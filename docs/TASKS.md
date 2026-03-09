@@ -189,7 +189,7 @@
 - **Produces**: Tests in `parser.test.ts`, `planner.test.ts`, `executor.test.ts`
 
 ### T-028: Extension schema_grants SQL generation
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009
 - **Description**: Add planner and executor tests verifying that `schema_grants` in extensions YAML (PRD §4.7) produces correct GRANT USAGE ON SCHEMA SQL.
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`
