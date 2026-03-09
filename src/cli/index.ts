@@ -11,6 +11,8 @@ import { resolveConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
 import { testConnection, closePool, getPool } from '../core/db.js';
 import { detectDrift } from '../drift/index.js';
+import { buildPlan } from '../planner/index.js';
+import { execute } from '../executor/index.js';
 import { lintPlan } from '../lint/index.js';
 import { generateSql } from '../sql/index.js';
 import { generateErd } from '../erd/index.js';
@@ -182,6 +184,38 @@ async function main(): Promise<void> {
             }
           } else {
             logger.info('No drift detected');
+          }
+        }
+
+        // --apply: generate fix operations and execute them
+        if (parsed.apply && report.items.length > 0) {
+          const plan = buildPlan(desired, actual, {
+            allowDestructive: config.allowDestructive,
+            pgSchema: config.pgSchema,
+          });
+
+          if (plan.blocked.length > 0) {
+            for (const op of plan.blocked) {
+              logger.warn(`Blocked (destructive): ${op.type} ${op.objectName} — use --allow-destructive to allow`);
+            }
+          }
+
+          if (plan.operations.length > 0) {
+            const result = await execute({
+              connectionString: config.connectionString,
+              operations: plan.operations,
+              pgSchema: config.pgSchema,
+              dryRun: config.dryRun,
+              lockTimeout: config.lockTimeout,
+              statementTimeout: config.statementTimeout,
+              logger,
+            });
+            logger.info(`Applied ${result.executed} fix operations`);
+            if (config.json) {
+              console.log(JSON.stringify(result, null, 2));
+            }
+          } else if (plan.blocked.length > 0) {
+            logger.warn('No operations applied — all fixes are destructive. Use --allow-destructive to apply.');
           }
         }
         break;

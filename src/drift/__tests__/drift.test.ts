@@ -1,7 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { detectDrift } from '../index.js';
 import type { DesiredState, ActualState } from '../../planner/index.js';
 import type { DriftReport, DriftItem } from '../index.js';
+import { useTestProject, writeSchema } from '../../testing/index.js';
+import { buildPlan } from '../../planner/index.js';
+import { execute } from '../../executor/index.js';
+import { createLogger } from '../../core/logger.js';
+import { closePool } from '../../core/db.js';
+import { buildDesiredAndActual } from '../../cli/pipeline.js';
 
 function emptyDesired(): DesiredState {
   return {
@@ -1873,5 +1879,444 @@ describe('detectDrift', () => {
     const report = detectDrift(desired, actual);
     const grantDrift = report.items.filter((i) => i.type === 'grant');
     expect(grantDrift).toHaveLength(0);
+  });
+});
+
+// ─── drift --apply integration tests ──────────────────────────
+
+const DATABASE_URL = process.env.DATABASE_URL!;
+const logger = createLogger({ verbose: false, quiet: true, json: false });
+
+afterAll(async () => {
+  await closePool();
+});
+
+describe('drift --apply integration', () => {
+  it('should fix drift by applying missing column', async () => {
+    const project = await useTestProject(DATABASE_URL);
+    try {
+      // Step 1: Create initial table via migration
+      writeSchema(project.dir, {
+        'tables/users.yaml': `table: users
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
+  - name: name
+    type: text
+    nullable: false
+`,
+      });
+      await project.migrate();
+
+      // Step 2: Add a new column to YAML (creates drift)
+      writeSchema(project.dir, {
+        'tables/users.yaml': `table: users
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
+  - name: name
+    type: text
+    nullable: false
+  - name: email
+    type: text
+`,
+      });
+
+      // Verify drift exists
+      const report1 = await project.drift();
+      expect(report1.items.length).toBeGreaterThan(0);
+      expect(report1.items).toContainEqual(
+        expect.objectContaining({ type: 'column', object: 'users.email', status: 'missing_in_db' }),
+      );
+
+      // Step 3: Apply drift fix
+      const { desired, actual } = await buildDesiredAndActual(project.config, logger);
+      const plan = buildPlan(desired, actual, {
+        allowDestructive: false,
+        pgSchema: project.config.pgSchema,
+      });
+      expect(plan.operations.length).toBeGreaterThan(0);
+      await execute({
+        connectionString: project.config.connectionString,
+        operations: plan.operations,
+        pgSchema: project.config.pgSchema,
+        logger,
+      });
+
+      // Step 4: Verify table/column drift is resolved
+      const report2 = await project.drift();
+      const tableDrift = report2.items.filter(
+        (i) => i.type === 'table' || i.type === 'column',
+      );
+      expect(tableDrift).toHaveLength(0);
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it('should block destructive drift fixes without --allow-destructive', async () => {
+    const project = await useTestProject(DATABASE_URL);
+    try {
+      // Step 1: Create table with extra column via migration
+      writeSchema(project.dir, {
+        'tables/items.yaml': `table: items
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+  - name: title
+    type: text
+    nullable: false
+  - name: description
+    type: text
+`,
+      });
+      await project.migrate();
+
+      // Step 2: Remove the description column from YAML (DB has extra column)
+      writeSchema(project.dir, {
+        'tables/items.yaml': `table: items
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+  - name: title
+    type: text
+    nullable: false
+`,
+      });
+
+      // Verify drift detected
+      const report1 = await project.drift();
+      expect(report1.items).toContainEqual(
+        expect.objectContaining({ type: 'column', object: 'items.description', status: 'missing_in_yaml' }),
+      );
+
+      // Step 3: Plan without allowDestructive — drop_column should be blocked
+      const { desired, actual } = await buildDesiredAndActual(project.config, logger);
+      const plan = buildPlan(desired, actual, {
+        allowDestructive: false,
+        pgSchema: project.config.pgSchema,
+      });
+
+      expect(plan.blocked.length).toBeGreaterThan(0);
+      expect(plan.blocked).toContainEqual(
+        expect.objectContaining({ type: 'drop_column' }),
+      );
+
+      // Step 4: Plan with allowDestructive — drop_column should be in operations
+      const planDestructive = buildPlan(desired, actual, {
+        allowDestructive: true,
+        pgSchema: project.config.pgSchema,
+      });
+      expect(planDestructive.blocked).toHaveLength(0);
+      expect(planDestructive.operations).toContainEqual(
+        expect.objectContaining({ type: 'drop_column' }),
+      );
+
+      // Step 5: Execute only the drop_column operation
+      const dropOps = planDestructive.operations.filter((op) => op.type === 'drop_column');
+      expect(dropOps.length).toBeGreaterThan(0);
+      await execute({
+        connectionString: project.config.connectionString,
+        operations: dropOps,
+        pgSchema: project.config.pgSchema,
+        logger,
+      });
+
+      // Step 6: The description column should be gone
+      const report2 = await project.drift();
+      const descriptionDrift = report2.items.filter((i) => i.object === 'items.description');
+      expect(descriptionDrift).toHaveLength(0);
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it('should fix drift for missing table entirely', async () => {
+    const project = await useTestProject(DATABASE_URL);
+    try {
+      // Write a table YAML without migrating — DB is empty, YAML defines table
+      writeSchema(project.dir, {
+        'tables/products.yaml': `table: products
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+  - name: name
+    type: text
+    nullable: false
+  - name: price
+    type: numeric
+`,
+      });
+
+      // Drift: table missing in DB
+      const report1 = await project.drift();
+      expect(report1.items).toContainEqual(
+        expect.objectContaining({ type: 'table', object: 'products', status: 'missing_in_db' }),
+      );
+
+      // Apply fix
+      const { desired, actual } = await buildDesiredAndActual(project.config, logger);
+      const plan = buildPlan(desired, actual, {
+        allowDestructive: false,
+        pgSchema: project.config.pgSchema,
+      });
+      await execute({
+        connectionString: project.config.connectionString,
+        operations: plan.operations,
+        pgSchema: project.config.pgSchema,
+        logger,
+      });
+
+      // Table drift should be resolved — table exists now
+      const report2 = await project.drift();
+      const tableMissing = report2.items.filter(
+        (i) => i.type === 'table' && i.object === 'products' && i.status === 'missing_in_db',
+      );
+      expect(tableMissing).toHaveLength(0);
+      // All columns should exist
+      const colMissing = report2.items.filter(
+        (i) => i.type === 'column' && i.object.startsWith('products.') && i.status === 'missing_in_db',
+      );
+      expect(colMissing).toHaveLength(0);
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  // ─── drift --apply ────────────────────────────────────────────
+
+  it('drift --apply fixes missing column drift and re-drift shows no differences', async () => {
+    const connStr = process.env.DATABASE_URL!;
+    const project = await useTestProject(connStr);
+    try {
+      // 1. Write table YAML with two columns
+      writeSchema(project.dir, {
+        'tables/items.yaml': `
+table: items
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
+  - name: title
+    type: text
+    nullable: false
+  - name: description
+    type: text
+`,
+      });
+
+      // 2. Migrate to create table
+      await project.migrate();
+
+      // 3. Add a third column to YAML (simulating a new desired column)
+      writeSchema(project.dir, {
+        'tables/items.yaml': `
+table: items
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
+  - name: title
+    type: text
+    nullable: false
+  - name: description
+    type: text
+  - name: price
+    type: integer
+`,
+      });
+
+      // 4. Detect drift — should show price missing in DB
+      const report1 = await project.drift();
+      const priceMissing = report1.items.find(
+        (i) => i.type === 'column' && i.object === 'items.price' && i.status === 'missing_in_db',
+      );
+      expect(priceMissing).toBeDefined();
+
+      // 5. Apply fix: build plan + execute (same as drift --apply)
+      const { desired, actual } = await buildDesiredAndActual(project.config, logger);
+      const plan = buildPlan(desired, actual, {
+        allowDestructive: false,
+        pgSchema: project.config.pgSchema,
+      });
+      expect(plan.operations.length).toBeGreaterThan(0);
+      await execute({
+        connectionString: project.config.connectionString,
+        operations: plan.operations,
+        pgSchema: project.config.pgSchema,
+        logger,
+      });
+
+      // 6. Re-detect drift — should be clean
+      const report2 = await project.drift();
+      const remaining = report2.items.filter(
+        (i) => i.type === 'column' && i.object === 'items.price',
+      );
+      expect(remaining).toHaveLength(0);
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it('drift --apply blocks destructive operations without --allow-destructive', async () => {
+    const connStr = process.env.DATABASE_URL!;
+    const project = await useTestProject(connStr);
+    try {
+      // 1. Write table YAML and migrate
+      writeSchema(project.dir, {
+        'tables/orders.yaml': `
+table: orders
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
+  - name: amount
+    type: integer
+  - name: legacy_field
+    type: text
+`,
+      });
+      await project.migrate();
+
+      // 2. Remove the legacy_field column from YAML (simulating desired drop)
+      writeSchema(project.dir, {
+        'tables/orders.yaml': `
+table: orders
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
+  - name: amount
+    type: integer
+`,
+      });
+
+      // 3. Detect drift — legacy_field missing in YAML
+      const report1 = await project.drift();
+      const extraCol = report1.items.find(
+        (i) => i.type === 'column' && i.object === 'orders.legacy_field' && i.status === 'missing_in_yaml',
+      );
+      expect(extraCol).toBeDefined();
+
+      // 4. Plan without --allow-destructive — drop_column should be blocked
+      const { desired, actual } = await buildDesiredAndActual(project.config, logger);
+      const plan = buildPlan(desired, actual, {
+        allowDestructive: false,
+        pgSchema: project.config.pgSchema,
+      });
+      const blockedDropCol = plan.blocked.find(
+        (op) => op.type === 'drop_column' && op.objectName.includes('legacy_field'),
+      );
+      expect(blockedDropCol).toBeDefined();
+
+      // 5. With --allow-destructive, the drop should be in operations
+      const planDestructive = buildPlan(desired, actual, {
+        allowDestructive: true,
+        pgSchema: project.config.pgSchema,
+      });
+      const dropOp = planDestructive.operations.find(
+        (op) => op.type === 'drop_column' && op.objectName.includes('legacy_field'),
+      );
+      expect(dropOp).toBeDefined();
+
+      // 6. Execute with allow-destructive and verify drift resolved
+      await execute({
+        connectionString: project.config.connectionString,
+        operations: planDestructive.operations,
+        pgSchema: project.config.pgSchema,
+        logger,
+      });
+
+      const report2 = await project.drift();
+      const remainingDrift = report2.items.filter(
+        (i) => i.object.includes('legacy_field'),
+      );
+      expect(remainingDrift).toHaveLength(0);
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it('drift --apply fixes missing index drift', async () => {
+    const connStr = process.env.DATABASE_URL!;
+    const project = await useTestProject(connStr);
+    try {
+      // 1. Create table without index
+      writeSchema(project.dir, {
+        'tables/products.yaml': `
+table: products
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
+  - name: name
+    type: text
+  - name: sku
+    type: text
+`,
+      });
+      await project.migrate();
+
+      // 2. Add an index to YAML
+      writeSchema(project.dir, {
+        'tables/products.yaml': `
+table: products
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
+  - name: name
+    type: text
+  - name: sku
+    type: text
+indexes:
+  - name: idx_products_sku
+    columns: [sku]
+`,
+      });
+
+      // 3. Detect drift — index missing in DB
+      const report1 = await project.drift();
+      const idxMissing = report1.items.find(
+        (i) => i.type === 'index' && i.object === 'idx_products_sku' && i.status === 'missing_in_db',
+      );
+      expect(idxMissing).toBeDefined();
+
+      // 4. Apply fix
+      const { desired, actual } = await buildDesiredAndActual(project.config, logger);
+      const plan = buildPlan(desired, actual, {
+        allowDestructive: false,
+        pgSchema: project.config.pgSchema,
+      });
+      expect(plan.operations.length).toBeGreaterThan(0);
+      await execute({
+        connectionString: project.config.connectionString,
+        operations: plan.operations,
+        pgSchema: project.config.pgSchema,
+        logger,
+      });
+
+      // 5. Re-detect drift — index should exist now
+      const report2 = await project.drift();
+      const idxRemaining = report2.items.filter(
+        (i) => i.type === 'index' && i.object === 'idx_products_sku',
+      );
+      expect(idxRemaining).toHaveLength(0);
+    } finally {
+      await project.cleanup();
+    }
   });
 });
