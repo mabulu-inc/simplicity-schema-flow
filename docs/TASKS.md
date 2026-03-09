@@ -279,7 +279,7 @@
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`
 
 ### T-041: Function options in SQL generation
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009, T-008
 - **Description**: Add planner and executor tests for function options from PRD §4.3: `security` (definer/invoker), `volatility` (stable/immutable/volatile), `parallel` (safe/restricted/unsafe), `strict`, `leakproof`, `cost`, `rows`, `set` (configuration parameters). Planner must produce SQL with `SECURITY DEFINER`, `IMMUTABLE`, `PARALLEL SAFE`, `STRICT`, `LEAKPROOF`, `COST 200`, `ROWS 10`, `SET search_path = public`. Introspection must read these attributes. Implement any missing logic.
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`
