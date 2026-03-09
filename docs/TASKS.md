@@ -273,7 +273,7 @@
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`, `drift.test.ts`
 
 ### T-040: Index options in SQL generation
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009
 - **Description**: Add planner and executor tests verifying index options from PRD §4.1: `method` (gin, gist, hash, brin), `where` (partial index), `include` (covering index), `opclass` (e.g., text_pattern_ops). Planner must produce SQL like `CREATE INDEX ... USING gin`, `WHERE condition`, `INCLUDE (col)`, `col text_pattern_ops`. Add executor integration tests verifying indexes are created with correct options. Implement any missing logic.
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`
