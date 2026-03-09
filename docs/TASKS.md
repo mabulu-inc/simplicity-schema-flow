@@ -1,73 +1,135 @@
 # Task List
 
-## Milestone 1: Reverse-Engineer schema-flow
+## Milestone 1: Core Foundation
 
-### T-001: Architecture overview
-- **Status**: DONE
+### T-001: Project setup and config system
+- **Status**: TODO
 - **Depends**: (none)
-- **Description**: Map schema-flow's high-level architecture — modules, data flow, execution phases. Document the pipeline: YAML → parse → plan → execute.
-- **Source**: `../schema-flow/src/index.ts`, all module directories
-- **Produces**: `docs/specs/architecture.md`
+- **Description**: Set up TypeScript project (tsconfig, vitest, pnpm). Implement config resolution — convention-over-configuration defaults, env var lookup (`SIMPLICITY_SCHEMA_DATABASE_URL` → `DATABASE_URL`), optional `simplicity-schema.config.yaml` file, CLI flag overrides.
+- **Produces**: `src/core/config.ts`, `src/core/config-file.ts`, tests
 
-### T-002: YAML schema types and parser
+### T-002: Database connection management
 - **Status**: TODO
 - **Depends**: T-001
-- **Description**: Document all YAML schema types (TableSchema, FunctionSchema, FunctionArg, EnumSchema, ViewSchema, etc.) and how the parser validates/transforms them. Include the full type hierarchy.
-- **Source**: `../schema-flow/src/schema/types.ts`, `../schema-flow/src/schema/parser.ts`
-- **Produces**: `docs/specs/schema-types.md`
+- **Description**: Implement connection pool (pg.Pool singleton), `withClient`, `withTransaction`, retry logic for transient errors (lock timeout, serialization failure, deadlock). Configurable lock_timeout and statement_timeout.
+- **Produces**: `src/core/db.ts`, tests
 
-### T-003: Config and database core
+### T-003: File discovery and tracking
 - **Status**: TODO
 - **Depends**: T-001
-- **Description**: Document the config system (resolveConfig, SchemaFlowConfig), connection pool management (closePool, withClient, withTransaction), file discovery, and the file tracker.
-- **Source**: `../schema-flow/src/core/`
-- **Produces**: `docs/specs/core.md`
+- **Description**: Implement glob-based discovery of YAML/SQL files from the schema directory. Implement file tracker — `_simplicity.history` table with file_path, SHA-256 hash, phase, applied_at. All files are hash-tracked uniformly and re-run only when content changes.
+- **Produces**: `src/core/files.ts`, `src/core/tracker.ts`, tests
 
-### T-004: Database introspection
+### T-004: Logger
 - **Status**: TODO
 - **Depends**: T-001
-- **Description**: Document how schema-flow reads current DB state — introspectTable, getExistingFunctions, getExistingEnums, etc. Map every pg_catalog query and what data structures they produce.
-- **Source**: `../schema-flow/src/introspect/index.ts`
-- **Produces**: `docs/specs/introspect.md`
+- **Description**: Implement structured leveled logger with colored output.
+- **Produces**: `src/core/logger.ts`
 
-### T-005: Planner / diff engine
+## Milestone 2: Schema Parsing
+
+### T-005: Schema type definitions
 - **Status**: TODO
-- **Depends**: T-002, T-004
-- **Description**: Document the planner — how it diffs YAML schemas against introspected DB state to produce Operations. Cover table creation, column add/drop/alter, index management, FK handling, enum values, function grants, RLS policies, triggers, ZDM patterns.
-- **Source**: `../schema-flow/src/planner/index.ts`
-- **Produces**: `docs/specs/planner.md`
+- **Depends**: T-001
+- **Description**: Define all YAML schema types — TableSchema, ColumnDef, IndexDef, CheckDef, UniqueConstraintDef, TriggerDef, PolicyDef, FunctionSchema, FunctionArg, EnumSchema, ViewSchema, MaterializedViewSchema, RoleSchema, ExtensionsSchema, MixinSchema, GrantDef, FunctionGrantDef, PrecheckDef, and all supporting types.
+- **Produces**: `src/schema/types.ts`
 
-### T-006: Executor and migration phases
+### T-006: YAML parser
 - **Status**: TODO
 - **Depends**: T-005
-- **Description**: Document the executor — how it runs operations in transactions, the phase ordering (pre-scripts → enums → functions → tables → triggers/policies/grants → post-scripts), advisory locking, dry-run mode, validate mode.
-- **Source**: `../schema-flow/src/executor/index.ts`
-- **Produces**: `docs/specs/executor.md`
+- **Description**: Implement YAML-to-typed-object parsers for each schema kind. Validate required fields, apply defaults.
+- **Produces**: `src/schema/parser.ts`, tests
 
-### T-007: Drift detection
-- **Status**: TODO
-- **Depends**: T-004, T-005
-- **Description**: Document drift detection — how it compares YAML to DB for tables, columns, indexes, functions, enums, views, roles, grants, seeds. Document the DriftReport format.
-- **Source**: `../schema-flow/src/drift/`
-- **Produces**: `docs/specs/drift.md`
-
-### T-008: Scaffold, rollback, and secondary features
-- **Status**: TODO
-- **Depends**: T-001
-- **Description**: Document scaffold (DB → YAML generation), rollback/snapshot system, expand/contract (ZDM column migrations), SQL file generation, ERD generation, lint rules.
-- **Source**: `../schema-flow/src/scaffold/`, `../schema-flow/src/rollback/`, `../schema-flow/src/expand/`, `../schema-flow/src/sql/`, `../schema-flow/src/erd/`, `../schema-flow/src/lint/`
-- **Produces**: `docs/specs/secondary-features.md`
-
-### T-009: CLI and public API
-- **Status**: TODO
-- **Depends**: T-006, T-008
-- **Description**: Document the CLI commands and the public API surface exported from index.ts. Map every exported function/type and its purpose.
-- **Source**: `../schema-flow/src/cli/index.ts`, `../schema-flow/src/index.ts`
-- **Produces**: `docs/specs/cli-and-api.md`
-
-### T-010: Test patterns and test infrastructure
+### T-007: Mixin system
 - **Status**: TODO
 - **Depends**: T-006
-- **Description**: Document the test infrastructure — useTestProject helper, writeSchema, migrate/drift helpers, how tests create isolated PG schemas, the testing module exports. Catalog test coverage by feature.
-- **Source**: `../schema-flow/src/testing/index.ts`, `../schema-flow/test/`, `../schema-flow/examples/`
-- **Produces**: `docs/specs/test-infrastructure.md`
+- **Description**: Implement mixin loading — parse mixin YAML files, merge mixin columns/indexes/triggers/policies/grants into table schemas that reference them.
+- **Produces**: `src/schema/mixins.ts`, tests
+
+## Milestone 3: Introspection
+
+### T-008: Database introspection
+- **Status**: TODO
+- **Depends**: T-002, T-005
+- **Description**: Implement queries against pg_catalog / information_schema to read current DB state — tables, columns, constraints, indexes, triggers, enums, functions, views, materialized views, roles, grants. Return typed data structures matching the schema types.
+- **Produces**: `src/introspect/index.ts`, tests
+
+## Milestone 4: Planning and Execution
+
+### T-009: Planner / diff engine
+- **Status**: TODO
+- **Depends**: T-006, T-008
+- **Description**: Implement the diff engine — compare desired (YAML) state vs. actual (introspected) state. Produce an ordered list of operations: create/alter/drop for tables, columns, indexes, constraints, FKs, enums, functions, views, triggers, policies, grants, roles, comments, seeds. Block destructive operations unless allowDestructive is set. Emit tables without FKs first, add FKs later.
+- **Produces**: `src/planner/index.ts`, tests
+
+### T-010: Executor
+- **Status**: TODO
+- **Depends**: T-009, T-003
+- **Description**: Implement the executor — run operations in phased order (pre → extensions → enums → roles → functions → tables → views → mat views → triggers → RLS → grants → comments → seeds → post) within transactions. Support advisory locking, dry-run mode, validate mode.
+- **Produces**: `src/executor/index.ts`, tests
+
+## Milestone 5: CLI
+
+### T-011: CLI entry point
+- **Status**: TODO
+- **Depends**: T-010
+- **Description**: Implement CLI with commands: `run`, `run pre`, `run migrate`, `run post`, `plan`, `validate`, `status`, `init`, `help`. Wire up config resolution, logging, and the migration pipeline.
+- **Produces**: `src/cli/index.ts`, tests
+
+## Milestone 6: Secondary Features
+
+### T-012: Drift detection
+- **Status**: TODO
+- **Depends**: T-009
+- **Description**: Implement read-only drift detection — compare YAML to live DB for all object types and produce a structured DriftReport.
+- **Produces**: `src/drift/index.ts`, tests
+
+### T-013: Scaffold / generate
+- **Status**: TODO
+- **Depends**: T-008
+- **Description**: Implement DB-to-YAML generation — introspect an existing database and produce YAML files. Also support `init` (project directory scaffolding) and `new pre|post|mixin` templates.
+- **Produces**: `src/scaffold/index.ts`, tests
+
+### T-014: Rollback
+- **Status**: TODO
+- **Depends**: T-010
+- **Description**: Implement snapshot capture before each migration and reverse operation computation. Support `down` command to rollback to a previous snapshot.
+- **Produces**: `src/rollback/index.ts`, tests
+
+### T-015: Expand/contract (zero-downtime migrations)
+- **Status**: TODO
+- **Depends**: T-010
+- **Description**: Implement expand/contract column migrations — add new column, create dual-write trigger, backfill, contract (drop old). Track expand state. Support `contract` and `expand-status` CLI commands.
+- **Produces**: `src/expand/index.ts`, tests
+
+### T-016: SQL generation
+- **Status**: TODO
+- **Depends**: T-009
+- **Description**: Render a migration plan as a standalone `.sql` file.
+- **Produces**: `src/sql/index.ts`, tests
+
+### T-017: Lint
+- **Status**: TODO
+- **Depends**: T-009
+- **Description**: Implement static analysis rules on migration plans — warn about dangerous patterns (dropping columns, long-held locks, etc.).
+- **Produces**: `src/lint/index.ts`, tests
+
+### T-018: ERD generation
+- **Status**: TODO
+- **Depends**: T-006
+- **Description**: Generate Mermaid ER diagrams from YAML table definitions.
+- **Produces**: `src/erd/index.ts`, tests
+
+## Milestone 7: Public API and Testing Infrastructure
+
+### T-019: Public API surface
+- **Status**: TODO
+- **Depends**: T-011, T-012, T-013, T-014, T-015, T-016, T-017, T-018
+- **Description**: Create `src/index.ts` that re-exports all public functionality and type definitions for programmatic use.
+- **Produces**: `src/index.ts`
+
+### T-020: Test infrastructure
+- **Status**: TODO
+- **Depends**: T-002
+- **Description**: Implement test helpers — `useTestProject` for creating isolated PG schemas, `writeSchema` for writing YAML to temp dirs, `migrate`/`drift` helpers for running the pipeline in tests.
+- **Produces**: `src/testing/index.ts`, tests

@@ -3,7 +3,7 @@
 ## Project Goal
 
 Build `@mabulu-inc/simplicity-schema` — a declarative schema management tool for PostgreSQL.
-This is a clean-room reimplementation inspired by `@mabulu-inc/schema-flow` (located at `../schema-flow`).
+Requirements are defined in `docs/PRD.md`.
 
 ## Ralph Loop Boot Sequence
 
@@ -11,13 +11,12 @@ This is a clean-room reimplementation inspired by `@mabulu-inc/schema-flow` (loc
 
 1. Read `docs/PROGRESS.md` — check "Current State" for last task, next task, blockers
 2. Read `docs/TASKS.md` — find the next eligible task (lowest-numbered TODO with all deps DONE)
-3. Read the task's referenced spec or source files for exact interfaces and behaviors
+3. Read `docs/PRD.md` for requirements relevant to the task
 4. Execute the task:
-   a. For reverse-engineering tasks: read source, document findings in the specified output file
-   b. For implementation tasks: use red/green TDD — write failing tests, implement, verify
-   c. Run full test suite if applicable: `pnpm test`
-   d. If all pass: commit, update PROGRESS.md, set task to DONE
-   e. If blocked: update PROGRESS.md with blocker, move to next eligible task
+   a. Use red/green TDD — write failing tests, implement, verify
+   b. Run full test suite: `pnpm test`
+   c. If all pass: commit, update PROGRESS.md, set task to DONE
+   d. If blocked: update PROGRESS.md with blocker, move to next eligible task
 
 ## Task Selection Algorithm
 
@@ -46,23 +45,6 @@ A task is DONE only when ALL conditions hold:
 - One commit per completed task
 - Message format: `T-NNN: short description`
 - No Claude attribution in commit messages
-
-## Reference Codebase
-
-The schema-flow source is at `../schema-flow/src/`. Key directories:
-- `core/` — config, db pool, file discovery, logging, tracker
-- `schema/` — YAML types and parser
-- `planner/` — diff engine that compares YAML to DB and generates operations
-- `executor/` — runs migrations in transactions
-- `introspect/` — reads current DB state via pg_catalog
-- `drift/` — detects schema drift between YAML and DB
-- `scaffold/` — generates YAML from existing DB
-- `rollback/` — reverse migration support
-- `expand/` — zero-downtime column migrations
-- `sql/` — SQL file generation
-- `lint/` — schema linting rules
-- `erd/` — Mermaid ERD generation
-- `cli/` — CLI entry point
 
 ## Project Conventions
 
