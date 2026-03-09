@@ -217,7 +217,7 @@
 - **Produces**: Tests in `executor.test.ts`
 
 ### T-032: Auto snapshot capture during migration
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-014
 - **Description**: Add integration test verifying that the migration pipeline (`runAll`/`runMigrate`) automatically saves a snapshot before executing operations (PRD §11.2). After running a migration, verify a snapshot exists in `_simplicity.snapshots`. Also test that `runDown` after a migration successfully rolls back using the auto-captured snapshot.
 - **Produces**: Tests in `executor.test.ts` or `rollback.test.ts`
