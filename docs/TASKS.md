@@ -331,7 +331,7 @@
 - **Produces**: Tests in `planner.test.ts`
 
 ### T-049: Intermediate state recovery
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-010, T-021
 - **Description**: Add tests for intermediate state recovery (PRD §8.4). Test that re-running migration after interruption picks up where it left off (file tracker skips already-applied files). Test detection and cleanup of invalid indexes left by failed CONCURRENTLY operations. Implement any missing logic.
 - **Produces**: Tests in `executor.test.ts`
