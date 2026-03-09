@@ -541,6 +541,10 @@ function driftViews(
         detail: 'View query differs',
       });
     }
+    // Compare grants on views
+    if (av && dv.grants) {
+      items.push(...driftGrants(dv.name, dv.grants, av.grants ?? []));
+    }
   }
   for (const [name] of actual) {
     if (!desired.find((v) => v.name === name)) {

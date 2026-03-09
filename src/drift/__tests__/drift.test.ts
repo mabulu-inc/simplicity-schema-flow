@@ -369,6 +369,66 @@ describe('detectDrift', () => {
     );
   });
 
+  it('reports view grant missing in DB', () => {
+    const desired = emptyDesired();
+    desired.views = [{
+      name: 'active_users',
+      query: 'SELECT * FROM users WHERE active = true',
+      grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
+    }];
+    const actual = emptyActual();
+    actual.views.set('active_users', { name: 'active_users', query: 'SELECT * FROM users WHERE active = true' });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'grant',
+        object: 'active_users:app_readonly',
+        status: 'missing_in_db',
+      }),
+    );
+  });
+
+  it('reports view grant extra in DB (missing in YAML)', () => {
+    const desired = emptyDesired();
+    desired.views = [{
+      name: 'active_users',
+      query: 'SELECT * FROM users WHERE active = true',
+      grants: [],
+    }];
+    const actual = emptyActual();
+    actual.views.set('active_users', {
+      name: 'active_users',
+      query: 'SELECT * FROM users WHERE active = true',
+      grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'grant',
+        object: 'active_users:app_readonly',
+        status: 'missing_in_yaml',
+      }),
+    );
+  });
+
+  it('reports no drift when view grants match', () => {
+    const desired = emptyDesired();
+    desired.views = [{
+      name: 'active_users',
+      query: 'SELECT * FROM users WHERE active = true',
+      grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
+    }];
+    const actual = emptyActual();
+    actual.views.set('active_users', {
+      name: 'active_users',
+      query: 'SELECT * FROM users WHERE active = true',
+      grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
+    });
+    const report = detectDrift(desired, actual);
+    const grantItems = report.items.filter((i) => i.type === 'grant' && i.object.startsWith('active_users'));
+    expect(grantItems).toHaveLength(0);
+  });
+
   // ─── Materialized Views ────────────────────────────────────────
 
   it('reports materialized view missing in DB', () => {

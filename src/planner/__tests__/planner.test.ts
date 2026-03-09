@@ -902,6 +902,40 @@ describe('Planner', () => {
       const result = buildPlan(emptyDesired(), actual);
       expect(result.blocked.some((o) => o.type === 'drop_view')).toBe(true);
     });
+
+    it('produces grant_table operations for view grants', () => {
+      const desired = emptyDesired();
+      desired.views = [{
+        name: 'active_users',
+        query: 'SELECT id, email FROM users WHERE active = true',
+        grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const grantOps = findOps(result.operations, 'grant_table');
+      expect(grantOps).toHaveLength(1);
+      expect(grantOps[0].sql).toContain('GRANT SELECT');
+      expect(grantOps[0].sql).toContain('"active_users"');
+      expect(grantOps[0].sql).toContain('"app_readonly"');
+      expect(grantOps[0].phase).toBe(13);
+    });
+
+    it('produces multiple grant_table operations for view with multiple grants', () => {
+      const desired = emptyDesired();
+      desired.views = [{
+        name: 'active_users',
+        query: 'SELECT id, email FROM users WHERE active = true',
+        grants: [
+          { to: 'app_readonly', privileges: ['SELECT'] },
+          { to: 'app_writer', privileges: ['SELECT', 'INSERT'] },
+        ],
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const grantOps = findOps(result.operations, 'grant_table');
+      expect(grantOps).toHaveLength(2);
+      expect(grantOps[0].sql).toContain('"app_readonly"');
+      expect(grantOps[1].sql).toContain('"app_writer"');
+      expect(grantOps[1].sql).toContain('SELECT, INSERT');
+    });
   });
 
   describe('materialized views', () => {

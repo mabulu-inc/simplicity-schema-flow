@@ -866,6 +866,87 @@ describe('Executor', () => {
     });
   });
 
+  describe('view grant operations', () => {
+    let testSchema: string;
+
+    beforeEach(async () => {
+      testSchema = uniqueSchema();
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`CREATE SCHEMA "${testSchema}"`);
+        // Create a source table for the view
+        await client.query(`CREATE TABLE "${testSchema}"."users" ("id" serial PRIMARY KEY, "email" text, "active" boolean DEFAULT true)`);
+      } finally {
+        client.release();
+      }
+    });
+
+    afterEach(async () => {
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`DROP SCHEMA IF EXISTS "${testSchema}" CASCADE`);
+      } finally {
+        client.release();
+      }
+    });
+
+    it('executes view with grants', async () => {
+      const grantRole = `view_grant_role_${Date.now()}`;
+      const pool = getPool(DATABASE_URL);
+      let client = await pool.connect();
+      try {
+        await client.query(`CREATE ROLE "${grantRole}" NOLOGIN`);
+      } finally {
+        client.release();
+      }
+
+      const ops: Operation[] = [
+        {
+          type: 'create_view',
+          phase: 9,
+          objectName: 'active_users',
+          sql: `CREATE OR REPLACE VIEW "${testSchema}"."active_users" AS SELECT id, email FROM "${testSchema}"."users" WHERE active = true`,
+          destructive: false,
+        },
+        {
+          type: 'grant_table',
+          phase: 13,
+          objectName: `active_users.${grantRole}`,
+          sql: `GRANT SELECT ON "${testSchema}"."active_users" TO "${grantRole}"`,
+          destructive: false,
+        },
+      ];
+
+      const result = await execute({
+        connectionString: DATABASE_URL,
+        operations: ops,
+        logger,
+      });
+
+      expect(result.executed).toBe(2);
+
+      // Verify grant
+      client = await pool.connect();
+      try {
+        const grantRes = await client.query(
+          `SELECT has_table_privilege('${grantRole}', '"${testSchema}"."active_users"', 'SELECT') AS has_priv`,
+        );
+        expect(grantRes.rows[0].has_priv).toBe(true);
+      } finally {
+        client.release();
+        const c2 = await pool.connect();
+        try {
+          await c2.query(`REVOKE ALL ON "${testSchema}"."active_users" FROM "${grantRole}"`);
+          await c2.query(`DROP ROLE IF EXISTS "${grantRole}"`);
+        } finally {
+          c2.release();
+        }
+      }
+    });
+  });
+
   describe('pre/post scripts', () => {
     let testSchema: string;
 
