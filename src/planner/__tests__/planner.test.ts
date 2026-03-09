@@ -2235,4 +2235,92 @@ describe('Planner', () => {
       expect(grantOps[0].sql).toContain('SELECT ("email")');
     });
   });
+
+  describe('PRD §8.1 destructive operation blocking', () => {
+    it('blocks disable_rls when existing table has policies but desired has none', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        // No policies
+      }];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        policies: [{
+          name: 'user_policy',
+          for: 'SELECT',
+          to: 'public',
+          using: 'true',
+        }],
+      });
+      const result = buildPlan(desired, actual);
+      expect(result.blocked.some((o) => o.type === 'disable_rls')).toBe(true);
+    });
+
+    it('allows disable_rls with allowDestructive', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+      }];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        policies: [{
+          name: 'user_policy',
+          for: 'SELECT',
+          to: 'public',
+          using: 'true',
+        }],
+      });
+      const result = buildPlan(desired, actual, { allowDestructive: true });
+      const ops = findOps(result.operations, 'disable_rls');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain('DISABLE ROW LEVEL SECURITY');
+    });
+
+    it('blocks drop_policy when policy exists in DB but not in desired', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        policies: [{
+          name: 'keep_policy',
+          for: 'SELECT',
+          to: 'public',
+          using: 'true',
+        }],
+      }];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        policies: [
+          { name: 'keep_policy', for: 'SELECT', to: 'public', using: 'true' },
+          { name: 'old_policy', for: 'ALL', to: 'public', using: 'true' },
+        ],
+      });
+      const result = buildPlan(desired, actual);
+      expect(result.blocked.some((o) => o.type === 'drop_policy')).toBe(true);
+    });
+
+    it('blocks drop_view when view exists in DB but not in desired', () => {
+      const desired = emptyDesired();
+      const actual = emptyActual();
+      actual.views.set('old_view', { name: 'old_view', query: 'SELECT 1' });
+      const result = buildPlan(desired, actual);
+      expect(result.blocked.some((o) => o.type === 'drop_view')).toBe(true);
+    });
+
+    it('blocks drop_materialized_view when mat view exists in DB but not in desired', () => {
+      const desired = emptyDesired();
+      const actual = emptyActual();
+      actual.materializedViews.set('old_mv', { name: 'old_mv', query: 'SELECT 1' });
+      const result = buildPlan(desired, actual);
+      expect(result.blocked.some((o) => o.type === 'drop_materialized_view')).toBe(true);
+    });
+  });
 });

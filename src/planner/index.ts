@@ -1187,6 +1187,17 @@ function diffPolicies(
     }
   }
 
+  // Disable RLS if existing had policies but desired has none
+  if (existing.length > 0 && desired.length === 0) {
+    ops.push({
+      type: 'disable_rls',
+      phase: 12,
+      objectName: table,
+      sql: `ALTER TABLE "${pgSchema}"."${table}" DISABLE ROW LEVEL SECURITY`,
+      destructive: true,
+    });
+  }
+
   return ops;
 }
 
