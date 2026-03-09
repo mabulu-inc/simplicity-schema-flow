@@ -137,7 +137,7 @@
 - **Produces**: `src/index.ts`
 
 ### T-020: Test infrastructure
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-002
 - **Description**: Implement test helpers — `useTestProject` for creating isolated PG schemas, `writeSchema` for writing YAML to temp dirs, `migrate`/`drift` helpers for running the pipeline in tests.
 - **Produces**: `src/testing/index.ts`, tests
