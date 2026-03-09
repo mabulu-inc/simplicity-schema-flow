@@ -640,6 +640,438 @@ describe('detectDrift', () => {
     expect(report.summary.total).toBe(0);
   });
 
+  // ─── Index attribute differences ─────────────────────────────
+
+  it('reports index uniqueness difference', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+        indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+      indexes: [{ name: 'idx_users_email', columns: ['email'], unique: false }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'index',
+        object: 'idx_users_email',
+        status: 'different',
+        detail: expect.stringContaining('unique'),
+      }),
+    );
+  });
+
+  it('reports index method difference', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'data', type: 'jsonb' }],
+        indexes: [{ name: 'idx_users_data', columns: ['data'], method: 'gin' }],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'data', type: 'jsonb' }],
+      indexes: [{ name: 'idx_users_data', columns: ['data'], method: 'btree' }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'index',
+        object: 'idx_users_data',
+        status: 'different',
+        detail: expect.stringContaining('method'),
+      }),
+    );
+  });
+
+  it('reports index partial condition (where) difference', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'active', type: 'boolean' }],
+        indexes: [{ name: 'idx_users_active', columns: ['id'], where: 'active = true' }],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'active', type: 'boolean' }],
+      indexes: [{ name: 'idx_users_active', columns: ['id'] }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'index',
+        object: 'idx_users_active',
+        status: 'different',
+        detail: expect.stringContaining('where'),
+      }),
+    );
+  });
+
+  it('reports index column differences', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'email', type: 'text' },
+          { name: 'name', type: 'text' },
+        ],
+        indexes: [{ name: 'idx_users_email', columns: ['email', 'name'] }],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'email', type: 'text' },
+        { name: 'name', type: 'text' },
+      ],
+      indexes: [{ name: 'idx_users_email', columns: ['email'] }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'index',
+        object: 'idx_users_email',
+        status: 'different',
+        detail: expect.stringContaining('columns'),
+      }),
+    );
+  });
+
+  // ─── FK constraint drift ──────────────────────────────────────
+
+  it('reports FK missing in DB', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'posts',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'user_id', type: 'integer', references: { table: 'users', column: 'id' } },
+        ],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('posts', {
+      table: 'posts',
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'user_id', type: 'integer' },
+      ],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'constraint',
+        object: expect.stringContaining('posts.user_id'),
+        status: 'different',
+        detail: expect.stringContaining('FK'),
+      }),
+    );
+  });
+
+  it('reports FK present in DB but not in YAML', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'posts',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'user_id', type: 'integer' },
+        ],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('posts', {
+      table: 'posts',
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'user_id', type: 'integer', references: { table: 'users', column: 'id' } },
+      ],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'constraint',
+        object: expect.stringContaining('posts.user_id'),
+        status: 'different',
+        detail: expect.stringContaining('FK'),
+      }),
+    );
+  });
+
+  // ─── Unique constraint drift ──────────────────────────────────
+
+  it('reports unique constraint missing in DB', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+        unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'constraint',
+        object: expect.stringContaining('uq_users_email'),
+        status: 'missing_in_db',
+      }),
+    );
+  });
+
+  it('reports unique constraint missing in YAML', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+      unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'constraint',
+        object: expect.stringContaining('uq_users_email'),
+        status: 'missing_in_yaml',
+      }),
+    );
+  });
+
+  // ─── Function attribute differences ───────────────────────────
+
+  it('reports function body difference', () => {
+    const desired = emptyDesired();
+    desired.functions = [
+      { name: 'my_func', returns: 'trigger', body: 'BEGIN RETURN NEW; END;', language: 'plpgsql' },
+    ];
+    const actual = emptyActual();
+    actual.functions.set('my_func', {
+      name: 'my_func', returns: 'trigger', body: 'BEGIN RETURN OLD; END;', language: 'plpgsql',
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'function',
+        object: 'my_func',
+        status: 'different',
+        detail: expect.stringContaining('body'),
+      }),
+    );
+  });
+
+  it('reports function args difference', () => {
+    const desired = emptyDesired();
+    desired.functions = [
+      {
+        name: 'add_nums',
+        returns: 'integer',
+        body: 'SELECT a + b',
+        language: 'sql',
+        args: [{ name: 'a', type: 'integer' }, { name: 'b', type: 'integer' }],
+      },
+    ];
+    const actual = emptyActual();
+    actual.functions.set('add_nums', {
+      name: 'add_nums',
+      returns: 'integer',
+      body: 'SELECT a + b',
+      language: 'sql',
+      args: [{ name: 'a', type: 'text' }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'function',
+        object: 'add_nums',
+        status: 'different',
+        detail: expect.stringContaining('args'),
+      }),
+    );
+  });
+
+  it('reports function return type difference', () => {
+    const desired = emptyDesired();
+    desired.functions = [
+      { name: 'get_count', returns: 'bigint', body: 'SELECT count(*) FROM t', language: 'sql' },
+    ];
+    const actual = emptyActual();
+    actual.functions.set('get_count', {
+      name: 'get_count', returns: 'integer', body: 'SELECT count(*) FROM t', language: 'sql',
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'function',
+        object: 'get_count',
+        status: 'different',
+        detail: expect.stringContaining('returns'),
+      }),
+    );
+  });
+
+  it('reports function security difference', () => {
+    const desired = emptyDesired();
+    desired.functions = [
+      { name: 'sec_func', returns: 'void', body: 'SELECT 1', language: 'sql', security: 'definer' },
+    ];
+    const actual = emptyActual();
+    actual.functions.set('sec_func', {
+      name: 'sec_func', returns: 'void', body: 'SELECT 1', language: 'sql', security: 'invoker',
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'function',
+        object: 'sec_func',
+        status: 'different',
+        detail: expect.stringContaining('security'),
+      }),
+    );
+  });
+
+  it('reports function volatility difference', () => {
+    const desired = emptyDesired();
+    desired.functions = [
+      { name: 'vol_func', returns: 'void', body: 'SELECT 1', language: 'sql', volatility: 'immutable' },
+    ];
+    const actual = emptyActual();
+    actual.functions.set('vol_func', {
+      name: 'vol_func', returns: 'void', body: 'SELECT 1', language: 'sql', volatility: 'volatile',
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'function',
+        object: 'vol_func',
+        status: 'different',
+        detail: expect.stringContaining('volatility'),
+      }),
+    );
+  });
+
+  // ─── Role membership drift ───────────────────────────────────
+
+  it('reports role membership difference', () => {
+    const desired = emptyDesired();
+    desired.roles = [{ role: 'app_user', login: true, in: ['readers'] }];
+    const actual = emptyActual();
+    actual.roles.set('app_user', { role: 'app_user', login: true });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'role',
+        object: 'app_user',
+        status: 'different',
+        detail: expect.stringContaining('membership'),
+      }),
+    );
+  });
+
+  // ─── Grant drift ──────────────────────────────────────────────
+
+  it('reports table grant missing in DB', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+        grants: [{ to: 'app_user', privileges: ['SELECT', 'INSERT'] }],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'grant',
+        object: expect.stringContaining('users'),
+        status: 'missing_in_db',
+      }),
+    );
+  });
+
+  it('reports table grant missing in YAML', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }],
+      grants: [{ to: 'old_role', privileges: ['SELECT'] }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'grant',
+        object: expect.stringContaining('users'),
+        status: 'missing_in_yaml',
+      }),
+    );
+  });
+
+  // ─── Seed drift ───────────────────────────────────────────────
+
+  it('reports seed drift when YAML has seeds but DB table has no seeds field', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'statuses',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'name', type: 'text' }],
+        seeds: [{ id: 1, name: 'active' }, { id: 2, name: 'inactive' }],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('statuses', {
+      table: 'statuses',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'name', type: 'text' }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'seed',
+        object: 'statuses',
+        status: 'different',
+      }),
+    );
+  });
+
   // ─── Type alias normalization ──────────────────────────────────
 
   it('does not report drift for equivalent type aliases (int vs integer)', () => {

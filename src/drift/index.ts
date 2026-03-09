@@ -11,8 +11,10 @@ import type {
   ColumnDef,
   IndexDef,
   CheckDef,
+  UniqueConstraintDef,
   TriggerDef,
   PolicyDef,
+  GrantDef,
   EnumSchema,
   FunctionSchema,
   ViewSchema,
@@ -154,6 +156,10 @@ function driftRoles(
       if (dr.inherit !== undefined && dr.inherit !== ar.inherit) diffs.push('inherit');
       if (dr.bypassrls !== undefined && dr.bypassrls !== ar.bypassrls) diffs.push('bypassrls');
       if (dr.replication !== undefined && dr.replication !== ar.replication) diffs.push('replication');
+      // Membership comparison
+      const dMemberships = (dr.in || []).sort().join(',');
+      const aMemberships = (ar.in || []).sort().join(',');
+      if (dMemberships !== aMemberships) diffs.push('membership');
       if (diffs.length > 0) {
         items.push({
           type: 'role',
@@ -190,6 +196,9 @@ function driftFunctions(
       if (df.returns !== af.returns) diffs.push('returns');
       if ((df.security || 'invoker') !== (af.security || 'invoker')) diffs.push('security');
       if ((df.volatility || 'volatile') !== (af.volatility || 'volatile')) diffs.push('volatility');
+      const dArgs = (df.args || []).map((a) => `${a.name}:${a.type}`).join(',');
+      const aArgs = (af.args || []).map((a) => `${a.name}:${a.type}`).join(',');
+      if (dArgs !== aArgs) diffs.push('args');
       if (diffs.length > 0) {
         items.push({
           type: 'function',
@@ -222,10 +231,14 @@ function driftTables(
       items.push({ type: 'table', object: dt.table, status: 'missing_in_db' });
     } else {
       items.push(...driftColumns(dt.table, dt.columns, at.columns));
+      items.push(...driftForeignKeys(dt.table, dt.columns, at.columns));
       items.push(...driftIndexes(dt.table, dt.indexes || [], at.indexes || []));
       items.push(...driftChecks(dt.table, dt.checks || [], at.checks || []));
+      items.push(...driftUniqueConstraints(dt.table, dt.unique_constraints || [], at.unique_constraints || []));
       items.push(...driftTriggers(dt.table, dt.triggers || [], at.triggers || []));
       items.push(...driftPolicies(dt.table, dt.policies || [], at.policies || []));
+      items.push(...driftGrants(dt.table, dt.grants || [], at.grants || []));
+      items.push(...driftSeeds(dt.table, dt.seeds, at.seeds));
       items.push(...driftTableComment(dt.table, dt.comment, at.comment));
     }
   }
@@ -304,8 +317,23 @@ function driftIndexes(table: string, desired: IndexDef[], actual: IndexDef[]): D
 
   for (const idx of desired) {
     const name = idx.name || `idx_${table}_${idx.columns.join('_')}`;
-    if (!actualByName.has(name)) {
+    const ai = actualByName.get(name);
+    if (!ai) {
       items.push({ type: 'index', object: name, status: 'missing_in_db' });
+    } else {
+      const diffs: string[] = [];
+      if (idx.columns.join(',') !== ai.columns.join(',')) diffs.push('columns');
+      if (Boolean(idx.unique) !== Boolean(ai.unique)) diffs.push('unique');
+      if ((idx.method || 'btree') !== (ai.method || 'btree')) diffs.push('method');
+      if ((idx.where || '') !== (ai.where || '')) diffs.push('where');
+      if (diffs.length > 0) {
+        items.push({
+          type: 'index',
+          object: name,
+          status: 'different',
+          detail: `Index differs: ${diffs.join(', ')}`,
+        });
+      }
     }
   }
 
@@ -451,6 +479,128 @@ function driftMaterializedViews(
     }
   }
   return items;
+}
+
+// ─── Foreign Keys ───────────────────────────────────────────────
+
+function driftForeignKeys(table: string, desired: ColumnDef[], actual: ColumnDef[]): DriftItem[] {
+  const items: DriftItem[] = [];
+  const actualMap = new Map(actual.map((c) => [c.name, c]));
+
+  for (const dc of desired) {
+    const ac = actualMap.get(dc.name);
+    if (!ac) continue; // column-level drift already reported
+    const dRef = dc.references;
+    const aRef = ac.references;
+    if (dRef && !aRef) {
+      items.push({
+        type: 'constraint',
+        object: `${table}.${dc.name}`,
+        status: 'different',
+        detail: `FK expected on ${dc.name} -> ${dRef.table}.${dRef.column}, not present in DB`,
+      });
+    } else if (!dRef && aRef) {
+      items.push({
+        type: 'constraint',
+        object: `${table}.${dc.name}`,
+        status: 'different',
+        detail: `FK on ${dc.name} -> ${aRef.table}.${aRef.column} exists in DB but not in YAML`,
+      });
+    } else if (dRef && aRef) {
+      if (dRef.table !== aRef.table || dRef.column !== aRef.column) {
+        items.push({
+          type: 'constraint',
+          object: `${table}.${dc.name}`,
+          status: 'different',
+          detail: `FK target differs: expected ${dRef.table}.${dRef.column}, actual ${aRef.table}.${aRef.column}`,
+        });
+      }
+    }
+  }
+  return items;
+}
+
+// ─── Unique Constraints ─────────────────────────────────────────
+
+function driftUniqueConstraints(
+  table: string,
+  desired: UniqueConstraintDef[],
+  actual: UniqueConstraintDef[],
+): DriftItem[] {
+  const items: DriftItem[] = [];
+  const getName = (uc: UniqueConstraintDef) =>
+    uc.name || `${table}_${uc.columns.join('_')}_key`;
+  const actualByName = new Map(actual.map((uc) => [getName(uc), uc]));
+
+  for (const uc of desired) {
+    const name = getName(uc);
+    if (!actualByName.has(name)) {
+      items.push({ type: 'constraint', object: `${table}.${name}`, status: 'missing_in_db' });
+    }
+  }
+
+  const desiredNames = new Set(desired.map(getName));
+  for (const uc of actual) {
+    const name = getName(uc);
+    if (!desiredNames.has(name)) {
+      items.push({ type: 'constraint', object: `${table}.${name}`, status: 'missing_in_yaml' });
+    }
+  }
+  return items;
+}
+
+// ─── Grants ─────────────────────────────────────────────────────
+
+function driftGrants(table: string, desired: GrantDef[], actual: GrantDef[]): DriftItem[] {
+  const items: DriftItem[] = [];
+  const grantKey = (g: GrantDef) => `${g.to}:${g.privileges.sort().join(',')}`;
+  const actualKeys = new Set(actual.map(grantKey));
+  const desiredKeys = new Set(desired.map(grantKey));
+
+  for (const g of desired) {
+    if (!actualKeys.has(grantKey(g))) {
+      items.push({
+        type: 'grant',
+        object: `${table}:${g.to}`,
+        status: 'missing_in_db',
+      });
+    }
+  }
+  for (const g of actual) {
+    if (!desiredKeys.has(grantKey(g))) {
+      items.push({
+        type: 'grant',
+        object: `${table}:${g.to}`,
+        status: 'missing_in_yaml',
+      });
+    }
+  }
+  return items;
+}
+
+// ─── Seeds ──────────────────────────────────────────────────────
+
+function driftSeeds(
+  table: string,
+  desired?: Record<string, unknown>[],
+  actual?: Record<string, unknown>[],
+): DriftItem[] {
+  const dLen = desired?.length ?? 0;
+  const aLen = actual?.length ?? 0;
+  if (dLen === 0 && aLen === 0) return [];
+  const dJson = JSON.stringify(desired || []);
+  const aJson = JSON.stringify(actual || []);
+  if (dJson !== aJson) {
+    return [{
+      type: 'seed',
+      object: table,
+      status: 'different',
+      expected: `${dLen} seed rows`,
+      actual: `${aLen} seed rows`,
+      detail: `Seed data differs for ${table}`,
+    }];
+  }
+  return [];
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
