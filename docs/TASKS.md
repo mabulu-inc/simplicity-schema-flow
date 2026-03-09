@@ -57,7 +57,7 @@
 ## Milestone 3: Introspection
 
 ### T-008: Database introspection
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-002, T-005
 - **Description**: Implement queries against pg_catalog / information_schema to read current DB state — tables, columns, constraints, indexes, triggers, enums, functions, views, materialized views, roles, grants. Return typed data structures matching the schema types.
 - **Produces**: `src/introspect/index.ts`, tests
