@@ -241,7 +241,7 @@
 ## Milestone 14: Coverage Gaps — Column & Table Features
 
 ### T-035: Generated columns
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009, T-008
 - **Description**: Add end-to-end tests for generated columns (PRD §4.1 `generated: "price * quantity"`). Planner must produce `CREATE TABLE` SQL with `GENERATED ALWAYS AS (expr) STORED`. Introspection must detect generated columns and their expressions. Drift detection must report when a generated expression differs or is missing. Add planner, executor integration, introspect, and drift tests. Implement any missing logic.
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`, `drift.test.ts`
