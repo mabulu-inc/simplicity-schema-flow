@@ -3,7 +3,7 @@
 ## Milestone 1: Core Foundation
 
 ### T-001: Project setup and config system
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: (none)
 - **Description**: Set up TypeScript project (tsconfig, vitest, pnpm). Implement config resolution — convention-over-configuration defaults, env var lookup (`SIMPLICITY_SCHEMA_DATABASE_URL` → `DATABASE_URL`), optional `simplicity-schema.config.yaml` file, CLI flag overrides.
 - **Produces**: `src/core/config.ts`, `src/core/config-file.ts`, tests

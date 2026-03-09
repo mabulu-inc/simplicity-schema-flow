@@ -2,9 +2,9 @@
 
 ## Current State
 <!-- Updated by each Ralph Loop iteration. Read this FIRST. -->
-Last completed task: (none)
-Next eligible task: T-001 (Project setup and config system)
+Last completed task: T-001 (Project setup and config system)
+Next eligible task: T-002 (Database connection management)
 
 ## Completed Tasks
 
-(none yet)
+- **T-001**: Project setup and config system — TypeScript project (tsconfig, vitest, pnpm), config resolution with defaults/env/yaml/CLI overrides. 16 tests passing.
