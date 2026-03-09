@@ -293,7 +293,7 @@
 ## Milestone 16: Coverage Gaps — Role, Grant & Policy Options
 
 ### T-043: Role attributes in SQL generation
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009, T-008
 - **Description**: Add planner and executor tests for all role attributes from PRD §4.6: `login`, `superuser`, `createdb`, `createrole`, `inherit`, `bypassrls`, `replication`, `connection_limit`. Planner must produce `CREATE ROLE ... LOGIN CREATEDB CONNECTION LIMIT 10` etc. Introspection must read all attributes (currently only reads `login`). Drift must detect attribute differences. Implement any missing logic.
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`, `drift.test.ts`
