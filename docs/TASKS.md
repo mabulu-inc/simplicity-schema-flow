@@ -305,7 +305,7 @@
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `drift.test.ts`
 
 ### T-045: Policy permissive flag
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009, T-008
 - **Description**: Add planner and executor tests for the `permissive` flag on RLS policies (PRD §4.1). Planner must produce `CREATE POLICY ... AS PERMISSIVE` or `AS RESTRICTIVE`. Introspection must read the permissive/restrictive flag. Drift must detect when the flag differs. Implement any missing logic.
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`, `drift.test.ts`
