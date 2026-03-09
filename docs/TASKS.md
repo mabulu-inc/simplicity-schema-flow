@@ -311,7 +311,7 @@
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`, `drift.test.ts`
 
 ### T-046: View grants
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009
 - **Description**: Add planner and executor tests for grants on views (PRD §4.4). Planner must produce `grant_table` operations for views with `grants` field. Executor must execute `GRANT SELECT ON view TO role`. Add drift test for view grant differences. Implement any missing logic.
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `drift.test.ts`
