@@ -402,27 +402,16 @@ while true; do
   timed_out=false
 
   if $VERBOSE; then
-    # Stream JSON to both terminal and log file, with timeout
-    if timeout "$ITER_TIMEOUT" bash -c "
-      claude --print \
-           --verbose \
-           --output-format stream-json \
-           --max-turns 50 \
-           --dangerously-skip-permissions \
-           \"$PROMPT\" 2>&1 | tee \"$log_file\"
-    "; then
-      echo -e "${GREEN}[$(timestamp)] Iteration $iteration completed successfully.${RESET}"
-    else
-      exit_code=$?
-      if [[ $exit_code -eq 124 ]]; then
-        timed_out=true
-        echo -e "${RED}[$(timestamp)] Iteration $iteration TIMED OUT after $(fmt_duration "$ITER_TIMEOUT").${RESET}"
-      else
-        echo -e "${RED}[$(timestamp)] Iteration $iteration exited with code $exit_code.${RESET}"
-      fi
-    fi
+    # Stream JSON to both terminal and log file
+    claude --print \
+         --verbose \
+         --output-format stream-json \
+         --max-turns 50 \
+         --dangerously-skip-permissions \
+         "$PROMPT" 2>&1 | tee "$log_file" &
+    claude_pid=$!
   else
-    # Run in background with progress monitor and timeout watchdog
+    # Run in background with progress monitor
     claude --print \
          --verbose \
          --output-format stream-json \
@@ -437,38 +426,38 @@ while true; do
     # Start progress monitor
     monitor_progress "$log_file" "$claude_pid" &
     monitor_pid=$!
+  fi
 
-    # Timeout watchdog: kill claude if it exceeds ITER_TIMEOUT
-    (
-      sleep "$ITER_TIMEOUT"
-      if kill -0 "$claude_pid" 2>/dev/null; then
-        echo -e "\n  ${RED}[$(date '+%Y-%m-%dT%H:%M:%S')] TIMEOUT — killing iteration after ${ITER_TIMEOUT}s${RESET}"
-        kill_tree "$claude_pid" TERM
-        sleep 5
-        kill_tree "$claude_pid" KILL 2>/dev/null || true
-      fi
-    ) &
-    watchdog_pid=$!
+  # Timeout watchdog: kill claude if it exceeds ITER_TIMEOUT
+  (
+    sleep "$ITER_TIMEOUT"
+    if kill -0 "$claude_pid" 2>/dev/null; then
+      echo -e "\n  ${RED}[$(date '+%Y-%m-%dT%H:%M:%S')] TIMEOUT — killing iteration after ${ITER_TIMEOUT}s${RESET}"
+      kill_tree "$claude_pid" TERM
+      sleep 5
+      kill_tree "$claude_pid" KILL 2>/dev/null || true
+    fi
+  ) &
+  watchdog_pid=$!
 
-    # Wait for Claude to finish
-    if wait "$claude_pid" 2>/dev/null; then
-      kill "$watchdog_pid" 2>/dev/null; wait "$watchdog_pid" 2>/dev/null || true
-      kill "$monitor_pid" 2>/dev/null; wait "$monitor_pid" 2>/dev/null || true
-      echo ""
-      echo -e "${GREEN}[$(timestamp)] Iteration $iteration completed successfully.${RESET}"
+  # Wait for Claude to finish
+  if wait "$claude_pid" 2>/dev/null; then
+    kill "$watchdog_pid" 2>/dev/null; wait "$watchdog_pid" 2>/dev/null || true
+    if ! $VERBOSE; then kill "$monitor_pid" 2>/dev/null; wait "$monitor_pid" 2>/dev/null || true; fi
+    echo ""
+    echo -e "${GREEN}[$(timestamp)] Iteration $iteration completed successfully.${RESET}"
+  else
+    exit_code=$?
+    kill "$watchdog_pid" 2>/dev/null; wait "$watchdog_pid" 2>/dev/null || true
+    if ! $VERBOSE; then kill "$monitor_pid" 2>/dev/null; wait "$monitor_pid" 2>/dev/null || true; fi
+    echo ""
+    if [[ $exit_code -eq 137 || $exit_code -eq 143 ]]; then
+      timed_out=true
+      echo -e "${RED}[$(timestamp)] Iteration $iteration TIMED OUT after $(fmt_duration "$ITER_TIMEOUT").${RESET}"
     else
-      exit_code=$?
-      kill "$watchdog_pid" 2>/dev/null; wait "$watchdog_pid" 2>/dev/null || true
-      kill "$monitor_pid" 2>/dev/null; wait "$monitor_pid" 2>/dev/null || true
-      echo ""
-      if [[ $exit_code -eq 137 || $exit_code -eq 143 ]]; then
-        timed_out=true
-        echo -e "${RED}[$(timestamp)] Iteration $iteration TIMED OUT after $(fmt_duration "$ITER_TIMEOUT").${RESET}"
-      else
-        echo -e "${RED}[$(timestamp)] Iteration $iteration exited with code $exit_code.${RESET}"
-        if [[ $exit_code -gt 1 ]]; then
-          echo -e "${RED}  Possible crash — continuing anyway.${RESET}"
-        fi
+      echo -e "${RED}[$(timestamp)] Iteration $iteration exited with code $exit_code.${RESET}"
+      if [[ $exit_code -gt 1 ]]; then
+        echo -e "${RED}  Possible crash — continuing anyway.${RESET}"
       fi
     fi
   fi
