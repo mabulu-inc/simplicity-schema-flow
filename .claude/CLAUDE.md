@@ -46,10 +46,19 @@ A task is DONE only when ALL conditions hold:
 - Message format: `T-NNN: short description`
 - No Claude attribution in commit messages
 
+## Database (MANDATORY)
+
+- PostgreSQL runs in Docker via `docker-compose.yml` in the project root
+- **NEVER assume PostgreSQL is installed locally** — always use the container
+- Default connection: `postgresql://postgres:postgres@localhost:54329/postgres`
+- Tests MUST read `DATABASE_URL` from the environment (loaded from `.env`)
+- Before running tests, ensure the container is up: `docker compose up -d --wait`
+- If `docker-compose.yml` or `.env` don't exist yet, create them as part of T-000
+
 ## Project Conventions
 
 - **Language**: TypeScript (strict mode)
 - **File naming**: kebab-case
 - **Package manager**: pnpm
 - **Testing framework**: Vitest
-- **Testing policy**: NEVER mock PostgreSQL — always use real instances
+- **Testing policy**: NEVER mock PostgreSQL — always use real instances via Docker container

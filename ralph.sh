@@ -14,14 +14,19 @@ set -euo pipefail
 #   ./ralph.sh -d 5         # 5-second delay between iterations
 #   ./ralph.sh -v           # Verbose — stream Claude output to terminal
 #   ./ralph.sh --dry-run    # Print what would happen without running
+#   ./ralph.sh -t 600       # 10-minute timeout per iteration (default: 900)
 # ============================================================================
 
 MAX_ITERATIONS=10
 DELAY=2
 DRY_RUN=false
 VERBOSE=false
+ITER_TIMEOUT=900  # 15 minutes per iteration
 LOG_DIR=".ralph-logs"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# --- Ensure subprocesses can't hang on PG connections ---
+export PGCONNECT_TIMEOUT=5
 
 # --- Colors ---
 BOLD='\033[1m'
@@ -37,14 +42,16 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -n|--iterations) MAX_ITERATIONS="$2"; shift 2 ;;
     -d|--delay)      DELAY="$2"; shift 2 ;;
+    -t|--timeout)    ITER_TIMEOUT="$2"; shift 2 ;;
     -v|--verbose)    VERBOSE=true; shift ;;
     --dry-run)       DRY_RUN=true; shift ;;
     -h|--help)
-      echo "Usage: ./ralph.sh [-n iterations] [-d delay_seconds] [-v] [--dry-run]"
+      echo "Usage: ./ralph.sh [-n iterations] [-d delay_seconds] [-t timeout_seconds] [-v] [--dry-run]"
       echo ""
       echo "Options:"
       echo "  -n, --iterations  Max iterations (default: 10, 0 = unlimited)"
       echo "  -d, --delay       Seconds between iterations (default: 2)"
+      echo "  -t, --timeout     Max seconds per iteration (default: 900)"
       echo "  -v, --verbose     Stream full Claude output to terminal"
       echo "  --dry-run         Print config and exit"
       exit 0
@@ -261,9 +268,27 @@ print_iteration_summary() {
   echo -e "  ${DIM}────────────────────────────────────────${RESET}"
 }
 
+# Kill a process tree (process + all descendants)
+kill_tree() {
+  local pid="$1"
+  local signal="${2:-TERM}"
+  # Kill children first
+  local children
+  children=$(pgrep -P "$pid" 2>/dev/null || true)
+  for child in $children; do
+    kill_tree "$child" "$signal"
+  done
+  kill -"$signal" "$pid" 2>/dev/null || true
+}
+
 # --- Pre-flight checks ---
 if ! command -v claude &>/dev/null; then
   echo -e "${RED}Error: 'claude' CLI not found. Install Claude Code first.${RESET}"
+  exit 1
+fi
+
+if ! command -v docker &>/dev/null; then
+  echo -e "${RED}Error: 'docker' not found. Docker is required for the test database.${RESET}"
   exit 1
 fi
 
@@ -277,11 +302,38 @@ if [[ ! -f "$PROJECT_DIR/docs/TASKS.md" ]]; then
   exit 1
 fi
 
+# --- Ensure Docker Compose database is running ---
+ensure_database() {
+  if [[ ! -f "$PROJECT_DIR/docker-compose.yml" ]]; then
+    echo -e "${YELLOW}[$(timestamp)] No docker-compose.yml yet — T-000 will create it.${RESET}"
+    return 0
+  fi
+
+  echo -e "${CYAN}[$(timestamp)] Ensuring test database is running...${RESET}"
+  if ! docker compose -f "$PROJECT_DIR/docker-compose.yml" up -d --wait 2>&1; then
+    echo -e "${RED}[$(timestamp)] Failed to start database container. Check Docker.${RESET}"
+    return 1
+  fi
+  echo -e "${GREEN}[$(timestamp)] Database container is healthy.${RESET}"
+}
+
+# --- Cleanup on exit ---
+cleanup() {
+  echo ""
+  echo -e "${DIM}[$(timestamp)] Cleaning up...${RESET}"
+  # Stop the database container
+  if [[ -f "$PROJECT_DIR/docker-compose.yml" ]]; then
+    docker compose -f "$PROJECT_DIR/docker-compose.yml" down 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
 # --- Config summary ---
 echo -e "${BOLD}=== Ralph Loop ===${RESET}"
 echo -e "  Project:    $PROJECT_DIR"
 echo -e "  Iterations: $([ "$MAX_ITERATIONS" -eq 0 ] && echo 'unlimited' || echo "$MAX_ITERATIONS")"
 echo -e "  Delay:      ${DELAY}s between iterations"
+echo -e "  Timeout:    ${ITER_TIMEOUT}s per iteration"
 echo -e "  Verbose:    $VERBOSE"
 echo -e "  Logs:       $LOG_DIR/"
 echo -e "  Next task:  $(get_next_task)"
@@ -292,6 +344,9 @@ if $DRY_RUN; then
   echo "(dry run — exiting)"
   exit 0
 fi
+
+# --- Start database ---
+ensure_database
 
 # --- Clean slate: discard any unstaged changes from a crashed iteration ---
 if ! git -C "$PROJECT_DIR" diff --quiet 2>/dev/null; then
@@ -320,6 +375,13 @@ while true; do
     break
   fi
 
+  # Ensure database is still running before each iteration
+  ensure_database || {
+    echo -e "${RED}[$(timestamp)] Database unavailable — skipping iteration.${RESET}"
+    sleep "$DELAY"
+    continue
+  }
+
   # Check if all tasks are done
   next_task=$(get_next_task)
   if all_tasks_done || [[ "$next_task" == *"none"* ]]; then
@@ -337,21 +399,30 @@ while true; do
 
   PROMPT="You are in Ralph Loop iteration $iteration. Follow the Ralph Loop Boot Sequence exactly as defined in CLAUDE.md. Read PROGRESS.md first, then TASKS.md, then execute the next eligible task using red/green TDD. When done, commit and update PROGRESS.md. Do NOT push to origin — the loop handles that. If blocked, update PROGRESS.md and exit."
 
+  timed_out=false
+
   if $VERBOSE; then
-    # Stream JSON to both terminal and log file
-    if claude --print \
-         --verbose \
-         --output-format stream-json \
-         --max-turns 50 \
-         --dangerously-skip-permissions \
-         "$PROMPT" 2>&1 | tee "$log_file"; then
+    # Stream JSON to both terminal and log file, with timeout
+    if timeout "$ITER_TIMEOUT" bash -c "
+      claude --print \
+           --verbose \
+           --output-format stream-json \
+           --max-turns 50 \
+           --dangerously-skip-permissions \
+           \"$PROMPT\" 2>&1 | tee \"$log_file\"
+    "; then
       echo -e "${GREEN}[$(timestamp)] Iteration $iteration completed successfully.${RESET}"
     else
-      exit_code=${PIPESTATUS[0]}
-      echo -e "${RED}[$(timestamp)] Iteration $iteration exited with code $exit_code.${RESET}"
+      exit_code=$?
+      if [[ $exit_code -eq 124 ]]; then
+        timed_out=true
+        echo -e "${RED}[$(timestamp)] Iteration $iteration TIMED OUT after $(fmt_duration "$ITER_TIMEOUT").${RESET}"
+      else
+        echo -e "${RED}[$(timestamp)] Iteration $iteration exited with code $exit_code.${RESET}"
+      fi
     fi
   else
-    # Run in background with progress monitor
+    # Run in background with progress monitor and timeout watchdog
     claude --print \
          --verbose \
          --output-format stream-json \
@@ -367,20 +438,47 @@ while true; do
     monitor_progress "$log_file" "$claude_pid" &
     monitor_pid=$!
 
+    # Timeout watchdog: kill claude if it exceeds ITER_TIMEOUT
+    (
+      sleep "$ITER_TIMEOUT"
+      if kill -0 "$claude_pid" 2>/dev/null; then
+        echo -e "\n  ${RED}[$(date '+%Y-%m-%dT%H:%M:%S')] TIMEOUT — killing iteration after ${ITER_TIMEOUT}s${RESET}"
+        kill_tree "$claude_pid" TERM
+        sleep 5
+        kill_tree "$claude_pid" KILL 2>/dev/null || true
+      fi
+    ) &
+    watchdog_pid=$!
+
     # Wait for Claude to finish
     if wait "$claude_pid" 2>/dev/null; then
+      kill "$watchdog_pid" 2>/dev/null; wait "$watchdog_pid" 2>/dev/null || true
       kill "$monitor_pid" 2>/dev/null; wait "$monitor_pid" 2>/dev/null || true
       echo ""
       echo -e "${GREEN}[$(timestamp)] Iteration $iteration completed successfully.${RESET}"
     else
       exit_code=$?
+      kill "$watchdog_pid" 2>/dev/null; wait "$watchdog_pid" 2>/dev/null || true
       kill "$monitor_pid" 2>/dev/null; wait "$monitor_pid" 2>/dev/null || true
       echo ""
-      echo -e "${RED}[$(timestamp)] Iteration $iteration exited with code $exit_code.${RESET}"
-      if [[ $exit_code -gt 1 ]]; then
-        echo -e "${RED}  Possible crash — continuing anyway.${RESET}"
+      if [[ $exit_code -eq 137 || $exit_code -eq 143 ]]; then
+        timed_out=true
+        echo -e "${RED}[$(timestamp)] Iteration $iteration TIMED OUT after $(fmt_duration "$ITER_TIMEOUT").${RESET}"
+      else
+        echo -e "${RED}[$(timestamp)] Iteration $iteration exited with code $exit_code.${RESET}"
+        if [[ $exit_code -gt 1 ]]; then
+          echo -e "${RED}  Possible crash — continuing anyway.${RESET}"
+        fi
       fi
     fi
+  fi
+
+  # If timed out, discard any partial work
+  if $timed_out; then
+    echo -e "${YELLOW}[$(timestamp)] Discarding partial work from timed-out iteration...${RESET}"
+    git -C "$PROJECT_DIR" checkout -- . 2>/dev/null || true
+    # Clean up any untracked files created during this iteration
+    git -C "$PROJECT_DIR" clean -fd --exclude=node_modules --exclude=.ralph-logs --exclude=.env 2>/dev/null || true
   fi
 
   # Mark completed tasks in TASKS.md based on new commits

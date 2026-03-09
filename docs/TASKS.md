@@ -1,5 +1,13 @@
 # Task List
 
+## Milestone 0: Infrastructure
+
+### T-000: Docker-based test database setup
+- **Status**: TODO
+- **Depends**: (none)
+- **Description**: Create `docker-compose.yml` with a PostgreSQL 17 container on port 54329 (with healthcheck, tmpfs for speed). Create `.env.example` with `DATABASE_URL=postgresql://postgres:postgres@localhost:54329/postgres`. Create `.env` (gitignored) copied from example. Update `vitest.config.ts` (or create `test/setup.ts`) to load `.env` via `dotenv`. Fix `src/core/__tests__/db.test.ts` to use `process.env.DATABASE_URL` without a hardcoded port fallback. Verify all existing tests pass against the containerized database.
+- **Produces**: `docker-compose.yml`, `.env.example`, `.env`, updated test files
+
 ## Milestone 1: Core Foundation
 
 ### T-001: Project setup and config system

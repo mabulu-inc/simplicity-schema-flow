@@ -847,6 +847,8 @@ All schema types are exported: `TableSchema`, `ColumnDef`, `IndexDef`, `CheckDef
 ## 14. Testing Requirements
 
 - **Real PostgreSQL only** — Never mock the database; all tests run against real PG instances
+- **Docker-based** — PostgreSQL runs in a Docker container managed by `docker-compose.yml` in the project root. Never assume a locally-installed PostgreSQL server.
+- **Connection** — Tests use the `DATABASE_URL` environment variable. The project provides a `.env.example` with the default; developers copy it to `.env`. The default is `postgresql://postgres:postgres@localhost:54329/postgres` (port 54329 to avoid conflicts with other local Postgres instances).
 - **Isolation** — Each test creates its own PostgreSQL schema via `useTestProject`; schemas are cleaned up after tests
 - **Pattern** — Tests write YAML to temp directories, run the pipeline, then query PG to verify results
 - **Framework** — Vitest

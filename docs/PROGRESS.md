@@ -3,7 +3,7 @@
 ## Current State
 <!-- Updated by each Ralph Loop iteration. Read this FIRST. -->
 Last completed task: T-002 (Database connection management)
-Next eligible task: T-003 (File discovery and tracking)
+Next eligible task: T-000 (Docker-based test database setup)
 
 ## Completed Tasks
 
