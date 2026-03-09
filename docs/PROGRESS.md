@@ -4,8 +4,8 @@
 
 <!-- Updated by each Ralph Loop iteration. Read this FIRST. -->
 
-Last completed task: T-009 (Planner / diff engine)
-Next eligible task: T-010 (Executor)
+Last completed task: T-010 (Executor)
+Next eligible task: T-011 (CLI entry point)
 
 ## Completed Tasks
 
@@ -19,3 +19,4 @@ Next eligible task: T-010 (Executor)
 - **T-007**: Mixin system — `src/schema/mixins.ts` with `loadMixins` (builds name→MixinSchema registry, rejects duplicates) and `applyMixins` (merges columns/indexes/checks/triggers/policies/grants into table schemas, skips duplicate columns, substitutes `{table}` placeholder in all string fields). Immutable — does not mutate inputs. 19 new tests, 134 total passing.
 - **T-008**: Database introspection — `src/introspect/index.ts` with `getExistingTables`, `getExistingEnums`, `getExistingFunctions`, `getExistingViews`, `getExistingMaterializedViews`, `getExistingRoles`, and `introspectTable` (columns with types/nullability/defaults/PKs, indexes, check constraints, foreign keys, triggers, RLS policies, table/column comments). All queries use pg_catalog for accuracy. 16 new tests, 150 total passing.
 - **T-009**: Planner / diff engine — `src/planner/index.ts` with `buildPlan` that compares desired (YAML) state vs actual (introspected) state. Produces ordered operations across all object types (extensions, enums, roles, functions, tables, columns, indexes, FKs, views, materialized views, triggers, RLS policies, grants, comments, seeds). FKs added as NOT VALID then validated. Destructive operations blocked unless allowDestructive set. Operations sorted by phase for correct dependency order. 49 new tests, 199 total passing.
+- **T-010**: Executor — `src/executor/index.ts` with `execute` function that runs planned operations in phased order within transactions. Advisory locking (pg_try_advisory_lock) prevents concurrent migrations. Dry-run mode logs operations without executing. Validate mode executes in a rolled-back transaction. Pre/post SQL scripts run in separate transactions with SHA-256 hash tracking (skip unchanged files). Automatic rollback on errors. Ensures `_simplicity` schema exists. 12 new tests, 211 total passing.

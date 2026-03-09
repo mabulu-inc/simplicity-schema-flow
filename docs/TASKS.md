@@ -71,7 +71,7 @@
 - **Produces**: `src/planner/index.ts`, tests
 
 ### T-010: Executor
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009, T-003
 - **Description**: Implement the executor — run operations in phased order (pre → extensions → enums → roles → functions → tables → views → mat views → triggers → RLS → grants → comments → seeds → post) within transactions. Support advisory locking, dry-run mode, validate mode.
 - **Produces**: `src/executor/index.ts`, tests
