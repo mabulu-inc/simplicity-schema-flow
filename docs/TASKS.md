@@ -177,7 +177,7 @@
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`
 
 ### T-026: Role group memberships (grant_membership)
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009
 - **Description**: Add planner test verifying that when a role has `in: [group_name]`, the planner produces `grant_membership` operations (PRD §4.6, §7.3). Add executor integration test verifying `GRANT group TO role` executes correctly. Also test that role attributes (superuser, createdb, createrole, inherit, bypassrls, replication, connection_limit) produce correct ALTER ROLE SQL.
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`
