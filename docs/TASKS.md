@@ -111,7 +111,7 @@
 - **Produces**: `src/expand/index.ts`, tests
 
 ### T-016: SQL generation
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009
 - **Description**: Render a migration plan as a standalone `.sql` file.
 - **Produces**: `src/sql/index.ts`, tests

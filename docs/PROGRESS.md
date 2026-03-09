@@ -4,8 +4,8 @@
 
 <!-- Updated by each Ralph Loop iteration. Read this FIRST. -->
 
-Last completed task: T-015 (Expand/contract)
-Next eligible task: T-016 (SQL generation)
+Last completed task: T-016 (SQL generation)
+Next eligible task: T-017 (Lint)
 
 ## Completed Tasks
 
@@ -25,3 +25,4 @@ Next eligible task: T-016 (SQL generation)
 - **T-013**: Scaffold / generate — `src/scaffold/index.ts` with `generateFromDb` (introspects DB objects and produces YAML files, one per table/enum/function/view/role), `scaffoldInit` (creates standard directory structure), `scaffoldPre`/`scaffoldPost` (timestamped SQL templates), `scaffoldMixin` (YAML mixin template). Writes files to disk when outputDir provided. 15 new tests, 292 total passing.
 - **T-014**: Rollback — `src/rollback/index.ts` with `ensureSnapshotsTable` (creates `_simplicity.snapshots`), `saveSnapshot`/`getLatestSnapshot`/`listSnapshots`/`deleteSnapshot` (snapshot CRUD), `computeRollback` (computes reverse operations from a snapshot — handles create_table→DROP, add_column→DROP COLUMN, create_enum→DROP TYPE, add_index→DROP INDEX, create_function→DROP FUNCTION, create/drop trigger/policy/view/materialized_view, enable_rls→DISABLE, constraints, grants, extensions, roles; skips irreversible ops like alter_column/add_enum_value), `runDown` (loads latest snapshot, executes reverse operations in transaction with advisory locking, deletes snapshot on success). 29 new tests, 321 total passing.
 - **T-015**: Expand/contract — `src/expand/index.ts` with `ensureExpandStateTable` (creates `_simplicity.expand_state`), `planExpandColumn` (generates operations: add column, create dual-write trigger function + trigger, backfill UPDATE), `runBackfill` (batch backfill with configurable batch size using ctid-based batching), `runContract` (drops old column, trigger, and trigger function within advisory-locked transaction; updates state to 'contracted'), `getExpandStatus` (lists all expand/contract states). Full lifecycle tested: expand → dual-write trigger fires on INSERT/UPDATE → backfill → contract drops old column. 10 new tests, 331 total passing.
+- **T-016**: SQL generation — `src/sql/index.ts` with `generateSql` function that renders a `PlanResult` as a standalone SQL string. Supports section comments by phase (Extensions, Enums, Tables, etc.), optional transaction wrapping (`wrapInTransaction`), optional blocked-operation comments (`includeBlocked`), header with generation timestamp, semicolon normalization. 11 new tests, 342 total passing. — `src/expand/index.ts` with `ensureExpandStateTable` (creates `_simplicity.expand_state`), `planExpandColumn` (generates operations: add column, create dual-write trigger function + trigger, backfill UPDATE), `runBackfill` (batch backfill with configurable batch size using ctid-based batching), `runContract` (drops old column, trigger, and trigger function within advisory-locked transaction; updates state to 'contracted'), `getExpandStatus` (lists all expand/contract states). Full lifecycle tested: expand → dual-write trigger fires on INSERT/UPDATE → backfill → contract drops old column. 10 new tests, 331 total passing.
