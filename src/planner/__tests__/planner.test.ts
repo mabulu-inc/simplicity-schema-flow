@@ -635,9 +635,50 @@ describe('Planner', () => {
         grants: [{ to: 'app_readonly', privileges: ['SELECT'], columns: ['id', 'email'] }],
       }];
       const result = buildPlan(desired, emptyActual());
-      const ops = findOps(result.operations, 'grant_table');
+      const ops = findOps(result.operations, 'grant_column');
       expect(ops).toHaveLength(1);
       expect(ops[0].sql).toContain('SELECT ("id", "email")');
+    });
+
+    it('produces grant_column for column-level grants on existing table', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [
+          { name: 'id', type: 'uuid', primary_key: true },
+          { name: 'email', type: 'text' },
+          { name: 'name', type: 'text' },
+        ],
+        grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['id', 'email', 'name'] }],
+      }];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [
+          { name: 'id', type: 'uuid', primary_key: true },
+          { name: 'email', type: 'text' },
+          { name: 'name', type: 'text' },
+        ],
+      });
+      const result = buildPlan(desired, actual);
+      const ops = findOps(result.operations, 'grant_column');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain('GRANT SELECT ("id", "email", "name")');
+      expect(ops[0].sql).toContain('TO "reader"');
+    });
+
+    it('produces grant_table (not grant_column) for table-level grants without columns', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        grants: [{ to: 'admin', privileges: ['ALL'] }],
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const tableGrants = findOps(result.operations, 'grant_table');
+      const colGrants = findOps(result.operations, 'grant_column');
+      expect(tableGrants).toHaveLength(1);
+      expect(colGrants).toHaveLength(0);
     });
 
     it('creates table with unique constraints', () => {

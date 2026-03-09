@@ -13,6 +13,7 @@ import type {
   CheckDef,
   TriggerDef,
   PolicyDef,
+  GrantDef,
   EnumSchema,
   FunctionSchema,
   FunctionArg,
@@ -232,7 +233,7 @@ export async function getExistingRoles(client: Client): Promise<RoleSchema[]> {
 
 /** Introspect a single table, returning a TableSchema-compatible structure. */
 export async function introspectTable(client: Client, tableName: string, schema: string): Promise<TableSchema> {
-  const [columns, indexes, checks, triggers, policies, tableComment, fkInfo] = await Promise.all([
+  const [columns, indexes, checks, triggers, policies, tableComment, fkInfo, columnGrants] = await Promise.all([
     getColumns(client, tableName, schema),
     getIndexes(client, tableName, schema),
     getChecks(client, tableName, schema),
@@ -240,6 +241,7 @@ export async function introspectTable(client: Client, tableName: string, schema:
     getPolicies(client, tableName, schema),
     getTableComment(client, tableName, schema),
     getForeignKeys(client, tableName, schema),
+    getColumnGrants(client, tableName, schema),
   ]);
 
   // Merge FK info into columns
@@ -265,6 +267,7 @@ export async function introspectTable(client: Client, tableName: string, schema:
   if (triggers.length > 0) result.triggers = triggers;
   if (policies.length > 0) result.policies = policies;
   if (tableComment) result.comment = tableComment;
+  if (columnGrants.length > 0) result.grants = columnGrants;
 
   return result;
 }
@@ -539,6 +542,45 @@ async function getPolicies(client: Client, table: string, schema: string): Promi
     if (r.check_expr) policy.check = r.check_expr as string;
     return policy;
   });
+}
+
+async function getColumnGrants(client: Client, table: string, schema: string): Promise<GrantDef[]> {
+  // Query column_privileges from information_schema to find column-level grants.
+  // We group by grantee and privilege_type, aggregating the column names.
+  const result = await client.query(
+    `SELECT grantee, privilege_type,
+            array_agg(column_name::text ORDER BY column_name) AS columns,
+            bool_or(is_grantable = 'YES') AS is_grantable
+     FROM information_schema.column_privileges
+     WHERE table_schema = $2
+       AND table_name = $1
+       AND grantor <> grantee
+     GROUP BY grantee, privilege_type
+     ORDER BY grantee, privilege_type`,
+    [table, schema],
+  );
+
+  // Merge privileges for same grantee+columns combo into a single GrantDef
+  const mergeMap = new Map<string, GrantDef>();
+  for (const row of result.rows) {
+    const cols = (row.columns as string[]).sort();
+    const key = `${row.grantee}:${cols.join(',')}`;
+    const existing = mergeMap.get(key);
+    if (existing) {
+      existing.privileges.push(row.privilege_type as string);
+      existing.privileges.sort();
+    } else {
+      const grant: GrantDef = {
+        to: row.grantee as string,
+        privileges: [row.privilege_type as string],
+        columns: cols,
+      };
+      if (row.is_grantable) grant.with_grant_option = true;
+      mergeMap.set(key, grant);
+    }
+  }
+
+  return Array.from(mergeMap.values());
 }
 
 async function getTableComment(client: Client, table: string, schema: string): Promise<string | undefined> {

@@ -1472,5 +1472,79 @@ describe('Executor', () => {
         client.release();
       }
     });
+
+    it('should execute column-level grant operations', async () => {
+      // Create a role for testing
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      const roleName = `col_grant_role_${Date.now()}`;
+      try {
+        await client.query(`CREATE ROLE "${roleName}"`);
+      } finally {
+        client.release();
+      }
+
+      try {
+        // Create table first
+        const createOps: Operation[] = [
+          {
+            type: 'create_table',
+            phase: 6,
+            objectName: 'accounts',
+            sql: `CREATE TABLE "${testSchema}"."accounts" ("id" uuid PRIMARY KEY, "email" text NOT NULL, "secret" text)`,
+            destructive: false,
+          },
+        ];
+
+        await execute({
+          connectionString: DATABASE_URL,
+          operations: createOps,
+          pgSchema: testSchema,
+          logger,
+        });
+
+        // Now grant column-level SELECT on id and email only
+        const grantOps: Operation[] = [
+          {
+            type: 'grant_column',
+            phase: 13,
+            objectName: `accounts.${roleName}`,
+            sql: `GRANT SELECT ("id", "email") ON "${testSchema}"."accounts" TO "${roleName}"`,
+            destructive: false,
+          },
+        ];
+
+        const result = await execute({
+          connectionString: DATABASE_URL,
+          operations: grantOps,
+          pgSchema: testSchema,
+          logger,
+        });
+        expect(result.executed).toBe(1);
+
+        // Verify the grant exists by querying column_privileges
+        const verifyClient = await pool.connect();
+        try {
+          const res = await verifyClient.query(
+            `SELECT column_name FROM information_schema.column_privileges
+             WHERE table_schema = $1 AND table_name = 'accounts'
+             AND grantee = $2 AND privilege_type = 'SELECT'
+             ORDER BY column_name`,
+            [testSchema, roleName],
+          );
+          expect(res.rows.map((r: { column_name: string }) => r.column_name)).toEqual(['email', 'id']);
+        } finally {
+          verifyClient.release();
+        }
+      } finally {
+        const cleanClient = await pool.connect();
+        try {
+          await cleanClient.query(`REVOKE ALL ON "${testSchema}"."accounts" FROM "${roleName}"`).catch(() => {});
+          await cleanClient.query(`DROP ROLE IF EXISTS "${roleName}"`);
+        } finally {
+          cleanClient.release();
+        }
+      }
+    });
   });
 });

@@ -331,3 +331,43 @@ describe('generated columns', () => {
     expect(priceCol!.generated).toBeUndefined();
   });
 });
+
+describe('column-level grants introspection', () => {
+  const roleName = `col_grant_introspect_${Date.now()}`;
+
+  beforeAll(async () => {
+    await exec(`CREATE TABLE grant_test (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      email text NOT NULL,
+      secret text
+    )`);
+    await client.query(`CREATE ROLE "${roleName}"`);
+    await client.query(
+      `GRANT SELECT ("id", "email") ON "${TEST_SCHEMA}"."grant_test" TO "${roleName}"`,
+    );
+  });
+
+  afterAll(async () => {
+    await client.query(`REVOKE ALL ON "${TEST_SCHEMA}"."grant_test" FROM "${roleName}"`).catch(() => {});
+    await client.query(`DROP ROLE IF EXISTS "${roleName}"`);
+  });
+
+  it('introspects column-level grants', async () => {
+    const table = await introspectTable(client, 'grant_test', TEST_SCHEMA);
+    expect(table.grants).toBeDefined();
+    expect(table.grants!.length).toBeGreaterThanOrEqual(1);
+    const grant = table.grants!.find((g) => g.to === roleName);
+    expect(grant).toBeDefined();
+    expect(grant!.privileges).toContain('SELECT');
+    expect(grant!.columns).toBeDefined();
+    expect(grant!.columns!.sort()).toEqual(['email', 'id']);
+  });
+
+  it('does not include column grants in table grants for non-granted columns', async () => {
+    const table = await introspectTable(client, 'grant_test', TEST_SCHEMA);
+    const grant = table.grants!.find((g) => g.to === roleName);
+    expect(grant).toBeDefined();
+    // "secret" column should not be in the grant
+    expect(grant!.columns).not.toContain('secret');
+  });
+});

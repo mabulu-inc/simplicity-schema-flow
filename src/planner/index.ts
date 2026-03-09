@@ -72,7 +72,9 @@ export type OperationType =
   | 'create_role'
   | 'alter_role'
   | 'grant_table'
+  | 'grant_column'
   | 'revoke_table'
+  | 'revoke_column'
   | 'grant_function'
   | 'revoke_function'
   | 'grant_membership'
@@ -1151,9 +1153,10 @@ function createPolicyOp(table: string, policy: PolicyDef, pgSchema: string): Ope
 
 function createGrantOp(table: string, grant: GrantDef, pgSchema: string): Operation {
   const privileges = grant.privileges.join(', ');
+  const isColumnGrant = grant.columns && grant.columns.length > 0;
   let target: string;
-  if (grant.columns && grant.columns.length > 0) {
-    const cols = grant.columns.map((c) => `"${c}"`).join(', ');
+  if (isColumnGrant) {
+    const cols = grant.columns!.map((c) => `"${c}"`).join(', ');
     target = `${privileges} (${cols}) ON "${pgSchema}"."${table}"`;
   } else {
     target = `${privileges} ON "${pgSchema}"."${table}"`;
@@ -1161,7 +1164,7 @@ function createGrantOp(table: string, grant: GrantDef, pgSchema: string): Operat
   let sql = `GRANT ${target} TO "${grant.to}"`;
   if (grant.with_grant_option) sql += ' WITH GRANT OPTION';
   return {
-    type: 'grant_table',
+    type: isColumnGrant ? 'grant_column' : 'grant_table',
     phase: 13,
     objectName: `${table}.${grant.to}`,
     sql,

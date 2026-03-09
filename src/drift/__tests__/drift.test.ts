@@ -1197,4 +1197,113 @@ describe('detectDrift', () => {
     );
     expect(genDrift).toHaveLength(0);
   });
+
+  // ─── Column-level grant drift ─────────────────────────────────
+
+  it('reports column-level grant missing in DB', () => {
+    const desired = emptyDesired();
+    desired.tables = [{
+      table: 'users',
+      columns: [
+        { name: 'id', type: 'uuid', primary_key: true },
+        { name: 'email', type: 'text' },
+      ],
+      grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['id', 'email'] }],
+    }];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [
+        { name: 'id', type: 'uuid', primary_key: true },
+        { name: 'email', type: 'text' },
+      ],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'grant',
+        object: 'users:reader',
+        status: 'missing_in_db',
+      }),
+    );
+  });
+
+  it('reports column-level grant missing in YAML', () => {
+    const desired = emptyDesired();
+    desired.tables = [{
+      table: 'users',
+      columns: [
+        { name: 'id', type: 'uuid', primary_key: true },
+        { name: 'email', type: 'text' },
+      ],
+    }];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [
+        { name: 'id', type: 'uuid', primary_key: true },
+        { name: 'email', type: 'text' },
+      ],
+      grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['id', 'email'] }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'grant',
+        object: 'users:reader',
+        status: 'missing_in_yaml',
+      }),
+    );
+  });
+
+  it('reports no drift when column-level grants match', () => {
+    const desired = emptyDesired();
+    desired.tables = [{
+      table: 'users',
+      columns: [
+        { name: 'id', type: 'uuid', primary_key: true },
+        { name: 'email', type: 'text' },
+      ],
+      grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['email', 'id'] }],
+    }];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [
+        { name: 'id', type: 'uuid', primary_key: true },
+        { name: 'email', type: 'text' },
+      ],
+      grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['id', 'email'] }],
+    });
+    const report = detectDrift(desired, actual);
+    const grantDrift = report.items.filter((i) => i.type === 'grant');
+    expect(grantDrift).toHaveLength(0);
+  });
+
+  it('detects drift when column-level grant columns differ', () => {
+    const desired = emptyDesired();
+    desired.tables = [{
+      table: 'users',
+      columns: [
+        { name: 'id', type: 'uuid', primary_key: true },
+        { name: 'email', type: 'text' },
+        { name: 'name', type: 'text' },
+      ],
+      grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['id', 'email', 'name'] }],
+    }];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [
+        { name: 'id', type: 'uuid', primary_key: true },
+        { name: 'email', type: 'text' },
+        { name: 'name', type: 'text' },
+      ],
+      grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['id', 'email'] }],
+    });
+    const report = detectDrift(desired, actual);
+    // The desired has 3 columns, actual has 2 — these are different keys so both should be reported
+    const grantDrift = report.items.filter((i) => i.type === 'grant');
+    expect(grantDrift.length).toBeGreaterThanOrEqual(1);
+  });
 });

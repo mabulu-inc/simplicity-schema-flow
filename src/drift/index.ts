@@ -568,7 +568,10 @@ function driftUniqueConstraints(
 
 function driftGrants(table: string, desired: GrantDef[], actual: GrantDef[]): DriftItem[] {
   const items: DriftItem[] = [];
-  const grantKey = (g: GrantDef) => `${g.to}:${g.privileges.sort().join(',')}`;
+  const grantKey = (g: GrantDef) => {
+    const colsPart = g.columns && g.columns.length > 0 ? `:cols=${[...g.columns].sort().join(',')}` : '';
+    return `${g.to}:${[...g.privileges].sort().join(',')}${colsPart}`;
+  };
   const actualKeys = new Set(actual.map(grantKey));
   const desiredKeys = new Set(desired.map(grantKey));
 
