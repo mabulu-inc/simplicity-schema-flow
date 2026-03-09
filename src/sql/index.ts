@@ -46,14 +46,18 @@ export function generateSql(plan: PlanResult, options: GenerateSqlOptions = {}):
   lines.push(`-- Generated at: ${new Date().toISOString()}`);
   lines.push('');
 
-  if (wrapInTransaction) {
+  // Split concurrent operations (e.g. CREATE INDEX CONCURRENTLY) from transactional ones
+  const transactionalOps = plan.operations.filter((op) => !op.concurrent);
+  const concurrentOps = plan.operations.filter((op) => op.concurrent);
+
+  if (wrapInTransaction && transactionalOps.length > 0) {
     lines.push('BEGIN;');
     lines.push('');
   }
 
-  // Group operations by phase and emit section comments
+  // Group transactional operations by phase and emit section comments
   let lastPhase = -1;
-  for (const op of plan.operations) {
+  for (const op of transactionalOps) {
     if (op.phase !== lastPhase) {
       if (lastPhase !== -1) lines.push('');
       const label = PHASE_LABELS[op.phase] || `Phase ${op.phase}`;
@@ -63,17 +67,32 @@ export function generateSql(plan: PlanResult, options: GenerateSqlOptions = {}):
     lines.push(addSemicolon(op.sql));
   }
 
+  if (wrapInTransaction && transactionalOps.length > 0) {
+    lines.push('');
+    lines.push('COMMIT;');
+  }
+
+  // Concurrent operations always appear outside transaction blocks
+  if (concurrentOps.length > 0) {
+    if (transactionalOps.length > 0) lines.push('');
+    lastPhase = -1;
+    for (const op of concurrentOps) {
+      if (op.phase !== lastPhase) {
+        if (lastPhase !== -1) lines.push('');
+        const label = PHASE_LABELS[op.phase] || `Phase ${op.phase}`;
+        lines.push(`-- ${label} (concurrent, outside transaction)`);
+        lastPhase = op.phase;
+      }
+      lines.push(addSemicolon(op.sql));
+    }
+  }
+
   if (includeBlocked && plan.blocked.length > 0) {
     lines.push('');
     lines.push('-- BLOCKED (destructive) — uncomment to apply:');
     for (const op of plan.blocked) {
       lines.push(`-- ${addSemicolon(op.sql)}`);
     }
-  }
-
-  if (wrapInTransaction) {
-    lines.push('');
-    lines.push('COMMIT;');
   }
 
   lines.push('');

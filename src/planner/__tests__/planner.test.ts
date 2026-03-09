@@ -788,4 +788,59 @@ describe('Planner', () => {
       expect(ops[0].sql).toContain('DROP DEFAULT');
     });
   });
+
+  describe('CONCURRENTLY indexes', () => {
+    it('generates CREATE INDEX CONCURRENTLY for new indexes', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [
+          { name: 'id', type: 'uuid', primary_key: true },
+          { name: 'email', type: 'text' },
+        ],
+        indexes: [{ columns: ['email'] }],
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'add_index');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain('INDEX CONCURRENTLY');
+      expect(ops[0].concurrent).toBe(true);
+    });
+
+    it('generates UNIQUE INDEX CONCURRENTLY for unique indexes', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [
+          { name: 'id', type: 'uuid', primary_key: true },
+          { name: 'email', type: 'text' },
+        ],
+        indexes: [{ columns: ['email'], unique: true }],
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'add_index');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain('CREATE UNIQUE INDEX CONCURRENTLY');
+      expect(ops[0].concurrent).toBe(true);
+    });
+
+    it('marks add_index operations as concurrent', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [{ name: 'email', type: 'text' }],
+        indexes: [{ name: 'idx_users_email', columns: ['email'] }],
+      }];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'email', type: 'text' }],
+      });
+      const result = buildPlan(desired, actual);
+      const ops = findOps(result.operations, 'add_index');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].concurrent).toBe(true);
+      expect(ops[0].phase).toBe(7);
+    });
+  });
 });

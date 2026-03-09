@@ -125,7 +125,7 @@ describe('generateSql', () => {
       operations: [
         makeOp({ type: 'create_extension', phase: 2, sql: 'CREATE EXTENSION IF NOT EXISTS "pgcrypto"' }),
         makeOp({ type: 'create_table', phase: 6, sql: 'CREATE TABLE "public"."users" (id int)' }),
-        makeOp({ type: 'add_index', phase: 7, sql: 'CREATE INDEX "idx_users_email" ON "public"."users" ("email")' }),
+        makeOp({ type: 'add_index', phase: 7, sql: 'CREATE INDEX CONCURRENTLY "idx_users_email" ON "public"."users" ("email")', concurrent: true }),
       ],
       blocked: [],
     };
@@ -133,5 +133,58 @@ describe('generateSql', () => {
     expect(result).toContain('-- Extensions');
     expect(result).toContain('-- Tables');
     expect(result).toContain('-- Indexes');
+  });
+
+  it('places concurrent operations outside transaction block', () => {
+    const plan: PlanResult = {
+      operations: [
+        makeOp({ type: 'create_table', phase: 6, sql: 'CREATE TABLE "public"."users" (id int)' }),
+        makeOp({ type: 'add_index', phase: 7, sql: 'CREATE INDEX CONCURRENTLY "idx_email" ON "public"."users" ("email")', concurrent: true }),
+      ],
+      blocked: [],
+    };
+    const result = generateSql(plan, { wrapInTransaction: true });
+
+    // Transaction should wrap only the non-concurrent ops
+    expect(result).toContain('BEGIN;');
+    expect(result).toContain('COMMIT;');
+
+    // The CONCURRENTLY index should appear AFTER COMMIT
+    const commitIdx = result.indexOf('COMMIT;');
+    const concurrentIdx = result.indexOf('CREATE INDEX CONCURRENTLY');
+    expect(concurrentIdx).toBeGreaterThan(commitIdx);
+
+    // Should have a section label indicating concurrent
+    expect(result).toContain('(concurrent, outside transaction)');
+  });
+
+  it('renders concurrent ops without transaction even when wrapInTransaction is false', () => {
+    const plan: PlanResult = {
+      operations: [
+        makeOp({ type: 'add_index', phase: 7, sql: 'CREATE INDEX CONCURRENTLY "idx_email" ON "public"."users" ("email")', concurrent: true }),
+      ],
+      blocked: [],
+    };
+    const result = generateSql(plan, { wrapInTransaction: false });
+    expect(result).not.toContain('BEGIN;');
+    expect(result).not.toContain('COMMIT;');
+    expect(result).toContain('CREATE INDEX CONCURRENTLY');
+    expect(result).toContain('(concurrent, outside transaction)');
+  });
+
+  it('does not wrap concurrent-only plan in transaction', () => {
+    const plan: PlanResult = {
+      operations: [
+        makeOp({ type: 'add_index', phase: 7, sql: 'CREATE INDEX CONCURRENTLY "idx_a" ON "public"."t" ("a")', concurrent: true }),
+        makeOp({ type: 'add_index', phase: 7, sql: 'CREATE INDEX CONCURRENTLY "idx_b" ON "public"."t" ("b")', concurrent: true }),
+      ],
+      blocked: [],
+    };
+    const result = generateSql(plan, { wrapInTransaction: true });
+    // No transactional ops, so no BEGIN/COMMIT
+    expect(result).not.toContain('BEGIN;');
+    expect(result).not.toContain('COMMIT;');
+    expect(result).toContain('CREATE INDEX CONCURRENTLY "idx_a"');
+    expect(result).toContain('CREATE INDEX CONCURRENTLY "idx_b"');
   });
 });

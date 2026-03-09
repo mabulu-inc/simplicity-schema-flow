@@ -137,17 +137,21 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
         logger?.info(`Executed pre-script: ${script.relativePath}`);
       }
 
-      // Execute operations (sorted by phase) in a transaction
+      // Execute operations (sorted by phase)
+      // Split concurrent operations (e.g. CREATE INDEX CONCURRENTLY) from transactional ones
       const sorted = [...operations].sort((a, b) => a.phase - b.phase);
+      const transactionalOps = sorted.filter((op) => !op.concurrent);
+      const concurrentOps = sorted.filter((op) => op.concurrent);
 
-      if (sorted.length > 0) {
+      // Run transactional operations in a transaction
+      if (transactionalOps.length > 0) {
         const opClient = await pool.connect();
         try {
           await opClient.query('BEGIN');
           if (lockTimeout !== undefined) await opClient.query(`SET lock_timeout = ${lockTimeout}`);
           if (statementTimeout !== undefined) await opClient.query(`SET statement_timeout = ${statementTimeout}`);
 
-          for (const op of sorted) {
+          for (const op of transactionalOps) {
             logger?.debug(`Executing: ${op.type} ${op.objectName}`);
             await opClient.query(op.sql);
             result.executed++;
@@ -164,6 +168,20 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           throw err;
         } finally {
           opClient.release();
+        }
+      }
+
+      // Run concurrent operations outside of transactions (e.g. CREATE INDEX CONCURRENTLY)
+      if (concurrentOps.length > 0 && !validateOnly) {
+        for (const op of concurrentOps) {
+          const concClient = await pool.connect();
+          try {
+            logger?.debug(`Executing (concurrent): ${op.type} ${op.objectName}`);
+            await concClient.query(op.sql);
+            result.executed++;
+          } finally {
+            concClient.release();
+          }
         }
       }
 

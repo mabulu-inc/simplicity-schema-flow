@@ -440,6 +440,96 @@ describe('Executor', () => {
       await fs.rm(tmpDir, { recursive: true });
     });
 
+    it('should execute concurrent operations outside the transaction', async () => {
+      // CREATE INDEX CONCURRENTLY cannot run inside a transaction.
+      // First create a table, then add a CONCURRENTLY index — both should succeed.
+      const ops: Operation[] = [
+        {
+          type: 'create_table',
+          phase: 6,
+          objectName: 'indexed_table',
+          sql: `CREATE TABLE "${testSchema}"."indexed_table" ("id" uuid PRIMARY KEY, "email" text NOT NULL)`,
+          destructive: false,
+        },
+        {
+          type: 'add_index',
+          phase: 7,
+          objectName: 'idx_indexed_table_email',
+          sql: `CREATE INDEX CONCURRENTLY "idx_indexed_table_email" ON "${testSchema}"."indexed_table" USING btree ("email")`,
+          destructive: false,
+          concurrent: true,
+        },
+      ];
+
+      const result = await execute({
+        connectionString: DATABASE_URL,
+        operations: ops,
+        logger,
+      });
+
+      // Both operations should execute
+      expect(result.executed).toBe(2);
+
+      // Verify the index was actually created
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const res = await client.query(
+          `SELECT indexname FROM pg_indexes WHERE schemaname = $1 AND tablename = 'indexed_table' AND indexname = 'idx_indexed_table_email'`,
+          [testSchema],
+        );
+        expect(res.rows.length).toBe(1);
+      } finally {
+        client.release();
+      }
+    });
+
+    it('should skip concurrent operations in validate mode', async () => {
+      // In validate mode, we run transactional ops in a rolled-back transaction
+      // but concurrent ops cannot be validated this way, so they are skipped
+      const ops: Operation[] = [
+        {
+          type: 'create_table',
+          phase: 6,
+          objectName: 'val_table',
+          sql: `CREATE TABLE "${testSchema}"."val_table" ("id" uuid PRIMARY KEY, "email" text)`,
+          destructive: false,
+        },
+        {
+          type: 'add_index',
+          phase: 7,
+          objectName: 'idx_val_email',
+          sql: `CREATE INDEX CONCURRENTLY "idx_val_email" ON "${testSchema}"."val_table" USING btree ("email")`,
+          destructive: false,
+          concurrent: true,
+        },
+      ];
+
+      const result = await execute({
+        connectionString: DATABASE_URL,
+        operations: ops,
+        validateOnly: true,
+        logger,
+      });
+
+      // Only the transactional op executed (then rolled back)
+      expect(result.executed).toBe(1);
+      expect(result.validated).toBe(true);
+
+      // Table should NOT exist (rolled back)
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const res = await client.query(
+          `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'val_table'`,
+          [testSchema],
+        );
+        expect(res.rows.length).toBe(0);
+      } finally {
+        client.release();
+      }
+    });
+
     it('should not run post-scripts in validate mode', async () => {
       const fs = await import('node:fs/promises');
       const os = await import('node:os');

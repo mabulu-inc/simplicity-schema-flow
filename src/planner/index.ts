@@ -83,6 +83,8 @@ export interface Operation {
   sql: string;
   /** Whether this is a destructive operation */
   destructive: boolean;
+  /** Whether this operation must run outside a transaction (e.g. CONCURRENTLY) */
+  concurrent?: boolean;
 }
 
 // ─── Desired State (parsed from YAML) ──────────────────────────
@@ -794,7 +796,7 @@ function createIndexOp(table: string, idx: IndexDef, pgSchema: string): Operatio
   const method = idx.method || 'btree';
   const unique = idx.unique ? 'UNIQUE ' : '';
   const cols = idx.columns.map((c) => `"${c}"`).join(', ');
-  let sql = `CREATE ${unique}INDEX "${name}" ON "${pgSchema}"."${table}" USING ${method} (${cols})`;
+  let sql = `CREATE ${unique}INDEX CONCURRENTLY "${name}" ON "${pgSchema}"."${table}" USING ${method} (${cols})`;
   if (idx.include && idx.include.length > 0) {
     sql += ` INCLUDE (${idx.include.map((c) => `"${c}"`).join(', ')})`;
   }
@@ -807,6 +809,7 @@ function createIndexOp(table: string, idx: IndexDef, pgSchema: string): Operatio
     objectName: name,
     sql,
     destructive: false,
+    concurrent: true,
   };
 }
 
