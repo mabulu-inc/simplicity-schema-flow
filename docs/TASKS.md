@@ -253,7 +253,7 @@
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `drift.test.ts`
 
 ### T-037: Composite primary keys
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009, T-008
 - **Description**: Add tests for table-level composite primary keys (PRD §4.1 `primary_key: [col1, col2]`). Planner must generate `PRIMARY KEY (col1, col2)` in CREATE TABLE SQL. Introspection must detect composite PKs. Drift detection must report when composite PK structure differs. Add planner, executor integration, introspect, and drift tests. Implement any missing logic.
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`, `drift.test.ts`
