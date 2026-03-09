@@ -419,3 +419,42 @@ describe('composite primary keys', () => {
     expect(idCol?.primary_key).toBe(true);
   });
 });
+
+describe('getExistingFunctions — options', () => {
+  beforeAll(async () => {
+    await exec(`CREATE FUNCTION func_with_options(x integer) RETURNS integer
+      AS $$ SELECT x * 2 $$
+      LANGUAGE sql
+      IMMUTABLE
+      PARALLEL SAFE
+      STRICT
+      LEAKPROOF
+      COST 200
+      SECURITY DEFINER
+      SET search_path = public`);
+    await exec(`CREATE FUNCTION func_set_returning() RETURNS SETOF integer
+      AS $$ SELECT generate_series(1, 10) $$
+      LANGUAGE sql
+      ROWS 10`);
+  });
+
+  it('reads parallel, strict, leakproof, cost, and set from function', async () => {
+    const fns = await getExistingFunctions(client, TEST_SCHEMA);
+    const fn = fns.find((f) => f.name === 'func_with_options');
+    expect(fn).toBeDefined();
+    expect(fn!.volatility).toBe('immutable');
+    expect(fn!.parallel).toBe('safe');
+    expect(fn!.strict).toBe(true);
+    expect(fn!.leakproof).toBe(true);
+    expect(fn!.cost).toBe(200);
+    expect(fn!.security).toBe('definer');
+    expect(fn!.set).toEqual({ search_path: 'public' });
+  });
+
+  it('reads rows for set-returning functions', async () => {
+    const fns = await getExistingFunctions(client, TEST_SCHEMA);
+    const fn = fns.find((f) => f.name === 'func_set_returning');
+    expect(fn).toBeDefined();
+    expect(fn!.rows).toBe(10);
+  });
+});

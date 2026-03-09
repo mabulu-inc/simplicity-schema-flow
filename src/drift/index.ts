@@ -196,6 +196,14 @@ function driftFunctions(
       if (df.returns !== af.returns) diffs.push('returns');
       if ((df.security || 'invoker') !== (af.security || 'invoker')) diffs.push('security');
       if ((df.volatility || 'volatile') !== (af.volatility || 'volatile')) diffs.push('volatility');
+      if ((df.parallel || 'unsafe') !== (af.parallel || 'unsafe')) diffs.push('parallel');
+      if (!!df.strict !== !!af.strict) diffs.push('strict');
+      if (!!df.leakproof !== !!af.leakproof) diffs.push('leakproof');
+      if ((df.cost ?? null) !== (af.cost ?? null)) diffs.push('cost');
+      if ((df.rows ?? null) !== (af.rows ?? null)) diffs.push('rows');
+      const dSet = JSON.stringify(df.set || {});
+      const aSet = JSON.stringify(af.set || {});
+      if (dSet !== aSet) diffs.push('set');
       const dArgs = (df.args || []).map((a) => `${a.name}:${a.type}`).join(',');
       const aArgs = (af.args || []).map((a) => `${a.name}:${a.type}`).join(',');
       if (dArgs !== aArgs) diffs.push('args');

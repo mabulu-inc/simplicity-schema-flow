@@ -427,11 +427,27 @@ function diffFunctions(
     const language = fn.language || 'plpgsql';
     const body = fn.body;
 
+    const parts = [
+      `CREATE OR REPLACE FUNCTION "${pgSchema}"."${fn.name}"(${args}) RETURNS ${fn.returns} AS $$ ${body} $$ LANGUAGE ${language}`,
+      volatility,
+      security,
+    ];
+    if (fn.parallel && fn.parallel !== 'unsafe') parts.push(`PARALLEL ${fn.parallel.toUpperCase()}`);
+    if (fn.strict) parts.push('STRICT');
+    if (fn.leakproof) parts.push('LEAKPROOF');
+    if (fn.cost != null) parts.push(`COST ${fn.cost}`);
+    if (fn.rows != null) parts.push(`ROWS ${fn.rows}`);
+    if (fn.set) {
+      for (const [key, value] of Object.entries(fn.set)) {
+        parts.push(`SET ${key} = ${value}`);
+      }
+    }
+
     ops.push({
       type: 'create_function',
       phase: 5,
       objectName: fn.name,
-      sql: `CREATE OR REPLACE FUNCTION "${pgSchema}"."${fn.name}"(${args}) RETURNS ${fn.returns} AS $$ ${body} $$ LANGUAGE ${language} ${volatility} ${security}`,
+      sql: parts.join(' '),
       destructive: false,
     });
 

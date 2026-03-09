@@ -346,6 +346,108 @@ describe('Planner', () => {
       expect(ops[0].sql).toContain('update_timestamp');
       expect(ops[0].sql).toContain('RETURNS trigger');
     });
+
+    it('includes PARALLEL SAFE in function SQL', () => {
+      const desired = emptyDesired();
+      desired.functions = [{
+        name: 'safe_func',
+        language: 'sql',
+        returns: 'integer',
+        body: 'SELECT 1',
+        parallel: 'safe',
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'create_function');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain('PARALLEL SAFE');
+    });
+
+    it('includes STRICT in function SQL', () => {
+      const desired = emptyDesired();
+      desired.functions = [{
+        name: 'strict_func',
+        language: 'sql',
+        returns: 'integer',
+        body: 'SELECT $1',
+        args: [{ name: 'x', type: 'integer' }],
+        strict: true,
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'create_function');
+      expect(ops[0].sql).toContain('STRICT');
+    });
+
+    it('includes LEAKPROOF in function SQL', () => {
+      const desired = emptyDesired();
+      desired.functions = [{
+        name: 'leak_func',
+        language: 'sql',
+        returns: 'boolean',
+        body: 'SELECT true',
+        leakproof: true,
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'create_function');
+      expect(ops[0].sql).toContain('LEAKPROOF');
+    });
+
+    it('includes COST and ROWS in function SQL', () => {
+      const desired = emptyDesired();
+      desired.functions = [{
+        name: 'cost_func',
+        language: 'sql',
+        returns: 'SETOF integer',
+        body: 'SELECT generate_series(1, 10)',
+        cost: 200,
+        rows: 10,
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'create_function');
+      expect(ops[0].sql).toContain('COST 200');
+      expect(ops[0].sql).toContain('ROWS 10');
+    });
+
+    it('includes SET configuration parameters in function SQL', () => {
+      const desired = emptyDesired();
+      desired.functions = [{
+        name: 'secure_func',
+        language: 'plpgsql',
+        returns: 'void',
+        body: 'BEGIN END;',
+        security: 'definer',
+        set: { search_path: 'public', statement_timeout: '5s' },
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'create_function');
+      expect(ops[0].sql).toContain('SET search_path = public');
+      expect(ops[0].sql).toContain('SET statement_timeout = 5s');
+    });
+
+    it('includes all function options combined', () => {
+      const desired = emptyDesired();
+      desired.functions = [{
+        name: 'full_func',
+        language: 'sql',
+        returns: 'integer',
+        body: 'SELECT 1',
+        security: 'definer',
+        volatility: 'immutable',
+        parallel: 'safe',
+        strict: true,
+        leakproof: true,
+        cost: 100,
+        set: { search_path: 'public' },
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'create_function');
+      expect(ops[0].sql).toContain('IMMUTABLE');
+      expect(ops[0].sql).toContain('SECURITY DEFINER');
+      expect(ops[0].sql).toContain('PARALLEL SAFE');
+      expect(ops[0].sql).toContain('STRICT');
+      expect(ops[0].sql).toContain('LEAKPROOF');
+      expect(ops[0].sql).toContain('COST 100');
+      expect(ops[0].sql).toContain('SET search_path = public');
+    });
   });
 
   describe('tables', () => {

@@ -2123,4 +2123,107 @@ describe('Executor', () => {
       }
     });
   });
+
+  describe('function options', () => {
+    const testSchema = `exec_fn_opts_${Date.now()}`;
+
+    beforeEach(async () => {
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`CREATE SCHEMA "${testSchema}"`);
+      } finally {
+        client.release();
+      }
+    });
+
+    afterEach(async () => {
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`DROP SCHEMA IF EXISTS "${testSchema}" CASCADE`);
+      } finally {
+        client.release();
+      }
+    });
+
+    it('creates function with all options (parallel, strict, leakproof, cost, set)', async () => {
+      const ops: Operation[] = [
+        {
+          type: 'create_function',
+          phase: 5,
+          objectName: 'full_opts_func',
+          sql: `CREATE OR REPLACE FUNCTION "${testSchema}"."full_opts_func"(x integer) RETURNS integer AS $$ SELECT x * 2 $$ LANGUAGE sql IMMUTABLE SECURITY DEFINER PARALLEL SAFE STRICT LEAKPROOF COST 200 SET search_path = public`,
+          destructive: false,
+        },
+      ];
+
+      const result = await execute({
+        connectionString: DATABASE_URL,
+        operations: ops,
+        logger,
+        pgSchema: testSchema,
+      });
+      expect(result.executed).toBe(1);
+
+      // Verify function attributes from pg_proc
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const res = await client.query(
+          `SELECT p.provolatile, p.proparallel, p.proisstrict, p.proleakproof,
+                  p.procost, p.prosecdef, p.proconfig
+           FROM pg_catalog.pg_proc p
+           JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+           WHERE n.nspname = $1 AND p.proname = 'full_opts_func'`,
+          [testSchema],
+        );
+        expect(res.rows).toHaveLength(1);
+        expect(res.rows[0].provolatile).toBe('i'); // immutable
+        expect(res.rows[0].proparallel).toBe('s'); // safe
+        expect(res.rows[0].proisstrict).toBe(true);
+        expect(res.rows[0].proleakproof).toBe(true);
+        expect(res.rows[0].procost).toBe(200);
+        expect(res.rows[0].prosecdef).toBe(true);
+        expect(res.rows[0].proconfig).toEqual(['search_path=public']);
+      } finally {
+        client.release();
+      }
+    });
+
+    it('creates function with ROWS for set-returning function', async () => {
+      const ops: Operation[] = [
+        {
+          type: 'create_function',
+          phase: 5,
+          objectName: 'set_func',
+          sql: `CREATE OR REPLACE FUNCTION "${testSchema}"."set_func"() RETURNS SETOF integer AS $$ SELECT generate_series(1, 10) $$ LANGUAGE sql VOLATILE SECURITY INVOKER ROWS 10`,
+          destructive: false,
+        },
+      ];
+
+      const result = await execute({
+        connectionString: DATABASE_URL,
+        operations: ops,
+        logger,
+        pgSchema: testSchema,
+      });
+      expect(result.executed).toBe(1);
+
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const res = await client.query(
+          `SELECT p.prorows FROM pg_catalog.pg_proc p
+           JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+           WHERE n.nspname = $1 AND p.proname = 'set_func'`,
+          [testSchema],
+        );
+        expect(res.rows).toHaveLength(1);
+        expect(res.rows[0].prorows).toBe(10);
+      } finally {
+        client.release();
+      }
+    });
+  });
 });

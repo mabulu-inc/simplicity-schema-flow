@@ -28,6 +28,7 @@ import type {
   PolicyCommand,
   FunctionSecurity,
   FunctionVolatility,
+  FunctionParallel,
 } from '../schema/types.js';
 
 type Client = pg.PoolClient | pg.Client;
@@ -74,6 +75,7 @@ export async function getExistingFunctions(client: Client, schema: string): Prom
             p.proleakproof AS leakproof,
             p.procost AS cost,
             p.prorows AS rows,
+            p.proconfig AS config,
             pg_catalog.pg_get_function_arguments(p.oid) AS arglist,
             obj_description(p.oid, 'pg_proc') AS comment
      FROM pg_catalog.pg_proc p
@@ -94,6 +96,27 @@ export async function getExistingFunctions(client: Client, schema: string): Prom
       security: r.security as FunctionSecurity,
       volatility: r.volatility as FunctionVolatility,
     };
+
+    const parallel = r.parallel as FunctionParallel;
+    if (parallel && parallel !== 'unsafe') fn.parallel = parallel;
+    if (r.strict === true) fn.strict = true;
+    if (r.leakproof === true) fn.leakproof = true;
+    const cost = Number(r.cost);
+    if (cost && cost !== 100) fn.cost = cost; // 100 is PG default for non-C functions
+    const rows = Number(r.rows);
+    if (rows && rows !== 0 && rows !== 1000) fn.rows = rows; // 1000 is PG default for set-returning
+    // Parse proconfig array like ['search_path=public', 'statement_timeout=5s']
+    const config = r.config as string[] | null;
+    if (config && config.length > 0) {
+      const setObj: Record<string, string> = {};
+      for (const entry of config) {
+        const eqIdx = entry.indexOf('=');
+        if (eqIdx > 0) {
+          setObj[entry.substring(0, eqIdx)] = entry.substring(eqIdx + 1);
+        }
+      }
+      fn.set = setObj;
+    }
 
     // Parse argument list string like "a integer, b integer"
     const arglist = (r.arglist as string || '').trim();
