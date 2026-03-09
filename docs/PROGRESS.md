@@ -5,7 +5,7 @@
 <!-- Updated by each Ralph Loop iteration. Read this FIRST. -->
 
 Last completed task: T-034 (PRD-listed API exports)
-Next eligible task: (none — all tasks complete)
+Next eligible task: T-035 (Generated columns)
 
 ## Completed Tasks
 

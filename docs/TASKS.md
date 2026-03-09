@@ -237,3 +237,113 @@
 - **Depends**: T-019
 - **Description**: Verify and add all PRD §13 exports that are missing or differently named: `runAll`, `runPre`, `runMigrate`, `runPost`, `runValidate`, `runBaseline` (pipeline convenience functions), `parseTableFile`, `parseFunctionFile`, `parseEnumFile`, `parseViewFile`, `parseRoleFile` (file-path-based parsers that read+parse), `generateSqlFile(plan, output)` (write SQL to file), `formatMigrationSql(operations)` (format ops as SQL string). Add re-exports or wrapper functions as needed in `src/index.ts`. Add tests in `index.test.ts` verifying all exports exist. Also verify all type exports (TableSchema, ColumnDef, etc.) are importable.
 - **Produces**: Updated `src/index.ts`, tests in `index.test.ts`
+
+## Milestone 14: Coverage Gaps — Column & Table Features
+
+### T-035: Generated columns
+- **Status**: TODO
+- **Depends**: T-009, T-008
+- **Description**: Add end-to-end tests for generated columns (PRD §4.1 `generated: "price * quantity"`). Planner must produce `CREATE TABLE` SQL with `GENERATED ALWAYS AS (expr) STORED`. Introspection must detect generated columns and their expressions. Drift detection must report when a generated expression differs or is missing. Add planner, executor integration, introspect, and drift tests. Implement any missing logic.
+- **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`, `drift.test.ts`
+
+### T-036: Column-level grants
+- **Status**: TODO
+- **Depends**: T-009, T-008
+- **Description**: Add end-to-end tests for column-level grants (PRD §4.1 `grants: { columns: [id, email, name] }`). Planner must produce `grant_column` operations generating `GRANT SELECT(col1, col2) ON table TO role`. Introspection must read column-level privileges. Drift detection must report column grant differences. Add planner, executor integration, and drift tests. Implement any missing logic.
+- **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `drift.test.ts`
+
+### T-037: Composite primary keys
+- **Status**: TODO
+- **Depends**: T-009, T-008
+- **Description**: Add tests for table-level composite primary keys (PRD §4.1 `primary_key: [col1, col2]`). Planner must generate `PRIMARY KEY (col1, col2)` in CREATE TABLE SQL. Introspection must detect composite PKs. Drift detection must report when composite PK structure differs. Add planner, executor integration, introspect, and drift tests. Implement any missing logic.
+- **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`, `drift.test.ts`
+
+### T-038: Seed upsert execution
+- **Status**: TODO
+- **Depends**: T-010
+- **Description**: Add executor integration tests for seed upsert (PRD §7.2 phase 15). Planner must generate `add_seed` operations that produce `INSERT ... ON CONFLICT (primary_key) DO UPDATE SET ...` SQL. Test both initial insert and update-on-conflict scenarios. Verify seed data exists in the table after execution. Implement any missing logic.
+- **Produces**: Tests in `executor.test.ts`
+
+## Milestone 15: Coverage Gaps — FK, Index, Function & Trigger Options
+
+### T-039: Foreign key options in SQL generation
+- **Status**: TODO
+- **Depends**: T-009, T-008
+- **Description**: Add planner and executor tests verifying FK options from PRD §4.1: `on_delete` (CASCADE, SET NULL, SET DEFAULT, RESTRICT, NO ACTION), `on_update`, `deferrable`, `initially_deferred`. Planner must produce SQL with `ON DELETE CASCADE`, `DEFERRABLE INITIALLY DEFERRED`, etc. Introspection must read these options. Drift must detect when FK options differ. Implement any missing logic.
+- **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`, `drift.test.ts`
+
+### T-040: Index options in SQL generation
+- **Status**: TODO
+- **Depends**: T-009
+- **Description**: Add planner and executor tests verifying index options from PRD §4.1: `method` (gin, gist, hash, brin), `where` (partial index), `include` (covering index), `opclass` (e.g., text_pattern_ops). Planner must produce SQL like `CREATE INDEX ... USING gin`, `WHERE condition`, `INCLUDE (col)`, `col text_pattern_ops`. Add executor integration tests verifying indexes are created with correct options. Implement any missing logic.
+- **Produces**: Tests in `planner.test.ts`, `executor.test.ts`
+
+### T-041: Function options in SQL generation
+- **Status**: TODO
+- **Depends**: T-009, T-008
+- **Description**: Add planner and executor tests for function options from PRD §4.3: `security` (definer/invoker), `volatility` (stable/immutable/volatile), `parallel` (safe/restricted/unsafe), `strict`, `leakproof`, `cost`, `rows`, `set` (configuration parameters). Planner must produce SQL with `SECURITY DEFINER`, `IMMUTABLE`, `PARALLEL SAFE`, `STRICT`, `LEAKPROOF`, `COST 200`, `ROWS 10`, `SET search_path = public`. Introspection must read these attributes. Implement any missing logic.
+- **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`
+
+### T-042: Trigger for_each and when clause
+- **Status**: TODO
+- **Depends**: T-009
+- **Description**: Add planner tests verifying trigger `for_each` (ROW vs STATEMENT) and `when` clause (PRD §4.1) produce correct SQL: `FOR EACH ROW`, `FOR EACH STATEMENT`, `WHEN (condition)`. Add drift tests verifying differences in for_each or when clause are detected. Add executor integration test. Implement any missing logic.
+- **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `drift.test.ts`
+
+## Milestone 16: Coverage Gaps — Role, Grant & Policy Options
+
+### T-043: Role attributes in SQL generation
+- **Status**: TODO
+- **Depends**: T-009, T-008
+- **Description**: Add planner and executor tests for all role attributes from PRD §4.6: `login`, `superuser`, `createdb`, `createrole`, `inherit`, `bypassrls`, `replication`, `connection_limit`. Planner must produce `CREATE ROLE ... LOGIN CREATEDB CONNECTION LIMIT 10` etc. Introspection must read all attributes (currently only reads `login`). Drift must detect attribute differences. Implement any missing logic.
+- **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`, `drift.test.ts`
+
+### T-044: Grant with_grant_option
+- **Status**: TODO
+- **Depends**: T-009
+- **Description**: Add planner and executor tests for `with_grant_option: true` on grants (PRD §4.1). Planner must produce `GRANT ... WITH GRANT OPTION` SQL. Introspection must detect whether a grant has WITH GRANT OPTION. Drift must report differences. Implement any missing logic.
+- **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `drift.test.ts`
+
+### T-045: Policy permissive flag
+- **Status**: TODO
+- **Depends**: T-009, T-008
+- **Description**: Add planner and executor tests for the `permissive` flag on RLS policies (PRD §4.1). Planner must produce `CREATE POLICY ... AS PERMISSIVE` or `AS RESTRICTIVE`. Introspection must read the permissive/restrictive flag. Drift must detect when the flag differs. Implement any missing logic.
+- **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`, `drift.test.ts`
+
+### T-046: View grants
+- **Status**: TODO
+- **Depends**: T-009
+- **Description**: Add planner and executor tests for grants on views (PRD §4.4). Planner must produce `grant_table` operations for views with `grants` field. Executor must execute `GRANT SELECT ON view TO role`. Add drift test for view grant differences. Implement any missing logic.
+- **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `drift.test.ts`
+
+## Milestone 17: Coverage Gaps — CLI & Safety Features
+
+### T-047: drift --apply execution
+- **Status**: TODO
+- **Depends**: T-012, T-010
+- **Description**: Add integration test for `drift --apply` (PRD §6, §10). When drift is detected, `--apply` should generate fix operations and execute them. Test that after `drift --apply`, re-running drift shows no differences. Test that destructive fixes require `--allow-destructive`. Implement the apply logic in the drift pipeline if missing.
+- **Produces**: Tests in `drift.test.ts` or `cli.test.ts`, possibly updated `src/drift/index.ts`
+
+### T-048: Extension drop requires --allow-destructive
+- **Status**: TODO
+- **Depends**: T-009
+- **Description**: Add planner test verifying that `drop_extension` is blocked by default and requires `--allow-destructive` (PRD §8.1). If the planner doesn't block extension drops, add the logic. Also test `disable_rls` and `drop_trigger` blocking since they're listed in PRD §8.1.
+- **Produces**: Tests in `planner.test.ts`
+
+### T-049: Intermediate state recovery
+- **Status**: TODO
+- **Depends**: T-010, T-021
+- **Description**: Add tests for intermediate state recovery (PRD §8.4). Test that re-running migration after interruption picks up where it left off (file tracker skips already-applied files). Test detection and cleanup of invalid indexes left by failed CONCURRENTLY operations. Implement any missing logic.
+- **Produces**: Tests in `executor.test.ts`
+
+### T-050: Expand/contract YAML-driven in normal run
+- **Status**: TODO
+- **Depends**: T-015, T-009
+- **Description**: Add integration test verifying that the `expand` field on a column in YAML (PRD §4.1, §11.3) triggers expand operations during a normal `simplicity-schema run` (not just via explicit expand commands). The planner should detect `expand: { from, transform }` and produce expand_column, create_dual_write_trigger, and backfill_column operations as part of the standard migration plan. Implement any missing logic.
+- **Produces**: Tests in `planner.test.ts`, `executor.test.ts`
+
+### T-051: --env flag E2E
+- **Status**: TODO
+- **Depends**: T-011, T-001
+- **Description**: Add E2E test verifying that `--env staging` CLI flag selects the correct environment block from `simplicity-schema.config.yaml` and merges it with defaults. Test that environment-specific connectionString, lockTimeout, and statementTimeout override the default values. Implement any missing config merging logic.
+- **Produces**: Tests in `cli.test.ts` or `config.test.ts`
