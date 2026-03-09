@@ -343,7 +343,7 @@
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`
 
 ### T-051: --env flag E2E
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-011, T-001
 - **Description**: Add E2E test verifying that `--env staging` CLI flag selects the correct environment block from `simplicity-schema.config.yaml` and merges it with defaults. Test that environment-specific connectionString, lockTimeout, and statementTimeout override the default values. Implement any missing config merging logic.
 - **Produces**: Tests in `cli.test.ts` or `config.test.ts`
