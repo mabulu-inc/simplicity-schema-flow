@@ -123,7 +123,7 @@
 - **Produces**: `src/lint/index.ts`, tests
 
 ### T-018: ERD generation
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-006
 - **Description**: Generate Mermaid ER diagrams from YAML table definitions.
 - **Produces**: `src/erd/index.ts`, tests
