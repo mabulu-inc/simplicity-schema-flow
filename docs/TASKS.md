@@ -225,7 +225,7 @@
 ## Milestone 12: Coverage Gaps — Drift Detection
 
 ### T-033: Drift detection completeness
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-012
 - **Description**: Add drift detection tests for all comparison dimensions missing coverage (PRD §10): (1) index attribute differences (uniqueness, method, partial conditions), (2) FK constraint drift, (3) unique constraint drift, (4) function attribute differences (body, args, return type, security, volatility), (5) role membership drift, (6) grant drift (table-level, column-level, sequence, function), (7) seed drift. If detectDrift doesn't compare these attributes, add the logic.
 - **Produces**: Tests in `drift.test.ts`, possibly updated `src/drift/index.ts`
