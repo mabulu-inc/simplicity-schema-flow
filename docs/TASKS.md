@@ -105,7 +105,7 @@
 - **Produces**: `src/rollback/index.ts`, tests
 
 ### T-015: Expand/contract (zero-downtime migrations)
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-010
 - **Description**: Implement expand/contract column migrations — add new column, create dual-write trigger, backfill, contract (drop old). Track expand state. Support `contract` and `expand-status` CLI commands.
 - **Produces**: `src/expand/index.ts`, tests

@@ -4,8 +4,8 @@
 
 <!-- Updated by each Ralph Loop iteration. Read this FIRST. -->
 
-Last completed task: T-014 (Rollback)
-Next eligible task: T-015 (Expand/contract)
+Last completed task: T-015 (Expand/contract)
+Next eligible task: T-016 (SQL generation)
 
 ## Completed Tasks
 
@@ -24,3 +24,4 @@ Next eligible task: T-015 (Expand/contract)
 - **T-012**: Drift detection — `src/drift/index.ts` with `detectDrift` function. Structured `DriftReport` covering all object types. 31 tests, 277 total passing.
 - **T-013**: Scaffold / generate — `src/scaffold/index.ts` with `generateFromDb` (introspects DB objects and produces YAML files, one per table/enum/function/view/role), `scaffoldInit` (creates standard directory structure), `scaffoldPre`/`scaffoldPost` (timestamped SQL templates), `scaffoldMixin` (YAML mixin template). Writes files to disk when outputDir provided. 15 new tests, 292 total passing.
 - **T-014**: Rollback — `src/rollback/index.ts` with `ensureSnapshotsTable` (creates `_simplicity.snapshots`), `saveSnapshot`/`getLatestSnapshot`/`listSnapshots`/`deleteSnapshot` (snapshot CRUD), `computeRollback` (computes reverse operations from a snapshot — handles create_table→DROP, add_column→DROP COLUMN, create_enum→DROP TYPE, add_index→DROP INDEX, create_function→DROP FUNCTION, create/drop trigger/policy/view/materialized_view, enable_rls→DISABLE, constraints, grants, extensions, roles; skips irreversible ops like alter_column/add_enum_value), `runDown` (loads latest snapshot, executes reverse operations in transaction with advisory locking, deletes snapshot on success). 29 new tests, 321 total passing.
+- **T-015**: Expand/contract — `src/expand/index.ts` with `ensureExpandStateTable` (creates `_simplicity.expand_state`), `planExpandColumn` (generates operations: add column, create dual-write trigger function + trigger, backfill UPDATE), `runBackfill` (batch backfill with configurable batch size using ctid-based batching), `runContract` (drops old column, trigger, and trigger function within advisory-locked transaction; updates state to 'contracted'), `getExpandStatus` (lists all expand/contract states). Full lifecycle tested: expand → dual-write trigger fires on INSERT/UPDATE → backfill → contract drops old column. 10 new tests, 331 total passing.
