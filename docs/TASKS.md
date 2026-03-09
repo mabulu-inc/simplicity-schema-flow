@@ -37,7 +37,7 @@
 ## Milestone 2: Schema Parsing
 
 ### T-005: Schema type definitions
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-001
 - **Description**: Define all YAML schema types — TableSchema, ColumnDef, IndexDef, CheckDef, UniqueConstraintDef, TriggerDef, PolicyDef, FunctionSchema, FunctionArg, EnumSchema, ViewSchema, MaterializedViewSchema, RoleSchema, ExtensionsSchema, MixinSchema, GrantDef, FunctionGrantDef, PrecheckDef, and all supporting types.
 - **Produces**: `src/schema/types.ts`
