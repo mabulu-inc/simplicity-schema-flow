@@ -211,7 +211,7 @@
 ## Milestone 11: Coverage Gaps — Precheck Execution & Snapshots
 
 ### T-031: Precheck execution and abort
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-010
 - **Description**: Add integration tests verifying that prechecks defined in table YAML (PRD §4.1, §11.6) are actually executed during migration, and that migration aborts with the provided message when a precheck query returns a falsy value. Test both passing and failing prechecks. If the executor doesn't implement precheck execution, add the logic.
 - **Produces**: Tests in `executor.test.ts`
