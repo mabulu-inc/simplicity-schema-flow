@@ -659,6 +659,119 @@ describe('Executor', () => {
     });
   });
 
+  describe('materialized view operations', () => {
+    let testSchema: string;
+
+    beforeEach(async () => {
+      testSchema = uniqueSchema();
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`CREATE SCHEMA "${testSchema}"`);
+        // Create a source table for the materialized view
+        await client.query(`CREATE TABLE "${testSchema}"."orders" ("id" serial PRIMARY KEY, "user_id" integer NOT NULL, "amount" numeric)`);
+        await client.query(`INSERT INTO "${testSchema}"."orders" ("user_id", "amount") VALUES (1, 100), (1, 200), (2, 50)`);
+      } finally {
+        client.release();
+      }
+    });
+
+    afterEach(async () => {
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`DROP SCHEMA IF EXISTS "${testSchema}" CASCADE`);
+      } finally {
+        client.release();
+      }
+    });
+
+    it('executes materialized view with grants, comment, and refresh', async () => {
+      // Create the role first
+      const grantRole = `mv_grant_role_${Date.now()}`;
+      const pool = getPool(DATABASE_URL);
+      let client = await pool.connect();
+      try {
+        await client.query(`CREATE ROLE "${grantRole}" NOLOGIN`);
+      } finally {
+        client.release();
+      }
+
+      const ops: Operation[] = [
+        {
+          type: 'create_materialized_view',
+          phase: 10,
+          objectName: 'user_stats',
+          sql: `CREATE MATERIALIZED VIEW "${testSchema}"."user_stats" AS SELECT user_id, count(*) AS order_count FROM "${testSchema}"."orders" GROUP BY user_id`,
+          destructive: false,
+        },
+        {
+          type: 'refresh_materialized_view',
+          phase: 10,
+          objectName: 'user_stats',
+          sql: `REFRESH MATERIALIZED VIEW "${testSchema}"."user_stats"`,
+          destructive: false,
+        },
+        {
+          type: 'grant_table',
+          phase: 13,
+          objectName: `user_stats.${grantRole}`,
+          sql: `GRANT SELECT ON "${testSchema}"."user_stats" TO "${grantRole}"`,
+          destructive: false,
+        },
+        {
+          type: 'set_comment',
+          phase: 14,
+          objectName: 'user_stats',
+          sql: `COMMENT ON MATERIALIZED VIEW "${testSchema}"."user_stats" IS 'Aggregated user order statistics'`,
+          destructive: false,
+        },
+      ];
+
+      const result = await execute({
+        connectionString: DATABASE_URL,
+        operations: ops,
+        logger,
+      });
+
+      expect(result.executed).toBe(4);
+
+      // Verify materialized view exists and has data
+      client = await pool.connect();
+      try {
+        const mvRes = await client.query(`SELECT * FROM "${testSchema}"."user_stats" ORDER BY user_id`);
+        expect(mvRes.rows.length).toBe(2);
+        expect(mvRes.rows[0].user_id).toBe(1);
+        expect(Number(mvRes.rows[0].order_count)).toBe(2);
+
+        // Verify grant
+        const grantRes = await client.query(
+          `SELECT has_table_privilege('${grantRole}', '"${testSchema}"."user_stats"', 'SELECT') AS has_priv`,
+        );
+        expect(grantRes.rows[0].has_priv).toBe(true);
+
+        // Verify comment
+        const commentRes = await client.query(
+          `SELECT obj_description(c.oid) AS comment
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE c.relname = 'user_stats' AND n.nspname = $1`,
+          [testSchema],
+        );
+        expect(commentRes.rows[0].comment).toBe('Aggregated user order statistics');
+      } finally {
+        client.release();
+        // Clean up the role
+        const c2 = await pool.connect();
+        try {
+          await c2.query(`REVOKE ALL ON "${testSchema}"."user_stats" FROM "${grantRole}"`);
+          await c2.query(`DROP ROLE IF EXISTS "${grantRole}"`);
+        } finally {
+          c2.release();
+        }
+      }
+    });
+  });
+
   describe('pre/post scripts', () => {
     let testSchema: string;
 

@@ -1250,6 +1250,13 @@ function diffMaterializedViews(
           sql: `CREATE MATERIALIZED VIEW "${pgSchema}"."${mv.name}" AS ${mv.query}`,
           destructive: false,
         });
+        ops.push({
+          type: 'refresh_materialized_view',
+          phase: 10,
+          objectName: mv.name,
+          sql: `REFRESH MATERIALIZED VIEW "${pgSchema}"."${mv.name}"`,
+          destructive: false,
+        });
       }
     }
 

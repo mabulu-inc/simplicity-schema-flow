@@ -409,6 +409,28 @@ indexes:
     }
   });
 
+  it('parses a materialized view with grants and comment', () => {
+    const yaml = `
+name: user_stats
+materialized: true
+query: |
+  SELECT user_id, count(*) FROM orders GROUP BY user_id
+grants:
+  - to: app_readonly
+    privileges: [SELECT]
+comment: "Aggregated user order statistics"
+`;
+    const result = parseView(yaml);
+    expect(result.materialized).toBe(true);
+    expect(result.name).toBe('user_stats');
+    if (result.materialized === true) {
+      expect(result.grants).toHaveLength(1);
+      expect(result.grants![0].to).toBe('app_readonly');
+      expect(result.grants![0].privileges).toEqual(['SELECT']);
+      expect(result.comment).toBe('Aggregated user order statistics');
+    }
+  });
+
   it('throws if name or query is missing', () => {
     expect(() => parseView('query: "SELECT 1"')).toThrow(/name/i);
     expect(() => parseView('name: v')).toThrow(/query/i);

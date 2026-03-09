@@ -724,6 +724,59 @@ describe('Planner', () => {
       expect(findOps(result.operations, 'drop_materialized_view')).toHaveLength(1);
       expect(findOps(result.operations, 'create_materialized_view')).toHaveLength(1);
     });
+
+    it('produces refresh_materialized_view when query changes', () => {
+      const desired = emptyDesired();
+      desired.materializedViews = [{
+        name: 'user_stats',
+        materialized: true,
+        query: 'SELECT user_id, count(*) AS cnt FROM orders GROUP BY user_id',
+      }];
+      const actual = emptyActual();
+      actual.materializedViews.set('user_stats', {
+        name: 'user_stats',
+        materialized: true,
+        query: 'SELECT user_id, count(*) FROM orders GROUP BY user_id',
+      });
+      const result = buildPlan(desired, actual, { allowDestructive: true });
+      const refreshOps = findOps(result.operations, 'refresh_materialized_view');
+      expect(refreshOps).toHaveLength(1);
+      expect(refreshOps[0].sql).toContain('REFRESH MATERIALIZED VIEW');
+      expect(refreshOps[0].phase).toBe(10);
+    });
+
+    it('produces grant_table operations for materialized view grants', () => {
+      const desired = emptyDesired();
+      desired.materializedViews = [{
+        name: 'user_stats',
+        materialized: true,
+        query: 'SELECT user_id, count(*) FROM orders GROUP BY user_id',
+        grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const grantOps = findOps(result.operations, 'grant_table');
+      expect(grantOps).toHaveLength(1);
+      expect(grantOps[0].sql).toContain('GRANT SELECT');
+      expect(grantOps[0].sql).toContain('"user_stats"');
+      expect(grantOps[0].sql).toContain('"app_readonly"');
+      expect(grantOps[0].phase).toBe(13);
+    });
+
+    it('produces set_comment operations for materialized view comments', () => {
+      const desired = emptyDesired();
+      desired.materializedViews = [{
+        name: 'user_stats',
+        materialized: true,
+        query: 'SELECT user_id, count(*) FROM orders GROUP BY user_id',
+        comment: 'Aggregated user order statistics',
+      }];
+      const result = buildPlan(desired, emptyActual());
+      const commentOps = findOps(result.operations, 'set_comment');
+      expect(commentOps).toHaveLength(1);
+      expect(commentOps[0].sql).toContain('COMMENT ON MATERIALIZED VIEW');
+      expect(commentOps[0].sql).toContain('Aggregated user order statistics');
+      expect(commentOps[0].phase).toBe(14);
+    });
   });
 
   describe('operation ordering', () => {
