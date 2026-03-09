@@ -1,16 +1,31 @@
 import type { ConfigOverrides } from '../core/config.js';
 
-const VALID_COMMANDS = ['run', 'plan', 'validate', 'status', 'init', 'baseline', 'help'] as const;
+const VALID_COMMANDS = [
+  'run', 'plan', 'validate', 'status', 'init', 'baseline',
+  'drift', 'lint', 'generate', 'sql', 'erd', 'new',
+  'down', 'contract', 'expand-status', 'docs', 'help',
+] as const;
 const RUN_SUBCOMMANDS = ['pre', 'migrate', 'post'] as const;
+const NEW_SUBCOMMANDS = ['pre', 'post', 'mixin'] as const;
 
 export type Command = (typeof VALID_COMMANDS)[number] | 'version' | 'unknown';
 export type RunSubcommand = (typeof RUN_SUBCOMMANDS)[number];
+export type NewSubcommand = (typeof NEW_SUBCOMMANDS)[number];
 
 export interface ParsedArgs {
   command: Command;
   subcommand?: RunSubcommand;
+  newSubcommand?: NewSubcommand;
   overrides: ConfigOverrides;
   unknownCommand?: string;
+  /** --output or --output-dir path */
+  output?: string;
+  /** --seeds flag for generate */
+  seeds?: boolean;
+  /** --name for new pre/post/mixin */
+  name?: string;
+  /** --apply flag for drift */
+  apply?: boolean;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -20,6 +35,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let subcommand: RunSubcommand | undefined;
   let unknownCommand: string | undefined;
 
+  let output: string | undefined;
+  let seeds: boolean | undefined;
+  let name: string | undefined;
+  let apply: boolean | undefined;
+  let newSubcommand: NewSubcommand | undefined;
   let i = 0;
 
   // Check for --help or --version before command
@@ -59,6 +79,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
     const sub = args[i];
     if ((RUN_SUBCOMMANDS as readonly string[]).includes(sub)) {
       subcommand = sub as RunSubcommand;
+      i++;
+    }
+  }
+
+  // Check for new subcommand
+  if (command === 'new' && i < args.length && !args[i].startsWith('-')) {
+    const sub = args[i];
+    if ((NEW_SUBCOMMANDS as readonly string[]).includes(sub)) {
+      newSubcommand = sub as NewSubcommand;
       i++;
     }
   }
@@ -107,6 +136,19 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case '--json':
         overrides.json = true;
         break;
+      case '--output':
+      case '--output-dir':
+        output = args[++i];
+        break;
+      case '--seeds':
+        seeds = true;
+        break;
+      case '--name':
+        name = args[++i];
+        break;
+      case '--apply':
+        apply = true;
+        break;
       case '--help':
       case '-h':
         // Already handled above
@@ -120,7 +162,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   const result: ParsedArgs = { command, overrides };
   if (subcommand) result.subcommand = subcommand;
+  if (newSubcommand) result.newSubcommand = newSubcommand;
   if (unknownCommand) result.unknownCommand = unknownCommand;
+  if (output) result.output = output;
+  if (seeds) result.seeds = seeds;
+  if (name) result.name = name;
+  if (apply) result.apply = apply;
   return result;
 }
 
@@ -128,5 +175,6 @@ function flagTakesValue(flag: string): boolean {
   return [
     '--connection-string', '--db', '--dir', '--schema', '--env',
     '--lock-timeout', '--statement-timeout', '--max-retries',
+    '--output', '--output-dir', '--name',
   ].includes(flag);
 }

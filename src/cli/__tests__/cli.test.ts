@@ -162,6 +162,123 @@ describe('CLI argument parsing', () => {
     expect(result.command).toBe('unknown');
     expect(result.unknownCommand).toBe('foobar');
   });
+
+  // ─── Missing command parsing tests (T-030) ─────────────────────
+
+  it('should parse "drift" command', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'drift']);
+    expect(result.command).toBe('drift');
+  });
+
+  it('should parse "drift" with --apply flag', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'drift', '--apply']);
+    expect(result.command).toBe('drift');
+    expect(result.apply).toBe(true);
+  });
+
+  it('should parse "lint" command', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'lint']);
+    expect(result.command).toBe('lint');
+  });
+
+  it('should parse "generate" command', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'generate']);
+    expect(result.command).toBe('generate');
+  });
+
+  it('should parse "generate" with --output-dir flag', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'generate', '--output-dir', './out']);
+    expect(result.command).toBe('generate');
+    expect(result.output).toBe('./out');
+  });
+
+  it('should parse "generate" with --seeds flag', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'generate', '--seeds']);
+    expect(result.command).toBe('generate');
+    expect(result.seeds).toBe(true);
+  });
+
+  it('should parse "sql" command', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'sql']);
+    expect(result.command).toBe('sql');
+  });
+
+  it('should parse "sql" with --output flag', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'sql', '--output', 'migration.sql']);
+    expect(result.command).toBe('sql');
+    expect(result.output).toBe('migration.sql');
+  });
+
+  it('should parse "erd" command', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'erd']);
+    expect(result.command).toBe('erd');
+  });
+
+  it('should parse "erd" with --output flag', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'erd', '--output', 'schema.mmd']);
+    expect(result.command).toBe('erd');
+    expect(result.output).toBe('schema.mmd');
+  });
+
+  it('should parse "new pre" with --name flag', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'new', 'pre', '--name', 'add_indexes']);
+    expect(result.command).toBe('new');
+    expect(result.newSubcommand).toBe('pre');
+    expect(result.name).toBe('add_indexes');
+  });
+
+  it('should parse "new post" with --name flag', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'new', 'post', '--name', 'seed_data']);
+    expect(result.command).toBe('new');
+    expect(result.newSubcommand).toBe('post');
+    expect(result.name).toBe('seed_data');
+  });
+
+  it('should parse "new mixin" with --name flag', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'new', 'mixin', '--name', 'timestamps']);
+    expect(result.command).toBe('new');
+    expect(result.newSubcommand).toBe('mixin');
+    expect(result.name).toBe('timestamps');
+  });
+
+  it('should parse "down" command', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'down']);
+    expect(result.command).toBe('down');
+  });
+
+  it('should parse "contract" command', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'contract']);
+    expect(result.command).toBe('contract');
+  });
+
+  it('should parse "expand-status" command', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'expand-status']);
+    expect(result.command).toBe('expand-status');
+  });
+
+  it('should parse "docs" command', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'docs']);
+    expect(result.command).toBe('docs');
+  });
+
+  it('should parse "generate" with --output-dir and --seeds together', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'generate', '--output-dir', './generated', '--seeds']);
+    expect(result.command).toBe('generate');
+    expect(result.output).toBe('./generated');
+    expect(result.seeds).toBe(true);
+  });
+
+  it('should parse "drift" with --json flag', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'drift', '--json']);
+    expect(result.command).toBe('drift');
+    expect(result.overrides.json).toBe(true);
+  });
+
+  it('should parse "new" without subcommand', () => {
+    const result = parseArgs(['node', 'simplicity-schema', 'new']);
+    expect(result.command).toBe('new');
+    expect(result.newSubcommand).toBeUndefined();
+  });
 });
 
 describe('CLI pipeline', () => {

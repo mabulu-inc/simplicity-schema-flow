@@ -234,6 +234,33 @@ async function introspectDatabase(
 }
 
 /**
+ * Build desired and actual state for drift/lint/sql/erd use.
+ */
+export async function buildDesiredAndActual(
+  config: SimplicitySchemaConfig,
+  logger: Logger,
+): Promise<{ desired: DesiredState; actual: ActualState }> {
+  const discovered = await discoverSchemaFiles(config.baseDir);
+  const desired = await parseDesiredState(discovered.schema, config.baseDir, logger);
+  const actual = await introspectDatabase(config, logger);
+  return { desired, actual };
+}
+
+/**
+ * Build a migration plan without executing.
+ */
+export async function getPlan(
+  config: SimplicitySchemaConfig,
+  logger: Logger,
+): Promise<ReturnType<typeof buildPlan>> {
+  const { desired, actual } = await buildDesiredAndActual(config, logger);
+  return buildPlan(desired, actual, {
+    allowDestructive: config.allowDestructive,
+    pgSchema: config.pgSchema,
+  });
+}
+
+/**
  * Initialize a new schema project directory.
  */
 export function initProject(baseDir: string): void {
