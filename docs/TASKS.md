@@ -203,7 +203,7 @@
 - **Produces**: Updated `src/cli/args.ts`, `src/cli/pipeline.ts`, tests in `cli.test.ts`
 
 ### T-030: Missing CLI command parsing
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-011
 - **Description**: Add CLI argument parsing tests for all commands missing coverage: `drift`, `lint`, `generate` (with `--output-dir`, `--seeds`), `sql` (with `--output`), `erd` (with `--output`), `new pre --name`, `new post --name`, `new mixin --name`, `down`, `contract`, `expand-status`, `docs`. Add `--apply` flag parsing for drift. Implement any commands not yet wired in the CLI.
 - **Produces**: Tests in `cli.test.ts`, updated `src/cli/args.ts`
