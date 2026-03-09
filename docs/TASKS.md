@@ -157,7 +157,7 @@
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`
 
 ### T-023: Safe unique constraint pattern
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-021
 - **Description**: Add tests (and implement if missing) for the 2-step safe unique constraint pattern from PRD §8.3: (1) CREATE UNIQUE INDEX CONCURRENTLY, (2) ALTER TABLE ADD CONSTRAINT ... USING INDEX. Verify in planner and executor tests.
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`

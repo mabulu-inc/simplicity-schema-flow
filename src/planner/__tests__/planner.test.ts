@@ -891,6 +891,115 @@ describe('Planner', () => {
     });
   });
 
+  describe('safe unique constraint pattern', () => {
+    it('uses 2-step safe pattern when adding unique constraint to existing table', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [
+          { name: 'email', type: 'text' },
+          { name: 'tenant_id', type: 'uuid' },
+        ],
+        unique_constraints: [{ columns: ['email', 'tenant_id'], name: 'uq_users_email_tenant' }],
+      }];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [
+          { name: 'email', type: 'text' },
+          { name: 'tenant_id', type: 'uuid' },
+        ],
+      });
+      const result = buildPlan(desired, actual);
+
+      // Step 1: CREATE UNIQUE INDEX CONCURRENTLY
+      const indexOps = findOps(result.operations, 'add_index');
+      expect(indexOps).toHaveLength(1);
+      expect(indexOps[0].sql).toContain('CREATE UNIQUE INDEX CONCURRENTLY');
+      expect(indexOps[0].sql).toContain('"uq_users_email_tenant"');
+      expect(indexOps[0].concurrent).toBe(true);
+      expect(indexOps[0].phase).toBe(7);
+
+      // Step 2: ALTER TABLE ADD CONSTRAINT ... USING INDEX
+      const ucOps = findOps(result.operations, 'add_unique_constraint');
+      expect(ucOps).toHaveLength(1);
+      expect(ucOps[0].sql).toContain('ADD CONSTRAINT "uq_users_email_tenant"');
+      expect(ucOps[0].sql).toContain('USING INDEX "uq_users_email_tenant"');
+      expect(ucOps[0].concurrent).toBe(true);
+      expect(ucOps[0].phase).toBe(8);
+    });
+
+    it('generates default name for unique constraint without explicit name', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [{ name: 'email', type: 'text' }],
+        unique_constraints: [{ columns: ['email'] }],
+      }];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'email', type: 'text' }],
+      });
+      const result = buildPlan(desired, actual);
+      const indexOps = findOps(result.operations, 'add_index');
+      expect(indexOps).toHaveLength(1);
+      expect(indexOps[0].sql).toContain('"uq_users_email"');
+    });
+
+    it('drops unique constraint not in desired (destructive)', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [{ name: 'email', type: 'text' }],
+      }];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'email', type: 'text' }],
+        unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+      });
+      const result = buildPlan(desired, actual);
+      expect(result.blocked.some((o) => o.type === 'drop_unique_constraint')).toBe(true);
+    });
+
+    it('does not produce safe pattern ops for new table (inline UNIQUE in CREATE TABLE)', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [{ name: 'email', type: 'text' }],
+        unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+      }];
+      const result = buildPlan(desired, emptyActual());
+      // New table: unique constraint is inline in CREATE TABLE
+      const createOps = findOps(result.operations, 'create_table');
+      expect(createOps[0].sql).toContain('UNIQUE');
+      // No separate add_index or add_unique_constraint ops for this
+      const ucOps = findOps(result.operations, 'add_unique_constraint');
+      expect(ucOps).toHaveLength(0);
+    });
+
+    it('skips unique constraint that already exists', () => {
+      const desired = emptyDesired();
+      desired.tables = [{
+        table: 'users',
+        columns: [{ name: 'email', type: 'text' }],
+        unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+      }];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'email', type: 'text' }],
+        unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+      });
+      const result = buildPlan(desired, actual);
+      const indexOps = findOps(result.operations, 'add_index');
+      const ucOps = findOps(result.operations, 'add_unique_constraint');
+      expect(indexOps).toHaveLength(0);
+      expect(ucOps).toHaveLength(0);
+    });
+  });
+
   describe('CONCURRENTLY indexes', () => {
     it('generates CREATE INDEX CONCURRENTLY for new indexes', () => {
       const desired = emptyDesired();

@@ -370,6 +370,84 @@ describe('Executor', () => {
     });
   });
 
+  describe('safe unique constraint pattern', () => {
+    let testSchema: string;
+
+    beforeEach(async () => {
+      testSchema = uniqueSchema();
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`CREATE SCHEMA "${testSchema}"`);
+        await client.query(`CREATE TABLE "${testSchema}"."users" ("id" uuid PRIMARY KEY, "email" text NOT NULL, "tenant_id" uuid NOT NULL)`);
+        await client.query(`INSERT INTO "${testSchema}"."users" (id, email, tenant_id) VALUES (gen_random_uuid(), 'a@b.com', gen_random_uuid())`);
+      } finally {
+        client.release();
+      }
+    });
+
+    afterEach(async () => {
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`DROP SCHEMA IF EXISTS "${testSchema}" CASCADE`);
+      } finally {
+        client.release();
+      }
+    });
+
+    it('executes the 2-step safe unique constraint pattern successfully', async () => {
+      const ucName = 'uq_users_email_tenant';
+      const ops: Operation[] = [
+        {
+          type: 'add_index',
+          phase: 7,
+          objectName: ucName,
+          sql: `CREATE UNIQUE INDEX CONCURRENTLY "${ucName}" ON "${testSchema}"."users" ("email", "tenant_id")`,
+          destructive: false,
+          concurrent: true,
+        },
+        {
+          type: 'add_unique_constraint',
+          phase: 8,
+          objectName: `users.${ucName}`,
+          sql: `ALTER TABLE "${testSchema}"."users" ADD CONSTRAINT "${ucName}" UNIQUE USING INDEX "${ucName}"`,
+          destructive: false,
+          concurrent: true,
+        },
+      ];
+
+      const result = await execute({
+        connectionString: DATABASE_URL,
+        operations: ops,
+        logger,
+      });
+
+      expect(result.executed).toBe(2);
+
+      // Verify the unique constraint exists
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const res = await client.query(
+          `SELECT conname, contype FROM pg_constraint c
+           JOIN pg_namespace n ON n.oid = c.connamespace
+           WHERE n.nspname = $1 AND conname = $2`,
+          [testSchema, ucName],
+        );
+        expect(res.rows.length).toBe(1);
+        expect(res.rows[0].contype).toBe('u'); // unique constraint
+
+        // Verify uniqueness is enforced: inserting a duplicate should fail
+        await expect(
+          client.query(`INSERT INTO "${testSchema}"."users" (id, email, tenant_id) VALUES (gen_random_uuid(), 'a@b.com', (SELECT tenant_id FROM "${testSchema}"."users" LIMIT 1))`),
+        ).rejects.toThrow(/unique/i);
+      } finally {
+        client.release();
+      }
+    });
+  });
+
   describe('pre/post scripts', () => {
     let testSchema: string;
 

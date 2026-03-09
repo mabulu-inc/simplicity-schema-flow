@@ -10,6 +10,7 @@ import type {
   ColumnDef,
   IndexDef,
   CheckDef,
+  UniqueConstraintDef,
   TriggerDef,
   PolicyDef,
   GrantDef,
@@ -634,6 +635,9 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
     }
   }
 
+  // Diff unique constraints (safe 2-step pattern: CONCURRENTLY index + USING INDEX)
+  ops.push(...diffUniqueConstraints(desired.table, desired.unique_constraints || [], existing.unique_constraints || [], pgSchema));
+
   // Diff indexes
   ops.push(...diffIndexes(desired.table, desired.indexes || [], existing.indexes || [], pgSchema));
 
@@ -861,6 +865,64 @@ function diffChecks(
         objectName: `${table}.${check.name}`,
         sql: `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${check.name}" CHECK (${check.expression})`,
         destructive: false,
+      });
+    }
+  }
+
+  return ops;
+}
+
+// ─── Unique Constraints (safe 2-step pattern for existing tables) ──
+
+function diffUniqueConstraints(
+  table: string,
+  desired: UniqueConstraintDef[],
+  existing: UniqueConstraintDef[],
+  pgSchema: string,
+): Operation[] {
+  const ops: Operation[] = [];
+  const existingByName = new Map(
+    existing.map((uc) => [uc.name || `uq_${table}_${uc.columns.join('_')}`, uc]),
+  );
+
+  for (const uc of desired) {
+    const ucName = uc.name || `uq_${table}_${uc.columns.join('_')}`;
+    if (!existingByName.has(ucName)) {
+      // Safe unique constraint pattern (PRD §8.3):
+      // 1. CREATE UNIQUE INDEX CONCURRENTLY (non-blocking)
+      // 2. ALTER TABLE ADD CONSTRAINT ... USING INDEX (instant)
+      const cols = uc.columns.map((c) => `"${c}"`).join(', ');
+      ops.push({
+        type: 'add_index',
+        phase: 7,
+        objectName: ucName,
+        sql: `CREATE UNIQUE INDEX CONCURRENTLY "${ucName}" ON "${pgSchema}"."${table}" (${cols})`,
+        destructive: false,
+        concurrent: true,
+      });
+      ops.push({
+        type: 'add_unique_constraint',
+        phase: 8,
+        objectName: `${table}.${ucName}`,
+        sql: `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${ucName}" UNIQUE USING INDEX "${ucName}"`,
+        destructive: false,
+        concurrent: true,
+      });
+    }
+  }
+
+  // Drop unique constraints not in desired
+  const desiredNames = new Set(
+    desired.map((uc) => uc.name || `uq_${table}_${uc.columns.join('_')}`),
+  );
+  for (const [name] of existingByName) {
+    if (!desiredNames.has(name)) {
+      ops.push({
+        type: 'drop_unique_constraint',
+        phase: 6,
+        objectName: `${table}.${name}`,
+        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT "${name}"`,
+        destructive: true,
       });
     }
   }
