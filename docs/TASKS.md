@@ -285,7 +285,7 @@
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`
 
 ### T-042: Trigger for_each and when clause
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009
 - **Description**: Add planner tests verifying trigger `for_each` (ROW vs STATEMENT) and `when` clause (PRD §4.1) produce correct SQL: `FOR EACH ROW`, `FOR EACH STATEMENT`, `WHEN (condition)`. Add drift tests verifying differences in for_each or when clause are detected. Add executor integration test. Implement any missing logic.
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `drift.test.ts`
