@@ -95,6 +95,7 @@ export async function runPipeline(
     operations,
     preScripts: phaseFilter !== 'migrate' ? preScripts : undefined,
     postScripts: phaseFilter !== 'migrate' ? postScripts : undefined,
+    pgSchema: config.pgSchema,
     dryRun: config.dryRun,
     validateOnly,
     lockTimeout: config.lockTimeout,

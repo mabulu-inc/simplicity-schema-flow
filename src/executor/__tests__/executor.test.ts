@@ -1114,6 +1114,170 @@ describe('Executor', () => {
     });
   });
 
+  describe('auto snapshot capture', () => {
+    let testSchema: string;
+
+    beforeEach(async () => {
+      testSchema = uniqueSchema();
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`CREATE SCHEMA "${testSchema}"`);
+        await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+        // Ensure snapshots table exists and is clean
+        const { ensureSnapshotsTable } = await import('../../rollback/index.js');
+        await ensureSnapshotsTable(client);
+        await client.query('DELETE FROM _simplicity.snapshots');
+      } finally {
+        client.release();
+      }
+    });
+
+    afterEach(async () => {
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`DROP SCHEMA IF EXISTS "${testSchema}" CASCADE`);
+        await client.query('DELETE FROM _simplicity.snapshots');
+      } finally {
+        client.release();
+      }
+    });
+
+    it('should auto-save a snapshot before executing operations', async () => {
+      const ops: Operation[] = [
+        {
+          type: 'create_table',
+          phase: 6,
+          objectName: 'snapshot_test',
+          sql: `CREATE TABLE "${testSchema}"."snapshot_test" ("id" uuid PRIMARY KEY)`,
+          destructive: false,
+        },
+      ];
+
+      await execute({
+        connectionString: DATABASE_URL,
+        operations: ops,
+        pgSchema: testSchema,
+        logger,
+      });
+
+      // Verify a snapshot was auto-saved
+      const { getLatestSnapshot } = await import('../../rollback/index.js');
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const snapshot = await getLatestSnapshot(client);
+        expect(snapshot).not.toBeNull();
+        expect(snapshot!.operations).toHaveLength(1);
+        expect(snapshot!.operations[0].type).toBe('create_table');
+        expect(snapshot!.operations[0].objectName).toBe('snapshot_test');
+        expect(snapshot!.pgSchema).toBe(testSchema);
+      } finally {
+        client.release();
+      }
+    });
+
+    it('should not save a snapshot in dry-run mode', async () => {
+      const ops: Operation[] = [
+        {
+          type: 'create_table',
+          phase: 6,
+          objectName: 'dry_run_snap',
+          sql: `CREATE TABLE "${testSchema}"."dry_run_snap" ("id" integer)`,
+          destructive: false,
+        },
+      ];
+
+      await execute({
+        connectionString: DATABASE_URL,
+        operations: ops,
+        pgSchema: testSchema,
+        dryRun: true,
+        logger,
+      });
+
+      const { getLatestSnapshot } = await import('../../rollback/index.js');
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const snapshot = await getLatestSnapshot(client);
+        expect(snapshot).toBeNull();
+      } finally {
+        client.release();
+      }
+    });
+
+    it('should not save a snapshot when there are no operations', async () => {
+      await execute({
+        connectionString: DATABASE_URL,
+        operations: [],
+        pgSchema: testSchema,
+        logger,
+      });
+
+      const { getLatestSnapshot } = await import('../../rollback/index.js');
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const snapshot = await getLatestSnapshot(client);
+        expect(snapshot).toBeNull();
+      } finally {
+        client.release();
+      }
+    });
+
+    it('should allow runDown to rollback using the auto-captured snapshot', async () => {
+      const ops: Operation[] = [
+        {
+          type: 'create_table',
+          phase: 6,
+          objectName: 'rollback_auto',
+          sql: `CREATE TABLE "${testSchema}"."rollback_auto" ("id" uuid PRIMARY KEY, "name" text)`,
+          destructive: false,
+        },
+      ];
+
+      // Run migration — should auto-capture snapshot
+      await execute({
+        connectionString: DATABASE_URL,
+        operations: ops,
+        pgSchema: testSchema,
+        logger,
+      });
+
+      // Verify table exists
+      const pool = getPool(DATABASE_URL);
+      let client = await pool.connect();
+      try {
+        const res = await client.query(
+          `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'rollback_auto'`,
+          [testSchema],
+        );
+        expect(res.rows.length).toBe(1);
+      } finally {
+        client.release();
+      }
+
+      // Run down — should use auto-captured snapshot
+      const { runDown } = await import('../../rollback/index.js');
+      const result = await runDown(DATABASE_URL, { logger });
+      expect(result.executed).toBeGreaterThan(0);
+
+      // Verify table is gone
+      client = await pool.connect();
+      try {
+        const res = await client.query(
+          `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'rollback_auto'`,
+          [testSchema],
+        );
+        expect(res.rows.length).toBe(0);
+      } finally {
+        client.release();
+      }
+    });
+  });
+
   describe('precheck execution', () => {
     let testSchema: string;
 

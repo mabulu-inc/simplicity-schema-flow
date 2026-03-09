@@ -12,6 +12,7 @@ import type { SchemaFile } from '../core/files.js';
 import type { Logger } from '../core/logger.js';
 import { getPool } from '../core/db.js';
 import { ensureHistoryTable, fileNeedsApply, recordFile } from '../core/tracker.js';
+import { ensureSnapshotsTable, saveSnapshot } from '../rollback/index.js';
 
 // Advisory lock key — consistent across all simplicity-schema instances
 const ADVISORY_LOCK_KEY = 737_513; // "ss" in ASCII-inspired number
@@ -21,6 +22,7 @@ export interface ExecuteOptions {
   operations: Operation[];
   preScripts?: SchemaFile[];
   postScripts?: SchemaFile[];
+  pgSchema?: string;
   dryRun?: boolean;
   validateOnly?: boolean;
   lockTimeout?: number;
@@ -64,6 +66,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     operations,
     preScripts = [],
     postScripts = [],
+    pgSchema = 'public',
     dryRun = false,
     validateOnly = false,
     lockTimeout,
@@ -107,6 +110,13 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     try {
       // Ensure _simplicity schema and history table
       await ensureHistoryTable(lockClient);
+
+      // Auto-save a migration snapshot before executing (for rollback support)
+      if (operations.length > 0 && !validateOnly) {
+        await ensureSnapshotsTable(lockClient);
+        await saveSnapshot(lockClient, operations, pgSchema);
+        logger?.debug('Auto-saved migration snapshot');
+      }
 
       // Run pre-scripts (each in its own transaction, tracked by hash)
       for (const script of preScripts) {
