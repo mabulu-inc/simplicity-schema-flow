@@ -302,13 +302,18 @@ describe('introspectTable', () => {
 
 describe('getExistingRoles', () => {
   const testRole = `test_role_${Date.now()}`;
+  const fullRole = `test_full_role_${Date.now()}`;
 
   beforeAll(async () => {
     await client.query(`CREATE ROLE ${testRole} NOLOGIN`);
+    await client.query(
+      `CREATE ROLE ${fullRole} LOGIN CREATEDB CREATEROLE NOINHERIT BYPASSRLS REPLICATION CONNECTION LIMIT 5`,
+    );
   });
 
   afterAll(async () => {
     await client.query(`DROP ROLE IF EXISTS ${testRole}`);
+    await client.query(`DROP ROLE IF EXISTS ${fullRole}`);
   });
 
   it('returns roles', async () => {
@@ -316,6 +321,33 @@ describe('getExistingRoles', () => {
     const role = roles.find((r) => r.role === testRole);
     expect(role).toBeDefined();
     expect(role!.login).toBe(false);
+  });
+
+  it('introspects all role attributes', async () => {
+    const roles = await getExistingRoles(client);
+    const role = roles.find((r) => r.role === fullRole);
+    expect(role).toBeDefined();
+    expect(role!.login).toBe(true);
+    expect(role!.createdb).toBe(true);
+    expect(role!.createrole).toBe(true);
+    expect(role!.inherit).toBe(false);
+    expect(role!.bypassrls).toBe(true);
+    expect(role!.replication).toBe(true);
+    expect(role!.connection_limit).toBe(5);
+  });
+
+  it('introspects default attribute values', async () => {
+    const roles = await getExistingRoles(client);
+    const role = roles.find((r) => r.role === testRole);
+    expect(role).toBeDefined();
+    expect(role!.login).toBe(false);
+    expect(role!.superuser).toBe(false);
+    expect(role!.createdb).toBe(false);
+    expect(role!.createrole).toBe(false);
+    expect(role!.inherit).toBe(true);
+    expect(role!.bypassrls).toBe(false);
+    expect(role!.replication).toBe(false);
+    expect(role!.connection_limit).toBe(-1);
   });
 });
 

@@ -429,6 +429,75 @@ describe('detectDrift', () => {
     );
   });
 
+  it('reports superuser attribute difference', () => {
+    const desired = emptyDesired();
+    desired.roles = [{ role: 'admin', superuser: true }];
+    const actual = emptyActual();
+    actual.roles.set('admin', { role: 'admin', superuser: false });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'role',
+        object: 'admin',
+        status: 'different',
+        detail: expect.stringContaining('superuser'),
+      }),
+    );
+  });
+
+  it('reports multiple role attribute differences', () => {
+    const desired = emptyDesired();
+    desired.roles = [{
+      role: 'power_user',
+      createdb: true,
+      createrole: true,
+      inherit: false,
+      bypassrls: true,
+      replication: true,
+      connection_limit: 10,
+    }];
+    const actual = emptyActual();
+    actual.roles.set('power_user', {
+      role: 'power_user',
+      createdb: false,
+      createrole: false,
+      inherit: true,
+      bypassrls: false,
+      replication: false,
+      connection_limit: -1,
+    });
+    const report = detectDrift(desired, actual);
+    const item = report.items.find((i) => i.object === 'power_user');
+    expect(item).toBeDefined();
+    expect(item!.status).toBe('different');
+    expect(item!.detail).toContain('createdb');
+    expect(item!.detail).toContain('createrole');
+    expect(item!.detail).toContain('inherit');
+    expect(item!.detail).toContain('bypassrls');
+    expect(item!.detail).toContain('replication');
+    expect(item!.detail).toContain('connection_limit');
+  });
+
+  it('reports no drift when all role attributes match', () => {
+    const desired = emptyDesired();
+    desired.roles = [{
+      role: 'app_user',
+      login: true,
+      createdb: false,
+      inherit: true,
+    }];
+    const actual = emptyActual();
+    actual.roles.set('app_user', {
+      role: 'app_user',
+      login: true,
+      createdb: false,
+      inherit: true,
+    });
+    const report = detectDrift(desired, actual);
+    const roleItems = report.items.filter((i) => i.type === 'role');
+    expect(roleItems).toHaveLength(0);
+  });
+
   // ─── Extensions ────────────────────────────────────────────────
 
   it('reports extension missing in DB', () => {

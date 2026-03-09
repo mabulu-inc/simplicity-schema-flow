@@ -156,6 +156,7 @@ function driftRoles(
       if (dr.inherit !== undefined && dr.inherit !== ar.inherit) diffs.push('inherit');
       if (dr.bypassrls !== undefined && dr.bypassrls !== ar.bypassrls) diffs.push('bypassrls');
       if (dr.replication !== undefined && dr.replication !== ar.replication) diffs.push('replication');
+      if (dr.connection_limit !== undefined && dr.connection_limit !== ar.connection_limit) diffs.push('connection_limit');
       // Membership comparison
       const dMemberships = (dr.in || []).sort().join(',');
       const aMemberships = (ar.in || []).sort().join(',');

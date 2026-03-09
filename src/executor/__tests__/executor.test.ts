@@ -711,6 +711,46 @@ describe('Executor', () => {
         client.release();
       }
     });
+
+    it('creates role with all attributes', async () => {
+      const ops: Operation[] = [
+        {
+          type: 'create_role',
+          phase: 4,
+          objectName: memberRole,
+          sql: `CREATE ROLE "${memberRole}" LOGIN CREATEDB CREATEROLE NOINHERIT BYPASSRLS REPLICATION CONNECTION LIMIT 3`,
+          destructive: false,
+        },
+      ];
+
+      const result = await execute({
+        connectionString: DATABASE_URL,
+        operations: ops,
+        logger,
+      });
+
+      expect(result.executed).toBe(1);
+
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const res = await client.query(
+          `SELECT rolcanlogin, rolcreatedb, rolcreaterole, rolinherit, rolbypassrls, rolreplication, rolconnlimit
+           FROM pg_roles WHERE rolname = $1`,
+          [memberRole],
+        );
+        expect(res.rows).toHaveLength(1);
+        expect(res.rows[0].rolcanlogin).toBe(true);
+        expect(res.rows[0].rolcreatedb).toBe(true);
+        expect(res.rows[0].rolcreaterole).toBe(true);
+        expect(res.rows[0].rolinherit).toBe(false);
+        expect(res.rows[0].rolbypassrls).toBe(true);
+        expect(res.rows[0].rolreplication).toBe(true);
+        expect(res.rows[0].rolconnlimit).toBe(3);
+      } finally {
+        client.release();
+      }
+    });
   });
 
   describe('materialized view operations', () => {
