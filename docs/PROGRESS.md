@@ -4,8 +4,8 @@
 
 <!-- Updated by each Ralph Loop iteration. Read this FIRST. -->
 
-Last completed task: T-012 (Drift detection)
-Next eligible task: T-013 (Scaffold / generate)
+Last completed task: T-013 (Scaffold / generate)
+Next eligible task: T-014 (Rollback)
 
 ## Completed Tasks
 
@@ -21,4 +21,5 @@ Next eligible task: T-013 (Scaffold / generate)
 - **T-009**: Planner / diff engine — `src/planner/index.ts` with `buildPlan` that compares desired (YAML) state vs actual (introspected) state. Produces ordered operations across all object types (extensions, enums, roles, functions, tables, columns, indexes, FKs, views, materialized views, triggers, RLS policies, grants, comments, seeds). FKs added as NOT VALID then validated. Destructive operations blocked unless allowDestructive set. Operations sorted by phase for correct dependency order. 49 new tests, 199 total passing.
 - **T-010**: Executor — `src/executor/index.ts` with `execute` function that runs planned operations in phased order within transactions. Advisory locking (pg_try_advisory_lock) prevents concurrent migrations. Dry-run mode logs operations without executing. Validate mode executes in a rolled-back transaction. Pre/post SQL scripts run in separate transactions with SHA-256 hash tracking (skip unchanged files). Automatic rollback on errors. Ensures `_simplicity` schema exists. 12 new tests, 211 total passing.
 - **T-011**: CLI entry point — `src/cli/index.ts` with argument parsing (`src/cli/args.ts`), help text (`src/cli/help.ts`), and pipeline orchestration (`src/cli/pipeline.ts`). Commands: run (full/pre/migrate/post), plan (dry-run), validate (rollback transaction), status (applied files + pending changes), init (create directory structure), help, version. Full pipeline wiring: discover → parse → expand mixins → introspect DB → plan → execute. 35 new tests, 246 total passing.
-- **T-012**: Drift detection — `src/drift/index.ts` with `detectDrift` function that performs read-only comparison of desired (YAML) state vs actual (introspected) state. Produces structured `DriftReport` with `DriftItem[]` covering all object types: tables, columns (type/nullable/default), indexes, check constraints, triggers, policies, enums (value differences), functions, views, materialized views, roles (attribute differences), extensions, and comments. Type alias normalization (int→integer, etc). Summary with totals and per-type counts. 31 new tests, 277 total passing. — `src/cli/index.ts` with argument parsing (`src/cli/args.ts`), help text (`src/cli/help.ts`), and pipeline orchestration (`src/cli/pipeline.ts`). Commands: run (full/pre/migrate/post), plan (dry-run), validate (rollback transaction), status (applied files + pending changes), init (create directory structure), help, version. Full pipeline wiring: discover → parse → expand mixins → introspect DB → plan → execute. 35 new tests, 246 total passing.
+- **T-012**: Drift detection — `src/drift/index.ts` with `detectDrift` function. Structured `DriftReport` covering all object types. 31 tests, 277 total passing.
+- **T-013**: Scaffold / generate — `src/scaffold/index.ts` with `generateFromDb` (introspects DB objects and produces YAML files, one per table/enum/function/view/role), `scaffoldInit` (creates standard directory structure), `scaffoldPre`/`scaffoldPost` (timestamped SQL templates), `scaffoldMixin` (YAML mixin template). Writes files to disk when outputDir provided. 15 new tests, 292 total passing.

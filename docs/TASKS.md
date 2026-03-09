@@ -93,7 +93,7 @@
 - **Produces**: `src/drift/index.ts`, tests
 
 ### T-013: Scaffold / generate
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-008
 - **Description**: Implement DB-to-YAML generation — introspect an existing database and produce YAML files. Also support `init` (project directory scaffolding) and `new pre|post|mixin` templates.
 - **Produces**: `src/scaffold/index.ts`, tests
