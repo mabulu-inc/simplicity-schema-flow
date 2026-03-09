@@ -23,7 +23,7 @@
 - **Produces**: `src/core/db.ts`, tests
 
 ### T-003: File discovery and tracking
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-001
 - **Description**: Implement glob-based discovery of YAML/SQL files from the schema directory. Implement file tracker — `_simplicity.history` table with file_path, SHA-256 hash, phase, applied_at. All files are hash-tracked uniformly and re-run only when content changes.
 - **Produces**: `src/core/files.ts`, `src/core/tracker.ts`, tests
