@@ -247,7 +247,7 @@
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `introspect.test.ts`, `drift.test.ts`
 
 ### T-036: Column-level grants
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-009, T-008
 - **Description**: Add end-to-end tests for column-level grants (PRD §4.1 `grants: { columns: [id, email, name] }`). Planner must produce `grant_column` operations generating `GRANT SELECT(col1, col2) ON table TO role`. Introspection must read column-level privileges. Drift detection must report column grant differences. Add planner, executor integration, and drift tests. Implement any missing logic.
 - **Produces**: Tests in `planner.test.ts`, `executor.test.ts`, `drift.test.ts`
