@@ -233,7 +233,7 @@
 ## Milestone 13: Coverage Gaps — Public API Surface
 
 ### T-034: PRD-listed API exports
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-019
 - **Description**: Verify and add all PRD §13 exports that are missing or differently named: `runAll`, `runPre`, `runMigrate`, `runPost`, `runValidate`, `runBaseline` (pipeline convenience functions), `parseTableFile`, `parseFunctionFile`, `parseEnumFile`, `parseViewFile`, `parseRoleFile` (file-path-based parsers that read+parse), `generateSqlFile(plan, output)` (write SQL to file), `formatMigrationSql(operations)` (format ops as SQL string). Add re-exports or wrapper functions as needed in `src/index.ts`. Add tests in `index.test.ts` verifying all exports exist. Also verify all type exports (TableSchema, ColumnDef, etc.) are importable.
 - **Produces**: Updated `src/index.ts`, tests in `index.test.ts`
