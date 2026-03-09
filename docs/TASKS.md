@@ -131,7 +131,7 @@
 ## Milestone 7: Public API and Testing Infrastructure
 
 ### T-019: Public API surface
-- **Status**: TODO
+- **Status**: DONE
 - **Depends**: T-011, T-012, T-013, T-014, T-015, T-016, T-017, T-018
 - **Description**: Create `src/index.ts` that re-exports all public functionality and type definitions for programmatic use.
 - **Produces**: `src/index.ts`
