@@ -23,7 +23,7 @@ DRY_RUN=false
 VERBOSE=false
 ITER_TIMEOUT=900  # 15 minutes per iteration
 LOG_DIR=".ralph-logs"
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TASKS_DIR="$PROJECT_DIR/docs/tasks"
 
 # --- Ensure subprocesses can't hang on PG connections ---

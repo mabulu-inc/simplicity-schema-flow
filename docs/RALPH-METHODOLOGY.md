@@ -6,7 +6,7 @@ Stateless, PRD-driven development automated by Claude Code.
 
 1. Write a **PRD** (`docs/PRD.md`) — numbered sections, testable requirements
 2. Decompose into **task files** (`docs/tasks/T-NNN.md`) — one per feature, with dependencies
-3. Run **`ralph.sh`** — it loops Claude Code sessions, each one picking up the next task
+3. Run **`pnpm ralph`** — it loops Claude Code sessions, each one picking up the next task
 
 Each iteration is stateless: boot from disk, find next task, red/green TDD, commit, update task file.
 
@@ -18,7 +18,7 @@ Each iteration is stateless: boot from disk, find next task, red/green TDD, comm
 | Task files | `docs/tasks/T-NNN.md` | What to do next. One file per task, status tracked inline.            |
 | Milestones | `docs/MILESTONES.md`  | Quick-scan index of tasks grouped by milestone. Not authoritative.    |
 | CLAUDE.md  | `.claude/CLAUDE.md`   | Project config. References this methodology + project-specific setup. |
-| ralph.sh   | `ralph.sh`            | The automation loop. Runs Claude Code headlessly.                     |
+| ralph.sh   | `scripts/ralph.sh`    | The automation loop. Runs Claude Code headlessly.                     |
 
 ## Task File Format
 
@@ -90,7 +90,7 @@ T-000 sets up: ESLint, Prettier, husky, lint-staged, coverage config, and `pnpm 
 - **One commit per task** — no Claude attribution in commit messages. The task file update (Status→DONE, SHA, notes) MUST be included in the same commit as the code — never split into a separate commit.
 - **Minimal green** — implement only what failing tests require
 - **No scope creep** — if the task is done, commit. Don't improve adjacent code.
-- **No pushing** — ralph.sh handles git push after each iteration
+- **No pushing** — `scripts/ralph.sh` handles git push after each iteration
 - **All checks pass** — `pnpm check` must succeed before committing
 - **Verify early and often** — run `pnpm check` after implementing each layer (e.g. types, then planner, then tests), not only at the end. Catching errors early avoids wasting an entire iteration on code that doesn't compile or pass. A task that spans 6+ files MUST verify at least once mid-implementation.
 - **Use dedicated tools, not shell equivalents** — use the Read tool to read files, not `cat`/`head`/`tail`. Use Grep to search, not `grep`. Shell commands dump large outputs into context and waste tokens. Reserve Bash for commands that have no dedicated tool (git, pnpm, docker).
@@ -122,8 +122,9 @@ Follow the Ralph Methodology defined in `docs/RALPH-METHODOLOGY.md`.
 - **Database**: PostgreSQL via Docker on port XXXXX
 ```
 
-5. Copy `ralph.sh` into the project root
-6. Run: `./ralph.sh`
+5. Copy `scripts/ralph.sh` and `scripts/ralph-kill.sh` into the project
+6. Add scripts to `package.json`: `"ralph": "bash scripts/ralph.sh"`, `"ralph:kill": "bash scripts/ralph-kill.sh"`
+7. Run: `pnpm ralph`
 
 ### Task Design
 
@@ -164,9 +165,10 @@ The shell script that drives the loop:
 Usage:
 
 ```bash
-./ralph.sh              # 10 iterations (default)
-./ralph.sh -n 0         # unlimited — run until all tasks DONE
-./ralph.sh -n 5 -v      # 5 iterations, verbose (stream output)
-./ralph.sh -t 600       # 10-minute timeout per iteration
-./ralph.sh --dry-run    # print config and exit
+pnpm ralph              # 10 iterations (default)
+pnpm ralph -- -n 0      # unlimited — run until all tasks DONE
+pnpm ralph -- -n 5 -v   # 5 iterations, verbose (stream output)
+pnpm ralph -- -t 600    # 10-minute timeout per iteration
+pnpm ralph -- --dry-run # print config and exit
+pnpm ralph:kill         # force-stop ralph and all child processes
 ```
