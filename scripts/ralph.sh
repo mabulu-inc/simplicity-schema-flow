@@ -397,6 +397,17 @@ while true; do
 
   PROMPT="You are in Ralph Loop iteration $iteration. Follow the Ralph Methodology as defined in CLAUDE.md and docs/RALPH-METHODOLOGY.md.
 
+PHASE LOGGING (MANDATORY): Before starting each phase, output a marker line EXACTLY like this:
+  [PHASE] Entering: <phase name>
+The phases in order are:
+  1. Boot — reading task files, PRD, and existing code to understand the task
+  2. Red — writing failing tests
+  3. Green — implementing the minimum code to pass tests
+  4. Verify — running pnpm check (lint, format, typecheck, build, test:coverage)
+  5. Commit — staging files and committing
+You MUST output the phase marker as plain text before doing any work in that phase. If you return to a phase (e.g. Red→Green→Red again), log it again.
+
+WORKFLOW:
 1. BOOT: Scan docs/tasks/ to find the next eligible task (lowest-numbered TODO with all deps DONE). Read the PRD sections it references.
 2. EXECUTE: Implement using strict red/green TDD — write failing tests FIRST, then implement the minimum to pass. Run 'pnpm check' after each layer (types, planner, tests, etc.) — do NOT wait until the end. Catch errors early.
 3. QUALITY GATES (mandatory before commit):

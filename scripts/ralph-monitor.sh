@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ralph-monitor.sh — Minimal ralph status display.
+# ralph-monitor.sh — Minimal ralph status display with phase timeline.
 #
 # Usage:
 #   ./scripts/ralph-monitor.sh           # one-shot status
@@ -33,12 +33,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# --- Helpers ---
-
-get_active_log() {
-  ls -t "$LOG_DIR"/*.jsonl 2>/dev/null | head -1
-}
-
 format_duration() {
   local secs="$1"
   if [[ $secs -lt 60 ]]; then
@@ -50,86 +44,96 @@ format_duration() {
   fi
 }
 
-# Detect phase from recent log activity. Returns "phase|timestamp" where
-# timestamp is the unix time of the first log line matching that phase.
-detect_phase() {
+# Extract phase timeline from log file.
+# Parses [PHASE] markers and correlates with log timestamps.
+get_phase_timeline() {
   local log="$1"
-  [[ -f "$log" ]] || { echo "BOOT|$(date +%s)"; return; }
+  [[ -f "$log" ]] || return
   set +e
 
-  local last_messages
-  last_messages=$(tail -100 "$log" 2>/dev/null || true)
+  # Get log creation time as baseline
+  local log_birth
+  log_birth=$(stat -f %B "$log" 2>/dev/null || stat -c %W "$log" 2>/dev/null || echo 0)
+  [[ "$log_birth" -le 0 ]] && log_birth=$(stat -f %m "$log" 2>/dev/null || stat -c %Y "$log" 2>/dev/null || echo 0)
 
-  local phase=""
+  local log_now
+  log_now=$(stat -f %m "$log" 2>/dev/null || stat -c %Y "$log" 2>/dev/null || echo 0)
 
-  if echo "$last_messages" | grep -q '"command":"git commit' 2>/dev/null; then
-    phase="Committing"
-  elif echo "$last_messages" | grep -q '"command":"pnpm check' 2>/dev/null; then
-    phase="Verifying"
-  elif echo "$last_messages" | grep -qE '"command":"pnpm (vitest|test)' 2>/dev/null; then
-    phase="Running tests"
-  elif echo "$last_messages" | grep -qE '"name":"(Edit|Write)"' 2>/dev/null; then
-    local last_edit_file
-    last_edit_file=$(echo "$last_messages" | grep -oE '"file_path":"[^"]*"' | tail -1 | sed 's/"file_path":"//;s/"//' || true)
-    if echo "$last_edit_file" | grep -qE '(test|spec)\.' 2>/dev/null; then
-      phase="Writing tests"
-    else
-      phase="Implementing"
-    fi
-  elif echo "$last_messages" | grep -qE '"name":"(Read|Grep|Glob)"' 2>/dev/null; then
-    local read_targets
-    read_targets=$(echo "$last_messages" | grep -o '"file_path":"[^"]*"' | tail -3 | sed 's/"file_path":"//;s/"//')
-    if echo "$read_targets" | grep -qE '(tasks/|PRD|CLAUDE)' 2>/dev/null; then
-      phase="Reading PRD"
-    else
-      phase="Reading code"
-    fi
-  else
-    phase="Starting"
-  fi
+  local total_lines
+  total_lines=$(wc -l < "$log" | xargs)
+  [[ "$total_lines" -lt 1 ]] && { set -e; return; }
 
-  # Find when this phase started by scanning backward through the log.
-  # We look for the transition point — the last line that does NOT match
-  # the current phase pattern.
-  local phase_start
-  local log_lines
-  log_lines=$(wc -l < "$log" | xargs)
-
-  # Use log file mtime as a rough "last activity" timestamp
-  local log_mtime
-  log_mtime=$(stat -f %m "$log" 2>/dev/null || stat -c %Y "$log" 2>/dev/null || echo 0)
-
-  # Estimate phase duration from how many of the last N lines match
-  local match_count=0
-  local sample=50
-  local tail_block
-  tail_block=$(tail -${sample} "$log" 2>/dev/null || true)
-
-  case "$phase" in
-    "Committing")     match_count=$(echo "$tail_block" | grep -c '"command":"git' 2>/dev/null || echo 0) ;;
-    "Verifying")      match_count=$(echo "$tail_block" | grep -c '"command":"pnpm' 2>/dev/null || echo 0) ;;
-    "Running tests")  match_count=$(echo "$tail_block" | grep -cE '"command":"pnpm (vitest|test)' 2>/dev/null || echo 0) ;;
-    "Writing tests")  match_count=$(echo "$tail_block" | grep -cE '"name":"(Edit|Write)"' 2>/dev/null || echo 0) ;;
-    "Implementing")   match_count=$(echo "$tail_block" | grep -cE '"name":"(Edit|Write)"' 2>/dev/null || echo 0) ;;
-    "Reading PRD")    match_count=$(echo "$tail_block" | grep -cE '"name":"(Read|Grep|Glob)"' 2>/dev/null || echo 0) ;;
-    "Reading code")   match_count=$(echo "$tail_block" | grep -cE '"name":"(Read|Grep|Glob)"' 2>/dev/null || echo 0) ;;
-    *)                match_count=1 ;;
-  esac
-
-  # Estimate: if log has been active for T seconds total and we're M/S into
-  # matching lines in the tail, scale proportionally
-  local log_start_mtime
-  log_start_mtime=$(stat -f %B "$log" 2>/dev/null || stat -c %W "$log" 2>/dev/null || echo "$log_mtime")
-  local total_elapsed=$(( log_mtime - log_start_mtime ))
+  local total_elapsed=$(( log_now - log_birth ))
   [[ $total_elapsed -lt 1 ]] && total_elapsed=1
 
-  local phase_secs=0
-  if [[ $log_lines -gt 0 && $match_count -gt 0 ]]; then
-    phase_secs=$(( (match_count * total_elapsed) / log_lines ))
-    [[ $phase_secs -lt 1 ]] && phase_secs=1
+  # Find all phase markers with their line numbers
+  # Format: "line_number:phase_name"
+  local phases
+  phases=$(grep -an '\[PHASE\] Entering:' "$log" 2>/dev/null | sed 's/.*\[PHASE\] Entering: *//' || true)
+
+  if [[ -z "$phases" ]]; then
+    set -e
+    return
   fi
 
-  echo "${phase}|${phase_secs}"
+  # Get line numbers for each phase
+  local line_numbers
+  line_numbers=$(grep -n '\[PHASE\] Entering:' "$log" 2>/dev/null | cut -d: -f1 || true)
+
+  # Build arrays (bash 3.x compatible)
+  local phase_count=0
+  local tmpfile
+  tmpfile=$(mktemp)
+
+  paste <(echo "$line_numbers") <(echo "$phases") > "$tmpfile" 2>/dev/null || {
+    # Fallback if paste fails
+    local i=0
+    while IFS= read -r p; do
+      local ln
+      ln=$(echo "$line_numbers" | sed -n "$((i+1))p")
+      echo -e "${ln}\t${p}" >> "$tmpfile"
+      i=$((i+1))
+    done <<< "$phases"
+  }
+
+  local prev_line=0 prev_phase=""
+  local now_ts
+  now_ts=$(date +%s)
+  local is_running
+  is_running=$(pgrep -f "claude --print.*Ralph Loop" 2>/dev/null | head -1 || true)
+
+  while IFS=$'\t' read -r line_num phase_name; do
+    [[ -z "$line_num" || -z "$phase_name" ]] && continue
+
+    # If there was a previous phase, calculate its duration and print it
+    if [[ -n "$prev_phase" ]]; then
+      local prev_start_secs=$(( (prev_line * total_elapsed) / total_lines ))
+      local curr_start_secs=$(( (line_num * total_elapsed) / total_lines ))
+      local dur=$(( curr_start_secs - prev_start_secs ))
+      [[ $dur -lt 1 ]] && dur=1
+      echo -e "  ${GREEN}✓${RESET} ${prev_phase}$(printf '%*s' $((20 - ${#prev_phase})) '')${DIM}$(format_duration $dur)${RESET}"
+    fi
+
+    prev_line=$line_num
+    prev_phase="$phase_name"
+    phase_count=$((phase_count + 1))
+  done < "$tmpfile"
+  rm -f "$tmpfile"
+
+  # Print the current (last) phase
+  if [[ -n "$prev_phase" ]]; then
+    local prev_start_secs=$(( (prev_line * total_elapsed) / total_lines ))
+    local dur=$(( total_elapsed - prev_start_secs ))
+    [[ $dur -lt 0 ]] && dur=0
+
+    if [[ -n "$is_running" ]]; then
+      # Still in progress
+      echo -e "  ${CYAN}▸${RESET} ${BOLD}${prev_phase}${RESET}$(printf '%*s' $((20 - ${#prev_phase})) '')${CYAN}$(format_duration $dur)${RESET}"
+    else
+      echo -e "  ${GREEN}✓${RESET} ${prev_phase}$(printf '%*s' $((20 - ${#prev_phase})) '')${DIM}$(format_duration $dur)${RESET}"
+    fi
+  fi
+
   set -e
 }
 
@@ -138,7 +142,7 @@ render() {
   local ralph_pid claude_pid active_log
   ralph_pid=$(pgrep -f "ralph.sh" 2>/dev/null | head -1 || true)
   claude_pid=$(pgrep -f "claude --print.*Ralph Loop" 2>/dev/null | head -1 || true)
-  active_log=$(get_active_log)
+  active_log=$(ls -t "$LOG_DIR"/*.jsonl 2>/dev/null | head -1)
 
   # Task counts
   local done_count=0 todo_count=0
@@ -183,41 +187,19 @@ render() {
     title=$(head -1 "$TASKS_DIR/${task}.md" | sed "s/^# ${task}: //")
   fi
 
-  # Phase + duration
-  local phase="—" phase_dur=""
-  if [[ -n "$active_log" && -n "$claude_pid" ]]; then
-    local phase_info
-    phase_info=$(detect_phase "$active_log")
-    phase=$(echo "$phase_info" | cut -d'|' -f1)
-    local phase_secs
-    phase_secs=$(echo "$phase_info" | cut -d'|' -f2)
-    if [[ $phase_secs -gt 0 ]]; then
-      phase_dur=" $(format_duration "$phase_secs")"
-    fi
-  fi
-
-  # Idle check
-  local idle_warning=""
-  if [[ -n "$active_log" && -f "$active_log" && -n "$claude_pid" ]]; then
-    local log_mtime now_ts idle
-    log_mtime=$(stat -f %m "$active_log" 2>/dev/null || stat -c %Y "$active_log" 2>/dev/null || echo 0)
-    now_ts=$(date +%s)
-    idle=$(( now_ts - log_mtime ))
-    if [[ $idle -gt 60 ]]; then
-      idle_warning=" ${YELLOW}(idle $(format_duration $idle))${RESET}"
-    fi
-  fi
-
   # Render
   $WATCH && clear
 
-  echo -e "${BOLD}ralph${RESET}  ${status_color}${status}${RESET}${idle_warning}"
+  echo -e "${BOLD}ralph${RESET}  ${status_color}${status}${RESET}"
   echo -e "${GREEN}${bar}${RESET} ${done_count}/${total} (${pct}%)"
   if [[ "$task" != "—" ]]; then
     echo -e "${CYAN}${task}${RESET} ${title}"
-    if [[ "$phase" != "—" ]]; then
-      echo -e "${DIM}${phase}${phase_dur}${RESET}"
-    fi
+  fi
+  echo ""
+
+  # Phase timeline
+  if [[ -n "$active_log" ]]; then
+    get_phase_timeline "$active_log"
   fi
 
   $WATCH && echo -e "\n${DIM}Ctrl+C to exit${RESET}"
