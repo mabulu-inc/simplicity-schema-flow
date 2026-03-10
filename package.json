@@ -29,6 +29,8 @@
     "test:coverage": "vitest run --coverage",
     "check": "pnpm lint && pnpm format && pnpm typecheck && pnpm build && pnpm test:coverage",
     "milestones": "bash scripts/update-milestones.sh",
+    "monitor": "bash scripts/ralph-monitor.sh -w",
+    "monitor:once": "bash scripts/ralph-monitor.sh",
     "prepare": "husky"
   },
   "lint-staged": {
