@@ -31,7 +31,15 @@ import type {
   ExtensionsSchema,
   SchemaGrant,
   MixinSchema,
+  SeedOnConflict,
 } from './types.js';
+
+const sqlTag = {
+  tag: '!sql',
+  resolve(value: string) {
+    return { __sql: value };
+  },
+};
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -223,7 +231,7 @@ function parsePrecheckDef(raw: Record<string, unknown>, context: string): Preche
 // ─── Top-level Parsers ──────────────────────────────────────────
 
 export function parseTable(yamlStr: string): TableSchema {
-  const raw = parseYaml(yamlStr) as Record<string, unknown>;
+  const raw = parseYaml(yamlStr, { customTags: [sqlTag] }) as Record<string, unknown>;
   const ctx = 'table';
 
   const table: TableSchema = {
@@ -262,6 +270,7 @@ export function parseTable(yamlStr: string): TableSchema {
   if (raw.rls !== undefined) table.rls = Boolean(raw.rls);
   if (raw.force_rls !== undefined) table.force_rls = Boolean(raw.force_rls);
   if (raw.seeds !== undefined) table.seeds = raw.seeds as Record<string, unknown>[];
+  if (raw.seeds_on_conflict !== undefined) table.seeds_on_conflict = raw.seeds_on_conflict as SeedOnConflict;
   if (raw.mixins !== undefined) table.mixins = raw.mixins as string[];
   const tableComment = resolveComment(raw);
   if (tableComment !== undefined) table.comment = tableComment;

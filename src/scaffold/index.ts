@@ -131,6 +131,7 @@ function buildTableYaml(table: TableSchema): Record<string, unknown> {
   if (table.policies && table.policies.length > 0) result.policies = table.policies;
   if (table.grants && table.grants.length > 0) result.grants = table.grants;
   if (table.seeds && table.seeds.length > 0) result.seeds = table.seeds;
+  if (table.seeds_on_conflict) result.seeds_on_conflict = table.seeds_on_conflict;
   if (table.comment) result.comment = table.comment;
 
   return result;

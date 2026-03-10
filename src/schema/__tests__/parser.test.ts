@@ -328,6 +328,43 @@ indexes:
 `;
     expect(() => parseTable(yaml)).toThrow(/method/i);
   });
+
+  it('parses seeds_on_conflict field', () => {
+    const yaml = `
+table: statuses
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+  - name: name
+    type: text
+seeds:
+  - id: 1
+    name: active
+seeds_on_conflict: 'DO NOTHING'
+`;
+    const result = parseTable(yaml);
+    expect(result.seeds_on_conflict).toBe('DO NOTHING');
+    expect(result.seeds).toHaveLength(1);
+  });
+
+  it('parses !sql YAML tag in seed values', () => {
+    const yaml = `
+table: users
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+  - name: created_at
+    type: timestamptz
+seeds:
+  - id: '00000000-0000-0000-0000-000000000001'
+    created_at: !sql now()
+`;
+    const result = parseTable(yaml);
+    expect(result.seeds).toHaveLength(1);
+    expect(result.seeds![0].created_at).toEqual({ __sql: 'now()' });
+  });
 });
 
 // ─── Enum Parsing ───────────────────────────────────────────────

@@ -873,6 +873,44 @@ describe('Planner', () => {
       expect(ops[0].sql).toContain('ON CONFLICT');
     });
 
+    it('seeds with seeds_on_conflict DO NOTHING generates insert-only SQL', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'statuses',
+          columns: [
+            { name: 'id', type: 'integer', primary_key: true },
+            { name: 'name', type: 'text' },
+          ],
+          seeds: [{ id: 1, name: 'active' }],
+          seeds_on_conflict: 'DO NOTHING',
+        },
+      ];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'add_seed');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain('ON CONFLICT ("id") DO NOTHING');
+      expect(ops[0].sql).not.toContain('DO UPDATE');
+    });
+
+    it('seeds with !sql expression renders raw SQL in VALUES', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'created_at', type: 'timestamptz' },
+          ],
+          seeds: [{ id: '00000000-0000-0000-0000-000000000001', created_at: { __sql: 'now()' } }],
+        },
+      ];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'add_seed');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain("VALUES ('00000000-0000-0000-0000-000000000001', now())");
+    });
+
     it('creates table with column-level grants', () => {
       const desired = emptyDesired();
       desired.tables = [

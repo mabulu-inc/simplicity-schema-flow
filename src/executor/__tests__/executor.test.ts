@@ -2126,6 +2126,81 @@ describe('Executor', () => {
         client.release();
       }
     });
+
+    it('should skip existing rows with DO NOTHING conflict strategy', async () => {
+      const ops: Operation[] = [
+        {
+          type: 'create_table',
+          phase: 6,
+          objectName: 'statuses',
+          sql: `CREATE TABLE "${testSchema}"."statuses" ("id" integer PRIMARY KEY, "name" text NOT NULL)`,
+          destructive: false,
+        },
+        {
+          type: 'add_seed',
+          phase: 15,
+          objectName: 'statuses',
+          sql: `INSERT INTO "${testSchema}"."statuses" ("id", "name") VALUES (1, 'active') ON CONFLICT ("id") DO NOTHING`,
+          destructive: false,
+        },
+      ];
+
+      await execute({ connectionString: DATABASE_URL, operations: ops, logger });
+
+      // Insert again with different name — should be ignored
+      const ops2: Operation[] = [
+        {
+          type: 'add_seed',
+          phase: 15,
+          objectName: 'statuses',
+          sql: `INSERT INTO "${testSchema}"."statuses" ("id", "name") VALUES (1, 'changed') ON CONFLICT ("id") DO NOTHING`,
+          destructive: false,
+        },
+      ];
+
+      await execute({ connectionString: DATABASE_URL, operations: ops2, logger });
+
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const res = await client.query(`SELECT id, name FROM "${testSchema}"."statuses" WHERE id = 1`);
+        expect(res.rows[0].name).toBe('active');
+      } finally {
+        client.release();
+      }
+    });
+
+    it('should handle !sql expressions in seed values', async () => {
+      const ops: Operation[] = [
+        {
+          type: 'create_table',
+          phase: 6,
+          objectName: 'events',
+          sql: `CREATE TABLE "${testSchema}"."events" ("id" integer PRIMARY KEY, "created_at" timestamptz NOT NULL)`,
+          destructive: false,
+        },
+        {
+          type: 'add_seed',
+          phase: 15,
+          objectName: 'events',
+          sql: `INSERT INTO "${testSchema}"."events" ("id", "created_at") VALUES (1, now()) ON CONFLICT ("id") DO UPDATE SET "created_at" = EXCLUDED."created_at"`,
+          destructive: false,
+        },
+      ];
+
+      const result = await execute({ connectionString: DATABASE_URL, operations: ops, logger });
+      expect(result.executed).toBe(2);
+
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const res = await client.query(`SELECT id, created_at FROM "${testSchema}"."events" WHERE id = 1`);
+        expect(res.rows).toHaveLength(1);
+        expect(res.rows[0].created_at).toBeInstanceOf(Date);
+      } finally {
+        client.release();
+      }
+    });
   });
 
   describe('foreign key options', () => {

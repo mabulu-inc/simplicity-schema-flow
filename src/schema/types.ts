@@ -123,7 +123,13 @@ export interface PrecheckDef {
 
 // ─── Seed ───────────────────────────────────────────────────────
 
+export interface SqlExpression {
+  __sql: string;
+}
+
 export type SeedRow = Record<string, unknown>;
+
+export type SeedOnConflict = 'DO NOTHING';
 
 // ─── Table ──────────────────────────────────────────────────────
 
@@ -142,6 +148,7 @@ export interface TableSchema {
   grants?: GrantDef[];
   prechecks?: PrecheckDef[];
   seeds?: SeedRow[];
+  seeds_on_conflict?: SeedOnConflict;
   mixins?: string[];
   comment?: string;
 }

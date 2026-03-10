@@ -20,6 +20,8 @@ import type {
   MaterializedViewSchema,
   RoleSchema,
   ExtensionsSchema,
+  SeedOnConflict,
+  SqlExpression,
 } from '../schema/types.js';
 import { planExpandColumn } from '../expand/index.js';
 
@@ -697,7 +699,7 @@ function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
   // Seeds (phase 15)
   if (table.seeds) {
     for (const seed of table.seeds) {
-      ops.push(createSeedOp(table.table, seed, table.columns, pgSchema));
+      ops.push(createSeedOp(table.table, seed, table.columns, pgSchema, table.seeds_on_conflict));
     }
   }
 
@@ -858,7 +860,7 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
   // Seeds
   if (desired.seeds) {
     for (const seed of desired.seeds) {
-      ops.push(createSeedOp(desired.table, seed, desired.columns, pgSchema));
+      ops.push(createSeedOp(desired.table, seed, desired.columns, pgSchema, desired.seeds_on_conflict));
     }
   }
 
@@ -1479,23 +1481,34 @@ function diffMaterializedViews(
 
 // ─── Seeds ─────────────────────────────────────────────────────
 
-function createSeedOp(table: string, seed: Record<string, unknown>, columns: ColumnDef[], pgSchema: string): Operation {
+function createSeedOp(
+  table: string,
+  seed: Record<string, unknown>,
+  columns: ColumnDef[],
+  pgSchema: string,
+  onConflict?: SeedOnConflict,
+): Operation {
   const keys = Object.keys(seed);
   const cols = keys.map((k) => `"${k}"`).join(', ');
   const vals = keys.map((k) => formatSeedValue(seed[k])).join(', ');
   // Find primary key columns for ON CONFLICT
   const pkCols = columns.filter((c) => c.primary_key).map((c) => `"${c.name}"`);
   const pkClause = pkCols.length > 0 ? `(${pkCols.join(', ')})` : '(id)';
-  const updateCols = keys
-    .filter((k) => !columns.find((c) => c.name === k && c.primary_key))
-    .map((k) => `"${k}" = EXCLUDED."${k}"`)
-    .join(', ');
 
   let sql = `INSERT INTO "${pgSchema}"."${table}" (${cols}) VALUES (${vals})`;
-  if (updateCols) {
-    sql += ` ON CONFLICT ${pkClause} DO UPDATE SET ${updateCols}`;
-  } else {
+
+  if (onConflict === 'DO NOTHING') {
     sql += ` ON CONFLICT ${pkClause} DO NOTHING`;
+  } else {
+    const updateCols = keys
+      .filter((k) => !columns.find((c) => c.name === k && c.primary_key))
+      .map((k) => `"${k}" = EXCLUDED."${k}"`)
+      .join(', ');
+    if (updateCols) {
+      sql += ` ON CONFLICT ${pkClause} DO UPDATE SET ${updateCols}`;
+    } else {
+      sql += ` ON CONFLICT ${pkClause} DO NOTHING`;
+    }
   }
 
   return {
@@ -1507,8 +1520,13 @@ function createSeedOp(table: string, seed: Record<string, unknown>, columns: Col
   };
 }
 
+function isSqlExpression(val: unknown): val is SqlExpression {
+  return typeof val === 'object' && val !== null && '__sql' in val && typeof (val as SqlExpression).__sql === 'string';
+}
+
 function formatSeedValue(val: unknown): string {
   if (val === null || val === undefined) return 'NULL';
+  if (isSqlExpression(val)) return val.__sql;
   if (typeof val === 'number') return String(val);
   if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
   return `'${escapeQuote(String(val))}'`;
