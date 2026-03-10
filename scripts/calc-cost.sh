@@ -161,6 +161,57 @@ case "$1" in
     rm -f "$tmpfile" "$sorted" "$totals"
     ;;
 
+  --update-tasks)
+    # Write cost into each DONE task file
+    TASKS_DIR="$PROJECT_DIR/docs/tasks"
+    changed=0
+
+    for task_file in "$TASKS_DIR"/T-*.md; do
+      [[ -f "$task_file" ]] || continue
+      grep -q '^\- \*\*Status\*\*: DONE' "$task_file" || continue
+
+      task_id=$(basename "$task_file" .md)
+      logs=$(ls "$LOG_DIR"/${task_id}-*.jsonl 2>/dev/null || true)
+      [[ -z "$logs" ]] && continue
+
+      # Sum cost across all iterations for this task
+      task_cost="0"
+      for log in $logs; do
+        result=$(calc_log "$log")
+        cost=$(echo "$result" | cut -d'|' -f5)
+        task_cost=$(awk "BEGIN {printf \"%.2f\", $task_cost + $cost}")
+      done
+
+      formatted="\$${task_cost}"
+      current=$(grep '^\- \*\*Cost\*\*:' "$task_file" | head -1 | sed 's/.*: *//' || true)
+
+      if [[ "$current" == "$formatted" ]]; then
+        continue
+      fi
+
+      if grep -q '^\- \*\*Cost\*\*:' "$task_file"; then
+        sed -i '' "s/^- \*\*Cost\*\*:.*$/- **Cost**: ${formatted}/" "$task_file"
+      elif grep -q '^\- \*\*Commit\*\*:' "$task_file"; then
+        sed -i '' "/^\- \*\*Commit\*\*:/a\\
+- **Cost**: ${formatted}" "$task_file"
+      elif grep -q '^\- \*\*Completed\*\*:' "$task_file"; then
+        sed -i '' "/^\- \*\*Completed\*\*:/a\\
+- **Cost**: ${formatted}" "$task_file"
+      else
+        sed -i '' "/^\- \*\*Status\*\*: DONE/a\\
+- **Cost**: ${formatted}" "$task_file"
+      fi
+      echo "Updated $task_id: ${formatted}"
+      changed=$((changed + 1))
+    done
+
+    if [[ $changed -eq 0 ]]; then
+      echo "All task costs up to date."
+    else
+      echo "Updated $changed task file(s)."
+    fi
+    ;;
+
   *)
     # Single log file
     [[ -f "$1" ]] || { echo "File not found: $1"; exit 1; }

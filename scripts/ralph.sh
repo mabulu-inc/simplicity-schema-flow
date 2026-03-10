@@ -568,8 +568,11 @@ WORKFLOW:
   # Backfill commit SHAs and regenerate milestones index
   if [[ -f "$PROJECT_DIR/scripts/update-shas.sh" ]]; then
     bash "$PROJECT_DIR/scripts/update-shas.sh" 2>/dev/null || true
-    git -C "$PROJECT_DIR" add docs/tasks/T-*.md 2>/dev/null || true
   fi
+  if [[ -f "$PROJECT_DIR/scripts/calc-cost.sh" ]]; then
+    bash "$PROJECT_DIR/scripts/calc-cost.sh" --update-tasks 2>/dev/null || true
+  fi
+  git -C "$PROJECT_DIR" add docs/tasks/T-*.md 2>/dev/null || true
   if [[ -f "$PROJECT_DIR/scripts/update-milestones.sh" ]]; then
     bash "$PROJECT_DIR/scripts/update-milestones.sh" 2>/dev/null || true
     git -C "$PROJECT_DIR" add docs/MILESTONES.md 2>/dev/null || true
