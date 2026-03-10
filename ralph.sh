@@ -478,6 +478,14 @@ while true; do
   # Print iteration summary
   print_iteration_summary "$log_file" "$iter_start"
 
+  # Regenerate milestones index
+  if [[ -f "$PROJECT_DIR/scripts/update-milestones.sh" ]]; then
+    bash "$PROJECT_DIR/scripts/update-milestones.sh" 2>/dev/null || true
+    git -C "$PROJECT_DIR" add docs/MILESTONES.md 2>/dev/null || true
+    git -C "$PROJECT_DIR" diff --cached --quiet docs/MILESTONES.md 2>/dev/null || \
+      git -C "$PROJECT_DIR" commit -m "Update milestones" --no-verify 2>/dev/null || true
+  fi
+
   # Push any unpushed commits
   if ! git -C "$PROJECT_DIR" diff --quiet origin/main..HEAD 2>/dev/null; then
     echo -e "${CYAN}[$(timestamp)] Pushing commits to origin...${RESET}"

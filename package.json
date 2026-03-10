@@ -28,6 +28,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "check": "pnpm lint && pnpm format && pnpm typecheck && pnpm build && pnpm test:coverage",
+    "milestones": "bash scripts/update-milestones.sh",
     "prepare": "husky"
   },
   "lint-staged": {
