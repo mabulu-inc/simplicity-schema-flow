@@ -97,7 +97,10 @@ columns:
     type: text
     nullable: false
     unique: true
+    unique_name: uq_users_email       # Custom unique constraint name (optional)
+    check: "length(email) > 0"        # Column-level check sugar (optional)
     comment: "User's primary email address"
+    description: "Same as comment"     # Alias for comment (either works)
   - name: name
     type: text
     nullable: false
@@ -106,7 +109,9 @@ columns:
     references:
       table: roles
       column: id
-      on_delete: SET NULL      # CASCADE | SET NULL | SET DEFAULT | RESTRICT | NO ACTION
+      name: fk_users_role             # Custom FK constraint name (optional)
+      schema: public                   # Cross-schema FK (optional, defaults to target schema)
+      on_delete: SET NULL              # CASCADE | SET NULL | SET DEFAULT | RESTRICT | NO ACTION
       on_update: NO ACTION
       deferrable: false
       initially_deferred: false
@@ -115,25 +120,29 @@ columns:
     default: "'{}'::jsonb"
   - name: total
     type: numeric
-    generated: "price * quantity"  # GENERATED ALWAYS AS (expr) STORED
+    generated: "price * quantity"      # GENERATED ALWAYS AS (expr) STORED
   - name: old_email
     type: text
-    expand:                    # Zero-downtime column migration
+    expand:                            # Zero-downtime column migration
       from: email
       transform: "lower(email)"
+      reverse: "email"                 # Reverse transform for dual-write (new → old)
+      batch_size: 5000                 # Backfill batch size (default: 1000)
 
-primary_key: [id]             # Composite PK alternative to column-level
+primary_key: [id]                      # Composite PK alternative to column-level
+primary_key_name: pk_users             # Custom PK constraint name (optional)
 
 indexes:
   - columns: [email]
     unique: true
+    comment: "Ensure email uniqueness"
   - name: idx_users_metadata
     columns: [metadata]
-    method: gin               # btree (default) | gin | gist | hash | brin
+    method: gin                        # btree (default) | gin | gist | hash | brin
   - columns: [created_at]
-    where: "deleted_at IS NULL"   # Partial index
+    where: "deleted_at IS NULL"        # Partial index
   - columns: [name]
-    include: [email]          # Covering index (INCLUDE)
+    include: [email]                   # Covering index (INCLUDE)
     opclass: text_pattern_ops
 
 checks:
@@ -144,27 +153,33 @@ checks:
 unique_constraints:
   - columns: [email, tenant_id]
     name: uq_users_email_tenant
+    comment: "One email per tenant"
 
 triggers:
   - name: set_updated_at
-    timing: BEFORE             # BEFORE | AFTER | INSTEAD OF
-    events: [UPDATE]           # INSERT | UPDATE | DELETE | TRUNCATE
+    timing: BEFORE                     # BEFORE | AFTER | INSTEAD OF
+    events: [UPDATE]                   # INSERT | UPDATE | DELETE | TRUNCATE
     function: update_timestamp
-    for_each: ROW              # ROW | STATEMENT
+    for_each: ROW                      # ROW | STATEMENT
     when: "OLD.* IS DISTINCT FROM NEW.*"
+    comment: "Auto-update timestamp"
+
+rls: true                              # Enable row-level security
+force_rls: true                        # Force RLS even on table owner
 
 policies:
   - name: users_own_data
-    for: SELECT                # SELECT | INSERT | UPDATE | DELETE | ALL
-    to: app_user               # Role name
+    for: SELECT                        # SELECT | INSERT | UPDATE | DELETE | ALL
+    to: app_user                       # Role name
     using: "id = current_setting('app.user_id')::uuid"
     check: "id = current_setting('app.user_id')::uuid"
-    permissive: true           # true (PERMISSIVE) | false (RESTRICTIVE)
+    permissive: true                   # true (PERMISSIVE) | false (RESTRICTIVE)
+    comment: "Users can only see their own data"
 
 grants:
   - to: app_readonly
     privileges: [SELECT]
-    columns: [id, email, name]  # Column-level grants (optional)
+    columns: [id, email, name]         # Column-level grants (optional)
     with_grant_option: false
 
 prechecks:
@@ -176,9 +191,14 @@ seeds:
   - id: "00000000-0000-0000-0000-000000000001"
     email: "admin@example.com"
     name: "Admin"
+seeds_on_conflict: "DO NOTHING"        # "DO NOTHING" for insert-only; omit for default upsert
 
 comment: "Core user accounts table"
 ```
+
+#### Table Name
+
+The `table` field is required. One YAML file per table.
 
 #### Column Types
 
@@ -190,6 +210,7 @@ All PostgreSQL types are supported. Common ones:
 | `text` | Variable-length string |
 | `varchar(N)` | Bounded string |
 | `integer`, `bigint`, `smallint` | Integers |
+| `serial`, `bigserial` | Auto-increment integers |
 | `numeric`, `decimal` | Exact numeric |
 | `boolean` | true/false |
 | `timestamptz` | Timestamp with timezone (preferred) |
@@ -197,6 +218,8 @@ All PostgreSQL types are supported. Common ones:
 | `date`, `time`, `interval` | Date/time |
 | `jsonb`, `json` | JSON data |
 | `bytea` | Binary data |
+| `inet`, `cidr`, `macaddr` | Network types |
+| `point`, `polygon`, `circle` | Geometric types |
 | `text[]`, `integer[]` | Arrays |
 | Custom enum names | User-defined enums |
 
@@ -209,6 +232,43 @@ All PostgreSQL types are supported. Common ones:
 | `SET DEFAULT` | Set FK column to default |
 | `RESTRICT` | Prevent if children exist (immediate) |
 | `NO ACTION` | Prevent if children exist (deferred, default) |
+
+#### Column-Level Check Sugar
+
+Columns support an inline `check` field as syntactic sugar:
+
+```yaml
+- name: age
+  type: integer
+  check: "age >= 0"                    # Generates a named CHECK constraint
+```
+
+This is equivalent to:
+
+```yaml
+checks:
+  - name: chk_<table>_<column>
+    expression: "age >= 0"
+```
+
+#### Description Alias
+
+The `description` field is an alias for `comment` on any object that supports comments (tables, columns, indexes, checks, unique constraints, triggers, policies, enums, functions, views, materialized views, roles). Either field name works; if both are provided, `comment` takes precedence.
+
+#### Seeds
+
+Seeds support literal values and SQL expressions:
+
+```yaml
+seeds:
+  - id: "00000000-0000-0000-0000-000000000001"
+    email: "admin@example.com"
+    created_at: !sql now()             # SQL expression (not a string literal)
+```
+
+The `seeds_on_conflict` field controls conflict behavior:
+- **Omitted (default)**: `INSERT ... ON CONFLICT (pk) DO UPDATE SET ...` — upsert
+- **`"DO NOTHING"`**: `INSERT ... ON CONFLICT (pk) DO NOTHING` — insert-only, skip existing rows
 
 ### 4.2 Enums
 
@@ -289,6 +349,9 @@ grants:
 comment: "Aggregated user order statistics"
 ```
 
+- When a materialized view's query changes, the tool recreates and refreshes it
+- Indexes, grants, and comments are applied after creation
+
 ### 4.6 Roles
 
 ```yaml
@@ -332,12 +395,27 @@ columns:
     type: timestamptz
     nullable: false
     default: now()
+indexes:
+  - columns: [created_at]
 triggers:
   - name: set_{table}_updated_at    # {table} is replaced with the consuming table name
     timing: BEFORE
     events: [UPDATE]
     function: update_timestamp
     for_each: ROW
+checks:
+  - name: chk_{table}_dates
+    expression: "updated_at >= created_at"
+rls: true                          # Enable RLS on consuming tables
+force_rls: true                    # Force RLS on consuming tables
+policies:
+  - name: "{table}_owner_policy"
+    for: ALL
+    to: app_user
+    using: "owner_id = current_user_id()"
+grants:
+  - to: app_readonly
+    privileges: [SELECT]
 ```
 
 Tables reference mixins:
@@ -350,11 +428,13 @@ columns:
   - name: id
     type: uuid
     primary_key: true
-  # ... timestamps columns and triggers are merged in automatically
+  # ... timestamps columns, indexes, triggers, checks, policies, grants are merged in automatically
 ```
 
 - The `{table}` placeholder in mixin field values is replaced with the consuming table's name
-- Mixins can contribute: `columns`, `indexes`, `checks`, `triggers`, `rls` (enable), `policies`, `grants`
+- Mixins can contribute: `columns`, `indexes`, `checks`, `triggers`, `rls`, `force_rls`, `policies`, `grants`
+- Column merge: mixin columns come first; if a table defines a column with the same name as a mixin column, the table's definition wins
+- Multiple mixins can be applied; they merge in order
 
 ---
 
@@ -432,6 +512,7 @@ environments:
 | Command | Description |
 |---------|-------------|
 | `simplicity-schema drift` | Compare YAML definitions to live DB; report differences |
+| `simplicity-schema drift --apply` | Detect drift and apply fixes (respects `--allow-destructive`) |
 | `simplicity-schema lint` | Static analysis of migration plan for dangerous patterns |
 | `simplicity-schema status` | Show migration status (applied files, pending changes) |
 
@@ -459,15 +540,13 @@ environments:
 
 | Command | Description |
 |---------|-------------|
-| `simplicity-schema docs` | Open documentation |
+| `simplicity-schema docs` | Print YAML format reference |
 | `simplicity-schema help` | Show help |
 | `simplicity-schema --version` | Show version |
 
 ### 6.6 Global Flags
 
 All commands accept: `--connection-string`, `--db`, `--dir`, `--schema`, `--env`, `--verbose`, `--quiet`, `--json`, `--lock-timeout`, `--statement-timeout`, `--max-retries`, `--allow-destructive`, `--skip-checks`
-
-The `--apply` flag on `drift` will apply fixes for detected drift.
 
 ---
 
@@ -493,6 +572,7 @@ Operations execute in strict dependency order:
 | Phase | Object Type | Notes |
 |-------|-------------|-------|
 | 0 | Internal schema | `CREATE SCHEMA IF NOT EXISTS _simplicity` (tool bookkeeping) |
+| 0+ | Prechecks | Pre-migration assertions (abort if falsy) |
 | 1 | Pre-scripts | SQL scripts in `pre/`, alphabetical order |
 | 2 | Extensions | `CREATE EXTENSION IF NOT EXISTS` |
 | 3 | Enums | `CREATE TYPE ... AS ENUM`, `ALTER TYPE ... ADD VALUE` |
@@ -505,9 +585,9 @@ Operations execute in strict dependency order:
 | 10 | Materialized views | `CREATE MATERIALIZED VIEW`, `REFRESH` |
 | 11 | Triggers | `CREATE TRIGGER` |
 | 12 | RLS policies | `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, `CREATE POLICY` |
-| 13 | Grants | `GRANT`/`REVOKE` on tables, columns, sequences, functions |
+| 13 | Grants | `GRANT`/`REVOKE` on tables, columns, sequences, functions, schemas |
 | 14 | Comments | `COMMENT ON` for all object types |
-| 15 | Seeds | `INSERT ... ON CONFLICT` (upsert) |
+| 15 | Seeds | `INSERT ... ON CONFLICT` (upsert or DO NOTHING) |
 | 16 | Post-scripts | SQL scripts in `post/`, alphabetical order |
 
 ### 7.3 Operation Types
@@ -521,10 +601,10 @@ The planner produces typed `Operation` objects:
 `add_index`, `add_unique_index`, `drop_index`
 
 **Constraints:**
-`add_check`, `add_check_not_valid`, `add_foreign_key`, `add_foreign_key_not_valid`, `validate_constraint`, `drop_foreign_key`
+`add_check`, `add_check_not_valid`, `drop_check`, `add_foreign_key`, `add_foreign_key_not_valid`, `validate_constraint`, `drop_foreign_key`, `add_unique_constraint`, `drop_unique_constraint`
 
 **Enums:**
-`create_enum`, `add_enum_value`
+`create_enum`, `add_enum_value`, `remove_enum_value`
 
 **Functions:**
 `create_function`
@@ -542,7 +622,7 @@ The planner produces typed `Operation` objects:
 `create_extension`, `drop_extension`
 
 **Roles & Grants:**
-`create_role`, `alter_role`, `grant_membership`, `grant_table`, `grant_column`, `revoke_table`, `revoke_column`, `grant_sequence`, `revoke_sequence`, `grant_function`, `revoke_function`
+`create_role`, `alter_role`, `grant_membership`, `grant_table`, `grant_column`, `revoke_table`, `revoke_column`, `grant_sequence`, `revoke_sequence`, `grant_function`, `revoke_function`, `grant_schema`
 
 **Expand/Contract:**
 `expand_column`, `create_dual_write_trigger`, `backfill_column`, `contract_column`, `drop_dual_write_trigger`
@@ -564,8 +644,9 @@ The following operations are **blocked by default** and require `--allow-destruc
 - `drop_table`, `drop_column`, `drop_index`, `drop_foreign_key`
 - `drop_view`, `drop_materialized_view`, `drop_extension`
 - `disable_rls`, `drop_policy`, `drop_trigger`
+- `drop_check`, `drop_unique_constraint`
 - Column type narrowing (e.g., `text` → `varchar(50)`)
-- Enum value removal
+- Enum value removal (`remove_enum_value`)
 
 ### 8.2 Concurrency Safety
 
@@ -601,9 +682,10 @@ The following operations are **blocked by default** and require `--allow-destruc
 **Expand/Contract column migrations:**
 1. Add new column
 2. Create dual-write trigger (copies data from old column to new on write)
-3. Backfill existing rows
+3. Backfill existing rows (configurable batch size, default 1000)
 4. Application switches to reading new column
 5. Contract: drop old column and trigger (requires `--allow-destructive`)
+6. If `reverse` is defined, the dual-write trigger also copies new→old for backward compatibility
 
 ### 8.4 Intermediate State Recovery
 
@@ -625,9 +707,9 @@ Static analysis applied to migration plans before execution:
 | `drop-column` | Warning | Dropping a column (data loss) |
 | `drop-table` | Warning | Dropping a table (data loss) |
 | `type-narrowing` | Warning | Narrowing a column type (potential data loss) |
+| `type-change` | Warning | Changing column type (may require table rewrite) |
 | `missing-fk-index` | Info | Foreign key column without an index (slow joins/cascades) |
 | `rename-detection` | Info | Detected possible rename (drop + add with same type) |
-| `type-change` | Warning | Changing column type (may require table rewrite) |
 
 ---
 
@@ -657,15 +739,23 @@ interface DriftItem {
 
 ### What's Compared
 
-- Tables: existence, columns, column types/defaults/nullability
-- Indexes: existence, columns, uniqueness, method, partial conditions
-- Constraints: checks, foreign keys, unique constraints
-- Enums: existence, values (order matters)
-- Functions: existence, body, args, return type, security/volatility
-- Views/Materialized views: existence, query
-- Roles: existence, attributes, memberships
-- Grants: table-level, column-level, sequence, function
-- Triggers, RLS policies, comments, seeds
+- **Tables**: existence, columns (name, type, default, nullability, generated expressions)
+- **Indexes**: existence, columns, uniqueness, method, partial conditions (WHERE), covering columns (INCLUDE), opclass
+- **Constraints**: checks (expression), foreign keys (actions, deferrable, initially_deferred), unique constraints
+- **Enums**: existence, values (order matters)
+- **Functions**: existence, body, args, return type, security, volatility, parallel, strict, leakproof, cost, rows, set params
+- **Views**: existence, query
+- **Materialized views**: existence, query
+- **Roles**: existence, all attributes (login, superuser, createdb, createrole, inherit, bypassrls, replication, connection_limit), group memberships
+- **Grants**: table-level, column-level, sequence, function, with_grant_option
+- **Triggers**: existence, timing, events, for_each, when, function
+- **RLS policies**: existence, for, to, using, check, permissive
+- **Comments**: all object types (tables, columns, indexes, constraints, triggers, policies, functions, views, roles, enums, materialized views)
+- **Seeds**: row existence, column values
+
+### Drift --apply
+
+When `--apply` is passed, drift detection generates a migration plan to fix all detected differences and executes it. Destructive fixes (dropping extra objects) require `--allow-destructive`.
 
 ---
 
@@ -676,7 +766,7 @@ interface DriftItem {
 `simplicity-schema generate` introspects an existing database and produces YAML files:
 
 - Generates one YAML file per table, enum, function, view, role
-- `--seeds` flag: also generates seed data from existing rows
+- `--seeds <table1>,<table2>` flag: also generates seed data from specified tables
 - `--output-dir` flag: target directory (defaults to `./schema`)
 - Useful for bootstrapping simplicity-schema on an existing project
 
@@ -686,10 +776,29 @@ interface DriftItem {
 
 ### 11.2 Rollback
 
-- Before each migration run, a `MigrationSnapshot` is captured
-- `simplicity-schema down` computes reverse operations from the snapshot and applies them
-- Reverse operations: drop added tables/columns, re-add dropped tables/columns, revert altered columns
-- Snapshots are stored in the history tracking table
+- Before each migration run, a `MigrationSnapshot` is captured automatically
+- `simplicity-schema down` computes reverse operations from the latest snapshot and applies them
+- Reverse operations:
+  - `create_table` → `DROP TABLE`
+  - `add_column` → `DROP COLUMN`
+  - `add_index` → `DROP INDEX`
+  - `add_foreign_key` / `add_foreign_key_not_valid` → `DROP CONSTRAINT`
+  - `add_check` / `add_check_not_valid` → `DROP CONSTRAINT`
+  - `add_unique_constraint` → `DROP CONSTRAINT`
+  - `create_enum` → `DROP TYPE`
+  - `create_function` → `DROP FUNCTION`
+  - `create_trigger` → `DROP TRIGGER`
+  - `drop_trigger` → `CREATE TRIGGER`
+  - `create_policy` → `DROP POLICY`
+  - `drop_policy` → `CREATE POLICY`
+  - `create_view` → `DROP VIEW`
+  - `create_materialized_view` → `DROP MATERIALIZED VIEW`
+  - `enable_rls` → `DISABLE RLS`
+  - `create_extension` → `DROP EXTENSION`
+  - `create_role` → `DROP ROLE`
+  - `grant_*` → `REVOKE`
+- Irreversible operations (e.g., `alter_column`, `add_enum_value`) are skipped
+- Snapshots stored in `_simplicity.snapshots`
 
 ### 11.3 Expand/Contract
 
@@ -702,13 +811,15 @@ Zero-downtime column migrations for type changes, renames, or transforms:
      expand:
        from: email
        transform: "lower(email)"
+       reverse: "email"              # Optional: dual-write new→old
+       batch_size: 5000              # Optional: override default 1000
    ```
 2. `simplicity-schema run` creates the new column and dual-write trigger
-3. Backfill runs to populate existing rows
+3. Backfill runs to populate existing rows (batched by configurable size)
 4. Application switches to using new column
 5. `simplicity-schema contract` drops old column and trigger
 
-State tracked via `ExpandTracker` in the history table. `expand-status` shows in-progress migrations.
+State tracked in `_simplicity.expand_state`. `expand-status` shows in-progress migrations.
 
 ### 11.4 SQL Generation
 
@@ -717,14 +828,19 @@ State tracked via `ExpandTracker` in the history table. `expand-status` shows in
 - Proper transaction grouping (transactional DDL wrapped in `BEGIN/COMMIT`)
 - CONCURRENTLY operations outside transactions
 - Comments indicating phase and operation type
+- Blocked operations shown as comments (when not using `--allow-destructive`)
 - Suitable for review, manual execution, or audit
 
 ### 11.5 ERD Generation
 
 `simplicity-schema erd --output schema.mmd` generates a Mermaid ER diagram:
 
-- Tables with column names and types
-- Foreign key relationships as edges
+- Tables with column names, types, PK/FK markers, and comments
+- Foreign key relationships as edges with correct cardinality
+  - One-to-many (default)
+  - Zero-or-many (nullable FK)
+  - One-to-one (FK with unique constraint)
+- Supports composite primary keys
 - Suitable for embedding in documentation
 
 ### 11.6 Pre-migration Checks
@@ -802,6 +918,8 @@ The package exports all core functionality for programmatic use from `@mabulu-in
 | `getExistingEnums(client, schema)` | List all enum types and values |
 | `getExistingFunctions(client, schema)` | List all functions |
 | `getExistingViews(client, schema)` | List all views |
+| `getExistingMaterializedViews(client, schema)` | List all materialized views |
+| `getExistingRoles(client)` | List all roles with attributes |
 
 ### Analysis
 
@@ -816,20 +934,40 @@ The package exports all core functionality for programmatic use from `@mabulu-in
 |--------|-------------|
 | `computeRollback(snapshot)` | Generate reverse operations |
 | `runDown(config)` | Execute rollback |
-| `planExpandColumn(config, table, column)` | Plan an expand/contract migration |
-| `runBackfill(config, table, column)` | Backfill expanded column |
-| `runContract(config, table, column)` | Complete contract phase |
+| `ensureSnapshotsTable(client)` | Create snapshots table |
+| `saveSnapshot(client, snapshot)` | Save a migration snapshot |
+| `getLatestSnapshot(client)` | Get most recent snapshot |
+| `listSnapshots(client)` | List all snapshots |
+| `deleteSnapshot(client, id)` | Delete a snapshot |
+| `ensureExpandStateTable(client)` | Create expand state table |
+| `planExpandColumn(...)` | Plan an expand/contract migration |
+| `runBackfill(opts)` | Backfill expanded column |
+| `runContract(opts)` | Complete contract phase |
+| `getExpandStatus(client)` | List in-progress expand/contract |
 
 ### Generation
 
 | Export | Description |
 |--------|-------------|
 | `generateFromDb(config)` | Generate YAML from existing DB |
+| `generateSql(plan, opts?)` | Render plan as SQL string |
 | `generateSqlFile(plan, output)` | Render plan as .sql file |
 | `formatMigrationSql(operations)` | Format operations as SQL string |
+| `generateErd(tables)` | Generate Mermaid ER diagram |
 | `scaffoldInit(dir)` | Create project directory structure |
 | `scaffoldPre(dir, name)` | Create pre-script template |
 | `scaffoldPost(dir, name)` | Create post-script template |
+| `scaffoldMixin(dir, name)` | Create mixin template |
+
+### Executor
+
+| Export | Description |
+|--------|-------------|
+| `execute(opts)` | Run planned operations |
+| `acquireAdvisoryLock(client)` | Acquire migration lock |
+| `releaseAdvisoryLock(client)` | Release migration lock |
+| `detectInvalidIndexes(client, schema)` | Find invalid indexes from failed CONCURRENTLY |
+| `reindexInvalid(client, schema, logger)` | Reindex invalid indexes |
 
 ### Testing (`@mabulu-inc/simplicity-schema/testing`)
 
@@ -840,7 +978,7 @@ The package exports all core functionality for programmatic use from `@mabulu-in
 
 ### Types
 
-All schema types are exported: `TableSchema`, `ColumnDef`, `IndexDef`, `CheckDef`, `UniqueConstraintDef`, `TriggerDef`, `PolicyDef`, `MixinSchema`, `FunctionSchema`, `FunctionArg`, `EnumSchema`, `ExtensionsSchema`, `ViewSchema`, `MaterializedViewSchema`, `RoleSchema`, `GrantDef`, `FunctionGrantDef`, `PrecheckDef`, `Operation`, `DriftReport`, `DriftItem`, `SimplicitySchemaConfig`
+All schema types are exported: `TableSchema`, `ColumnDef`, `IndexDef`, `CheckDef`, `UniqueConstraintDef`, `TriggerDef`, `PolicyDef`, `MixinSchema`, `FunctionSchema`, `FunctionArg`, `EnumSchema`, `ExtensionsSchema`, `ViewSchema`, `MaterializedViewSchema`, `RoleSchema`, `GrantDef`, `FunctionGrantDef`, `PrecheckDef`, `SeedRow`, `ExpandDef`, `Operation`, `OperationType`, `PlanResult`, `PlanOptions`, `DesiredState`, `ActualState`, `DriftReport`, `DriftItem`, `DriftItemType`, `DriftStatus`, `LintResult`, `LintWarning`, `LintSeverity`, `MigrationSnapshot`, `RollbackResult`, `ExpandState`, `BackfillOptions`, `BackfillResult`, `ContractOptions`, `ContractResult`, `ExecuteOptions`, `ExecuteResult`, `InvalidIndex`, `GenerateInput`, `GeneratedFile`, `GenerateSqlOptions`, `SimplicitySchemaConfig`, `ConfigOverrides`, `Logger`, `LoggerOptions`, `LogLevel`, `ClientOptions`, `Phase`, `SchemaFile`, `DiscoveredFiles`, `SchemaKind`, `ParsedSchema`, `PipelineOptions`, `StatusResult`, `BaselineResult`, `ForeignKeyAction`, `IndexMethod`, `FunctionSecurity`, `FunctionVolatility`, `FunctionParallel`, `FunctionArgMode`, `TriggerTiming`, `TriggerEvent`, `TriggerForEach`, `PolicyCommand`, `SchemaGrant`
 
 ---
 
@@ -862,4 +1000,3 @@ All schema types are exported: `TableSchema`, `ColumnDef`, `IndexDef`, `CheckDef
 - GUI or web interface
 - Multi-database orchestration
 - Automatic migration scheduling / cron
-- Backward compatibility with `@mabulu-inc/schema-flow` configuration or history tables

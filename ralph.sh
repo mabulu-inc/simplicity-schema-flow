@@ -5,7 +5,7 @@ set -euo pipefail
 # ralph.sh — The Ralph Loop
 #
 # Runs Claude Code in a stateless loop. Each iteration gets a fresh session
-# that reads PROGRESS.md and TASKS.md to pick up where the last one left off.
+# that scans docs/tasks/T-*.md to pick up the next eligible task.
 #
 # Usage:
 #   ./ralph.sh              # Run with defaults (10 iterations)
@@ -24,6 +24,7 @@ VERBOSE=false
 ITER_TIMEOUT=900  # 15 minutes per iteration
 LOG_DIR=".ralph-logs"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TASKS_DIR="$PROJECT_DIR/docs/tasks"
 
 # --- Ensure subprocesses can't hang on PG connections ---
 export PGCONNECT_TIMEOUT=5
@@ -78,54 +79,54 @@ fmt_duration() {
   fi
 }
 
-all_tasks_done() {
-  if grep -q '^\- \*\*Status\*\*: TODO' "$PROJECT_DIR/docs/TASKS.md" 2>/dev/null; then
-    return 1
-  fi
-  return 0
-}
-
+# Scan task files to find next eligible TODO task
 get_next_task() {
-  grep 'Next eligible task:' "$PROJECT_DIR/docs/PROGRESS.md" 2>/dev/null | sed 's/.*: //' || true
-}
-
-count_remaining_tasks() {
-  grep -c '^\- \*\*Status\*\*: TODO' "$PROJECT_DIR/docs/TASKS.md" 2>/dev/null || echo "0"
-}
-
-count_done_tasks() {
-  grep -c '^\- \*\*Status\*\*: DONE' "$PROJECT_DIR/docs/TASKS.md" 2>/dev/null || echo "0"
-}
-
-# Mark completed tasks as DONE in TASKS.md based on new commits since iter_start
-mark_completed_tasks() {
-  local since_ts="$1"
-  local task_ids
-  # Only match task IDs at the start of the commit subject (after the short hash),
-  # i.e. commits like "abc1234 T-004: Logger" — not "Update progress: T-003 complete, next T-004"
-  task_ids=$(git -C "$PROJECT_DIR" log --format='%s' --since="@${since_ts}" 2>/dev/null \
-    | grep -oE '^T-[0-9]+' | sort -u || true)
-
-  for task_id in $task_ids; do
-    local task_num="${task_id#T-}"
-    local header="### ${task_id}: "
-    # Find the task header line, then update the next Status line from TODO to DONE
-    if grep -q "^### ${task_id}:" "$PROJECT_DIR/docs/TASKS.md" 2>/dev/null; then
-      local line_num
-      line_num=$(grep -n "^### ${task_id}:" "$PROJECT_DIR/docs/TASKS.md" | head -1 | cut -d: -f1 || true)
-      if [[ -n "$line_num" ]]; then
-        # Find the Status line within the next 5 lines after the header
-        local status_line
-        status_line=$(sed -n "$((line_num+1)),$((line_num+5))p" "$PROJECT_DIR/docs/TASKS.md" \
-          | grep -n '^\- \*\*Status\*\*: TODO' | head -1 | cut -d: -f1 || true)
-        if [[ -n "$status_line" ]]; then
-          local actual_line=$((line_num + status_line))
-          sed -i '' "${actual_line}s/TODO/DONE/" "$PROJECT_DIR/docs/TASKS.md"
-          echo -e "  ${GREEN}[$(timestamp)] Marked ${task_id} as DONE in TASKS.md${RESET}"
-        fi
-      fi
+  local todo_tasks=()
+  for f in "$TASKS_DIR"/T-*.md; do
+    [[ -f "$f" ]] || continue
+    if grep -q '^\- \*\*Status\*\*: TODO' "$f" 2>/dev/null; then
+      todo_tasks+=("$f")
     fi
   done
+
+  for f in "${todo_tasks[@]}"; do
+    local deps
+    deps=$(grep '^\- \*\*Depends\*\*:' "$f" 2>/dev/null | sed 's/.*: //' || true)
+    if [[ "$deps" == "(none)" || "$deps" == "none" || -z "$deps" ]]; then
+      basename "$f" .md
+      return
+    fi
+    # Check each dependency
+    local all_met=true
+    for dep in $(echo "$deps" | sed 's/,/ /g; s/  */ /g; s/^ //; s/ $//'); do
+      local dep_file="$TASKS_DIR/${dep}.md"
+      if [[ ! -f "$dep_file" ]] || ! grep -q '^\- \*\*Status\*\*: DONE' "$dep_file" 2>/dev/null; then
+        all_met=false
+        break
+      fi
+    done
+    if $all_met; then
+      basename "$f" .md
+      return
+    fi
+  done
+  echo "none"
+}
+
+count_tasks_by_status() {
+  local status="$1"
+  local count=0
+  for f in "$TASKS_DIR"/T-*.md; do
+    [[ -f "$f" ]] || continue
+    if grep -q "^\- \*\*Status\*\*: ${status}" "$f" 2>/dev/null; then
+      count=$((count + 1))
+    fi
+  done
+  echo "$count"
+}
+
+all_tasks_done() {
+  [[ "$(count_tasks_by_status TODO)" -eq 0 ]]
 }
 
 # Monitor the JSON stream log and print activity indicators
@@ -261,10 +262,9 @@ print_iteration_summary() {
   fi
 
   # Task progress
-  local done_count remaining_count
-  done_count=$(count_done_tasks)
-  remaining_count=$(count_remaining_tasks)
-  local next
+  local done_count remaining_count next
+  done_count=$(count_tasks_by_status DONE)
+  remaining_count=$(count_tasks_by_status TODO)
   next=$(get_next_task)
   echo -e "  ${CYAN}Progress: $done_count done, $remaining_count remaining | Next: $next${RESET}"
   echo -e "  ${DIM}────────────────────────────────────────${RESET}"
@@ -274,7 +274,6 @@ print_iteration_summary() {
 kill_tree() {
   local pid="$1"
   local signal="${2:-TERM}"
-  # Kill children first
   local children
   children=$(pgrep -P "$pid" 2>/dev/null || true)
   for child in $children; do
@@ -294,13 +293,8 @@ if ! command -v docker &>/dev/null; then
   exit 1
 fi
 
-if [[ ! -f "$PROJECT_DIR/docs/PROGRESS.md" ]]; then
-  echo -e "${RED}Error: docs/PROGRESS.md not found. Are you in the right project?${RESET}"
-  exit 1
-fi
-
-if [[ ! -f "$PROJECT_DIR/docs/TASKS.md" ]]; then
-  echo -e "${RED}Error: docs/TASKS.md not found. Are you in the right project?${RESET}"
+if [[ ! -d "$TASKS_DIR" ]]; then
+  echo -e "${RED}Error: docs/tasks/ directory not found. Are you in the right project?${RESET}"
   exit 1
 fi
 
@@ -323,7 +317,6 @@ ensure_database() {
 cleanup() {
   echo ""
   echo -e "${DIM}[$(timestamp)] Cleaning up...${RESET}"
-  # Stop the database container
   if [[ -f "$PROJECT_DIR/docker-compose.yml" ]]; then
     docker compose -f "$PROJECT_DIR/docker-compose.yml" down 2>/dev/null || true
   fi
@@ -331,6 +324,10 @@ cleanup() {
 trap cleanup EXIT
 
 # --- Config summary ---
+next_task=$(get_next_task)
+done_count=$(count_tasks_by_status DONE)
+todo_count=$(count_tasks_by_status TODO)
+
 echo -e "${BOLD}=== Ralph Loop ===${RESET}"
 echo -e "  Project:    $PROJECT_DIR"
 echo -e "  Iterations: $([ "$MAX_ITERATIONS" -eq 0 ] && echo 'unlimited' || echo "$MAX_ITERATIONS")"
@@ -338,8 +335,8 @@ echo -e "  Delay:      ${DELAY}s between iterations"
 echo -e "  Timeout:    ${ITER_TIMEOUT}s per iteration"
 echo -e "  Verbose:    $VERBOSE"
 echo -e "  Logs:       $LOG_DIR/"
-echo -e "  Next task:  $(get_next_task)"
-echo -e "  Tasks:      ${GREEN}$(count_done_tasks) done${RESET} | ${YELLOW}$(count_remaining_tasks) remaining${RESET}"
+echo -e "  Next task:  $next_task"
+echo -e "  Tasks:      ${GREEN}${done_count} done${RESET} | ${YELLOW}${todo_count} remaining${RESET}"
 echo -e "${BOLD}==================${RESET}"
 
 if $DRY_RUN; then
@@ -386,25 +383,23 @@ while true; do
 
   # Check if all tasks are done
   next_task=$(get_next_task)
-  if all_tasks_done || [[ "$next_task" == *"none"* ]]; then
+  if all_tasks_done || [[ "$next_task" == "none" ]]; then
     echo ""
     echo -e "${GREEN}[$(timestamp)] All tasks are DONE. Ralph is finished.${RESET}"
     break
   fi
-  # Extract task ID (e.g. "T-069") from next_task for log filename
-  task_id=$(echo "$next_task" | grep -oE 'T-[0-9]+' | head -1 || echo "unknown")
-  log_file="$PROJECT_DIR/$LOG_DIR/${task_id}-$(date '+%Y%m%d-%H%M%S').jsonl"
+
+  log_file="$PROJECT_DIR/$LOG_DIR/${next_task}-$(date '+%Y%m%d-%H%M%S').jsonl"
   iter_start=$(date +%s)
 
   echo ""
   echo -e "${BOLD}[$(timestamp)] === Iteration $iteration/$([ "$MAX_ITERATIONS" -eq 0 ] && echo '∞' || echo "$MAX_ITERATIONS") — Target: $next_task ===${RESET}"
 
-  PROMPT="You are in Ralph Loop iteration $iteration. Follow the Ralph Loop Boot Sequence exactly as defined in CLAUDE.md. Read PROGRESS.md first, then TASKS.md, then execute the next eligible task using red/green TDD. When done, commit and update PROGRESS.md. Do NOT push to origin — the loop handles that. If blocked, update PROGRESS.md and exit."
+  PROMPT="You are in Ralph Loop iteration $iteration. Follow the Ralph Methodology as defined in CLAUDE.md. Scan docs/tasks/ to find the next eligible task (lowest-numbered TODO with all deps DONE), read the PRD sections it references, then implement it using red/green TDD. When done, commit and update the task file (Status→DONE, Completed timestamp, Commit SHA, Completion Notes). Do NOT push to origin — the loop handles that. If blocked, note the blocker in the task file and exit."
 
   timed_out=false
 
   if $VERBOSE; then
-    # Stream JSON to both terminal and log file
     claude --print \
          --verbose \
          --output-format stream-json \
@@ -413,7 +408,6 @@ while true; do
          "$PROMPT" 2>&1 | tee "$log_file" &
     claude_pid=$!
   else
-    # Run in background with progress monitor
     claude --print \
          --verbose \
          --output-format stream-json \
@@ -468,12 +462,8 @@ while true; do
   if $timed_out; then
     echo -e "${YELLOW}[$(timestamp)] Discarding partial work from timed-out iteration...${RESET}"
     git -C "$PROJECT_DIR" checkout -- . 2>/dev/null || true
-    # Clean up any untracked files created during this iteration
     git -C "$PROJECT_DIR" clean -fd --exclude=node_modules --exclude=.ralph-logs --exclude=.env 2>/dev/null || true
   fi
-
-  # Mark completed tasks in TASKS.md based on new commits
-  mark_completed_tasks "$iter_start"
 
   # Print iteration summary
   print_iteration_summary "$log_file" "$iter_start"
@@ -490,14 +480,14 @@ done
 
 # --- Final Summary ---
 total_duration=$(fmt_duration "$(elapsed "$loop_start")")
+done_count=$(count_tasks_by_status DONE)
+todo_count=$(count_tasks_by_status TODO)
 echo ""
 echo -e "${BOLD}=== Ralph Loop Complete ===${RESET}"
 echo -e "  Iterations:      $iteration"
 echo -e "  Total time:      $total_duration"
-echo -e "  Tasks completed: ${GREEN}$(count_done_tasks)${RESET}"
-echo -e "  Tasks remaining: ${YELLOW}$(count_remaining_tasks)${RESET}"
-echo -e "  Final state:"
-grep -A3 '## Current State' "$PROJECT_DIR/docs/PROGRESS.md" | tail -4
-echo ""
+echo -e "  Tasks completed: ${GREEN}${done_count}${RESET}"
+echo -e "  Tasks remaining: ${YELLOW}${todo_count}${RESET}"
+echo -e "  Next task:       $(get_next_task)"
 echo -e "  Logs: $LOG_DIR/"
 echo -e "${BOLD}==========================${RESET}"
