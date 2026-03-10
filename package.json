@@ -32,6 +32,7 @@
     "ralph": "bash scripts/ralph.sh",
     "ralph:kill": "bash scripts/ralph-kill.sh",
     "shas": "bash scripts/update-shas.sh",
+    "cost": "bash scripts/calc-cost.sh",
     "monitor": "bash scripts/ralph-monitor.sh -w",
     "monitor:once": "bash scripts/ralph-monitor.sh",
     "prepare": "husky"

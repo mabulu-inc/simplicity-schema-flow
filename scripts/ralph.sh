@@ -261,6 +261,17 @@ print_iteration_summary() {
     done
   fi
 
+  # Iteration cost
+  if [[ -f "$PROJECT_DIR/scripts/calc-cost.sh" && -f "$log_file" ]]; then
+    local cost_result
+    cost_result=$(bash "$PROJECT_DIR/scripts/calc-cost.sh" "$log_file" 2>/dev/null | tail -1 || true)
+    if [[ -n "$cost_result" ]]; then
+      local cost_amount
+      cost_amount=$(echo "$cost_result" | grep -o '\$[0-9.]*' || true)
+      [[ -n "$cost_amount" ]] && echo -e "  ${DIM}Cost:${RESET} ${cost_amount}"
+    fi
+  fi
+
   # Task progress
   local done_count remaining_count next
   done_count=$(count_tasks_by_status DONE)
