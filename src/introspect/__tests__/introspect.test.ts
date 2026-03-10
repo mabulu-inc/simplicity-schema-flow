@@ -290,6 +290,11 @@ describe('introspectTable', () => {
     expect(pol!.using).toBeTruthy();
   });
 
+  it('returns rls status', async () => {
+    const table = await introspectTable(client, 'products', TEST_SCHEMA);
+    expect(table.rls).toBe(true);
+  });
+
   it('returns table comment', async () => {
     const table = await introspectTable(client, 'products', TEST_SCHEMA);
     expect(table.comment).toBe('Product catalog');
@@ -299,6 +304,28 @@ describe('introspectTable', () => {
     const table = await introspectTable(client, 'products', TEST_SCHEMA);
     const nameCol = table.columns.find((c) => c.name === 'name');
     expect(nameCol!.comment).toBe('Product display name');
+  });
+});
+
+describe('force_rls introspection', () => {
+  beforeAll(async () => {
+    await exec(`CREATE TABLE force_rls_test (id uuid PRIMARY KEY)`);
+    await exec(`ALTER TABLE force_rls_test ENABLE ROW LEVEL SECURITY`);
+    await exec(`ALTER TABLE force_rls_test FORCE ROW LEVEL SECURITY`);
+    await exec(`CREATE TABLE no_force_rls_test (id uuid PRIMARY KEY)`);
+    await exec(`ALTER TABLE no_force_rls_test ENABLE ROW LEVEL SECURITY`);
+  });
+
+  it('detects force_rls when enabled', async () => {
+    const table = await introspectTable(client, 'force_rls_test', TEST_SCHEMA);
+    expect(table.rls).toBe(true);
+    expect(table.force_rls).toBe(true);
+  });
+
+  it('detects force_rls as absent when only rls is enabled', async () => {
+    const table = await introspectTable(client, 'no_force_rls_test', TEST_SCHEMA);
+    expect(table.rls).toBe(true);
+    expect(table.force_rls).toBeUndefined();
   });
 });
 

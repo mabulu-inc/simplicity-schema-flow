@@ -232,6 +232,7 @@ function driftTables(desired: TableSchema[], actual: Map<string, TableSchema>): 
       items.push(...driftChecks(dt.table, dt.checks || [], at.checks || []));
       items.push(...driftUniqueConstraints(dt.table, dt.unique_constraints || [], at.unique_constraints || []));
       items.push(...driftTriggers(dt.table, dt.triggers || [], at.triggers || []));
+      items.push(...driftRls(dt, at));
       items.push(...driftPolicies(dt.table, dt.policies || [], at.policies || []));
       items.push(...driftGrants(dt.table, dt.grants || [], at.grants || []));
       items.push(...driftSeeds(dt.table, dt.seeds, at.seeds));
@@ -242,6 +243,35 @@ function driftTables(desired: TableSchema[], actual: Map<string, TableSchema>): 
     if (!desired.find((t) => t.table === name)) {
       items.push({ type: 'table', object: name, status: 'missing_in_yaml' });
     }
+  }
+  return items;
+}
+
+function driftRls(desired: TableSchema, actual: TableSchema): DriftItem[] {
+  const items: DriftItem[] = [];
+  const wantRls = !!desired.rls || !!(desired.policies && desired.policies.length > 0);
+  const haveRls = !!actual.rls;
+  if (wantRls !== haveRls) {
+    items.push({
+      type: 'table',
+      object: desired.table,
+      status: 'different',
+      expected: wantRls ? 'rls enabled' : 'rls disabled',
+      actual: haveRls ? 'rls enabled' : 'rls disabled',
+      detail: `RLS: expected ${wantRls ? 'enabled' : 'disabled'}, actual ${haveRls ? 'enabled' : 'disabled'}`,
+    });
+  }
+  const wantForce = !!desired.force_rls;
+  const haveForce = !!actual.force_rls;
+  if (wantForce !== haveForce) {
+    items.push({
+      type: 'table',
+      object: desired.table,
+      status: 'different',
+      expected: wantForce ? 'force_rls enabled' : 'force_rls disabled',
+      actual: haveForce ? 'force_rls enabled' : 'force_rls disabled',
+      detail: `force_rls: expected ${wantForce ? 'enabled' : 'disabled'}, actual ${haveForce ? 'enabled' : 'disabled'}`,
+    });
   }
   return items;
 }

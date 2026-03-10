@@ -40,6 +40,8 @@ export function applyMixins(table: TableSchema, registry: MixinRegistry): TableS
   let hasTriggers = !!table.triggers;
   let hasPolicies = !!table.policies;
   let hasGrants = !!table.grants;
+  let rls = !!table.rls;
+  let forceRls = !!table.force_rls;
 
   for (const mixinName of table.mixins) {
     const mixin = registry.get(mixinName);
@@ -81,6 +83,9 @@ export function applyMixins(table: TableSchema, registry: MixinRegistry): TableS
       hasGrants = true;
       grants.push(...mixin.grants.map((g) => ({ ...g })));
     }
+
+    if (mixin.rls === true) rls = true;
+    if (mixin.force_rls === true) forceRls = true;
   }
 
   const result: TableSchema = {
@@ -93,6 +98,8 @@ export function applyMixins(table: TableSchema, registry: MixinRegistry): TableS
   if (hasTriggers) result.triggers = triggers;
   if (hasPolicies) result.policies = policies;
   if (hasGrants) result.grants = grants;
+  if (rls) result.rls = true;
+  if (forceRls) result.force_rls = true;
 
   return result;
 }

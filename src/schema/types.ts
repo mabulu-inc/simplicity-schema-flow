@@ -128,6 +128,8 @@ export interface TableSchema {
   checks?: CheckDef[];
   unique_constraints?: UniqueConstraintDef[];
   triggers?: TriggerDef[];
+  rls?: boolean;
+  force_rls?: boolean;
   policies?: PolicyDef[];
   grants?: GrantDef[];
   prechecks?: PrecheckDef[];
@@ -236,4 +238,5 @@ export interface MixinSchema {
   policies?: PolicyDef[];
   grants?: GrantDef[];
   rls?: boolean;
+  force_rls?: boolean;
 }

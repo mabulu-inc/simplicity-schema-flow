@@ -57,6 +57,8 @@ export type OperationType =
   // RLS
   | 'enable_rls'
   | 'disable_rls'
+  | 'force_rls'
+  | 'disable_force_rls'
   | 'create_policy'
   | 'drop_policy'
   // Views
@@ -620,8 +622,8 @@ function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
     }
   }
 
-  // RLS policies (phase 12)
-  if (table.policies && table.policies.length > 0) {
+  // RLS (phase 12)
+  if (table.rls || (table.policies && table.policies.length > 0)) {
     ops.push({
       type: 'enable_rls',
       phase: 12,
@@ -629,6 +631,17 @@ function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
       sql: `ALTER TABLE "${pgSchema}"."${table.table}" ENABLE ROW LEVEL SECURITY`,
       destructive: false,
     });
+  }
+  if (table.force_rls) {
+    ops.push({
+      type: 'force_rls',
+      phase: 12,
+      objectName: table.table,
+      sql: `ALTER TABLE "${pgSchema}"."${table.table}" FORCE ROW LEVEL SECURITY`,
+      destructive: false,
+    });
+  }
+  if (table.policies) {
     for (const policy of table.policies) {
       ops.push(createPolicyOp(table.table, policy, pgSchema));
     }
@@ -800,6 +813,9 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
 
   // Diff triggers
   ops.push(...diffTriggers(desired.table, desired.triggers || [], existing.triggers || [], pgSchema));
+
+  // Diff RLS
+  ops.push(...diffRls(desired, existing, pgSchema));
 
   // Diff policies
   ops.push(...diffPolicies(desired.table, desired.policies || [], existing.policies || [], pgSchema));
@@ -1129,12 +1145,15 @@ function createTriggerOp(table: string, trigger: TriggerDef, pgSchema: string): 
 
 // ─── Policies ──────────────────────────────────────────────────
 
-function diffPolicies(table: string, desired: PolicyDef[], existing: PolicyDef[], pgSchema: string): Operation[] {
+function diffRls(desired: TableSchema, existing: TableSchema, pgSchema: string): Operation[] {
   const ops: Operation[] = [];
-  const existingByName = new Map(existing.map((p) => [p.name, p]));
+  const table = desired.table;
+  const wantRls = !!desired.rls || !!(desired.policies && desired.policies.length > 0);
+  const haveRls = !!existing.rls || !!(existing.policies && existing.policies.length > 0);
+  const wantForce = !!desired.force_rls;
+  const haveForce = !!existing.force_rls;
 
-  // Enable RLS if any desired policies and not currently enabled
-  if (desired.length > 0 && existing.length === 0) {
+  if (wantRls && !haveRls) {
     ops.push({
       type: 'enable_rls',
       phase: 12,
@@ -1142,7 +1161,40 @@ function diffPolicies(table: string, desired: PolicyDef[], existing: PolicyDef[]
       sql: `ALTER TABLE "${pgSchema}"."${table}" ENABLE ROW LEVEL SECURITY`,
       destructive: false,
     });
+  } else if (!wantRls && haveRls) {
+    ops.push({
+      type: 'disable_rls',
+      phase: 12,
+      objectName: table,
+      sql: `ALTER TABLE "${pgSchema}"."${table}" DISABLE ROW LEVEL SECURITY`,
+      destructive: true,
+    });
   }
+
+  if (wantForce && !haveForce) {
+    ops.push({
+      type: 'force_rls',
+      phase: 12,
+      objectName: table,
+      sql: `ALTER TABLE "${pgSchema}"."${table}" FORCE ROW LEVEL SECURITY`,
+      destructive: false,
+    });
+  } else if (!wantForce && haveForce) {
+    ops.push({
+      type: 'disable_force_rls',
+      phase: 12,
+      objectName: table,
+      sql: `ALTER TABLE "${pgSchema}"."${table}" NO FORCE ROW LEVEL SECURITY`,
+      destructive: true,
+    });
+  }
+
+  return ops;
+}
+
+function diffPolicies(table: string, desired: PolicyDef[], existing: PolicyDef[], pgSchema: string): Operation[] {
+  const ops: Operation[] = [];
+  const existingByName = new Map(existing.map((p) => [p.name, p]));
 
   for (const policy of desired) {
     const existing_policy = existingByName.get(policy.name);
@@ -1173,17 +1225,6 @@ function diffPolicies(table: string, desired: PolicyDef[], existing: PolicyDef[]
         destructive: true,
       });
     }
-  }
-
-  // Disable RLS if existing had policies but desired has none
-  if (existing.length > 0 && desired.length === 0) {
-    ops.push({
-      type: 'disable_rls',
-      phase: 12,
-      objectName: table,
-      sql: `ALTER TABLE "${pgSchema}"."${table}" DISABLE ROW LEVEL SECURITY`,
-      destructive: true,
-    });
   }
 
   return ops;

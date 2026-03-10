@@ -76,6 +76,109 @@ describe('detectDrift', () => {
     );
   });
 
+  // ─── RLS / force_rls ──────────────────────────────────────────
+
+  it('reports force_rls drift when desired but not in DB', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+        rls: true,
+        force_rls: true,
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }],
+      rls: true,
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'table',
+        object: 'users',
+        status: 'different',
+        detail: expect.stringContaining('force_rls'),
+      }),
+    );
+  });
+
+  it('reports force_rls drift when in DB but not desired', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+        rls: true,
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }],
+      rls: true,
+      force_rls: true,
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'table',
+        object: 'users',
+        status: 'different',
+        detail: expect.stringContaining('force_rls'),
+      }),
+    );
+  });
+
+  it('reports no drift when force_rls matches', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+        rls: true,
+        force_rls: true,
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }],
+      rls: true,
+      force_rls: true,
+    });
+    const report = detectDrift(desired, actual);
+    const forceRlsItems = report.items.filter((i) => i.detail?.includes('force_rls'));
+    expect(forceRlsItems).toHaveLength(0);
+  });
+
+  it('reports RLS drift when desired but not in DB', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+        rls: true,
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'table',
+        object: 'users',
+        status: 'different',
+        detail: expect.stringContaining('RLS'),
+      }),
+    );
+  });
+
   // ─── Columns ───────────────────────────────────────────────────
 
   it('reports column missing in DB', () => {

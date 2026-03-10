@@ -139,6 +139,32 @@ comment: "Order records"
     expect(result.comment).toBe('Order records');
   });
 
+  it('parses rls and force_rls booleans', () => {
+    const yaml = `
+table: secure
+columns:
+  - name: id
+    type: uuid
+rls: true
+force_rls: true
+`;
+    const result = parseTable(yaml);
+    expect(result.rls).toBe(true);
+    expect(result.force_rls).toBe(true);
+  });
+
+  it('omits rls and force_rls when not specified', () => {
+    const yaml = `
+table: basic
+columns:
+  - name: id
+    type: uuid
+`;
+    const result = parseTable(yaml);
+    expect(result.rls).toBeUndefined();
+    expect(result.force_rls).toBeUndefined();
+  });
+
   it('throws if table name is missing', () => {
     const yaml = `
 columns:
@@ -525,6 +551,17 @@ rls: true
     expect(result.columns).toHaveLength(2);
     expect(result.triggers).toHaveLength(1);
     expect(result.rls).toBe(true);
+  });
+
+  it('parses force_rls on mixin', () => {
+    const yaml = `
+mixin: secure_mixin
+rls: true
+force_rls: true
+`;
+    const result = parseMixin(yaml);
+    expect(result.rls).toBe(true);
+    expect(result.force_rls).toBe(true);
   });
 
   it('throws if mixin name is missing', () => {

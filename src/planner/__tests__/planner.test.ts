@@ -790,6 +790,40 @@ describe('Planner', () => {
       expect(policyOps[0].sql).not.toContain('PERMISSIVE');
     });
 
+    it('creates table with force_rls', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          rls: true,
+          force_rls: true,
+        },
+      ];
+      const result = buildPlan(desired, emptyActual());
+      const enableOps = findOps(result.operations, 'enable_rls');
+      expect(enableOps).toHaveLength(1);
+      const forceOps = findOps(result.operations, 'force_rls');
+      expect(forceOps).toHaveLength(1);
+      expect(forceOps[0].sql).toContain('FORCE ROW LEVEL SECURITY');
+    });
+
+    it('creates table with rls:true but no force_rls', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          rls: true,
+        },
+      ];
+      const result = buildPlan(desired, emptyActual());
+      const enableOps = findOps(result.operations, 'enable_rls');
+      expect(enableOps).toHaveLength(1);
+      const forceOps = findOps(result.operations, 'force_rls');
+      expect(forceOps).toHaveLength(0);
+    });
+
     it('creates table with grants', () => {
       const desired = emptyDesired();
       desired.tables = [
@@ -2490,6 +2524,70 @@ describe('Planner', () => {
       const ops = findOps(result.operations, 'disable_rls');
       expect(ops).toHaveLength(1);
       expect(ops[0].sql).toContain('DISABLE ROW LEVEL SECURITY');
+    });
+
+    it('enables force_rls when desired but not in DB', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          rls: true,
+          force_rls: true,
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        rls: true,
+      });
+      const result = buildPlan(desired, actual);
+      const ops = findOps(result.operations, 'force_rls');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain('FORCE ROW LEVEL SECURITY');
+    });
+
+    it('blocks disable_force_rls when force_rls removed from desired', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          rls: true,
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        rls: true,
+        force_rls: true,
+      });
+      const result = buildPlan(desired, actual);
+      expect(result.blocked.some((o) => o.type === 'disable_force_rls')).toBe(true);
+    });
+
+    it('allows disable_force_rls with allowDestructive', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          rls: true,
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        rls: true,
+        force_rls: true,
+      });
+      const result = buildPlan(desired, actual, { allowDestructive: true });
+      const ops = findOps(result.operations, 'disable_force_rls');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain('NO FORCE ROW LEVEL SECURITY');
     });
 
     it('blocks drop_policy when policy exists in DB but not in desired', () => {

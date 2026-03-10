@@ -315,6 +315,51 @@ columns:
   });
 });
 
+// ─── applyMixins — rls/force_rls from mixin ─────────────────────
+
+describe('applyMixins — rls/force_rls', () => {
+  it('sets rls and force_rls from mixin', () => {
+    const reg = registryFrom(`
+mixin: secure
+rls: true
+force_rls: true
+`);
+    const table = parseTable(`
+table: orders
+mixins:
+  - secure
+columns:
+  - name: id
+    type: uuid
+`);
+    const result = applyMixins(table, reg);
+    expect(result.rls).toBe(true);
+    expect(result.force_rls).toBe(true);
+  });
+
+  it('does not override table-level rls when mixin omits it', () => {
+    const reg = registryFrom(`
+mixin: basic
+columns:
+  - name: created_at
+    type: timestamptz
+`);
+    const table = parseTable(`
+table: orders
+mixins:
+  - basic
+columns:
+  - name: id
+    type: uuid
+rls: true
+force_rls: true
+`);
+    const result = applyMixins(table, reg);
+    expect(result.rls).toBe(true);
+    expect(result.force_rls).toBe(true);
+  });
+});
+
 // ─── applyMixins — multiple mixins ─────────────────────────────
 
 describe('applyMixins — multiple mixins', () => {

@@ -239,6 +239,8 @@ export function parseTable(yamlStr: string): TableSchema {
     table.prechecks = (raw.prechecks as Record<string, unknown>[]).map((p, i) =>
       parsePrecheckDef(p, `${ctx}.prechecks[${i}]`),
     );
+  if (raw.rls !== undefined) table.rls = Boolean(raw.rls);
+  if (raw.force_rls !== undefined) table.force_rls = Boolean(raw.force_rls);
   if (raw.seeds !== undefined) table.seeds = raw.seeds as Record<string, unknown>[];
   if (raw.mixins !== undefined) table.mixins = raw.mixins as string[];
   if (raw.comment !== undefined) table.comment = String(raw.comment);
@@ -402,6 +404,7 @@ export function parseMixin(yamlStr: string): MixinSchema {
   if (raw.grants !== undefined)
     mixin.grants = (raw.grants as Record<string, unknown>[]).map((g, i) => parseGrantDef(g, `${ctx}.grants[${i}]`));
   if (raw.rls !== undefined) mixin.rls = Boolean(raw.rls);
+  if (raw.force_rls !== undefined) mixin.force_rls = Boolean(raw.force_rls);
 
   return mixin;
 }

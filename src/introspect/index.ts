@@ -260,19 +260,31 @@ export async function getExistingRoles(client: Client): Promise<RoleSchema[]> {
 
 /** Introspect a single table, returning a TableSchema-compatible structure. */
 export async function introspectTable(client: Client, tableName: string, schema: string): Promise<TableSchema> {
-  const [columns, indexes, checks, triggers, policies, tableComment, fkInfo, columnGrants, compositePk, tableGrants] =
-    await Promise.all([
-      getColumns(client, tableName, schema),
-      getIndexes(client, tableName, schema),
-      getChecks(client, tableName, schema),
-      getTriggers(client, tableName, schema),
-      getPolicies(client, tableName, schema),
-      getTableComment(client, tableName, schema),
-      getForeignKeys(client, tableName, schema),
-      getColumnGrants(client, tableName, schema),
-      getCompositePrimaryKey(client, tableName, schema),
-      getTableLevelGrants(client, tableName, schema),
-    ]);
+  const [
+    columns,
+    indexes,
+    checks,
+    triggers,
+    policies,
+    tableComment,
+    fkInfo,
+    columnGrants,
+    compositePk,
+    tableGrants,
+    rlsInfo,
+  ] = await Promise.all([
+    getColumns(client, tableName, schema),
+    getIndexes(client, tableName, schema),
+    getChecks(client, tableName, schema),
+    getTriggers(client, tableName, schema),
+    getPolicies(client, tableName, schema),
+    getTableComment(client, tableName, schema),
+    getForeignKeys(client, tableName, schema),
+    getColumnGrants(client, tableName, schema),
+    getCompositePrimaryKey(client, tableName, schema),
+    getTableLevelGrants(client, tableName, schema),
+    getRlsStatus(client, tableName, schema),
+  ]);
 
   // Merge FK info into columns
   for (const fk of fkInfo) {
@@ -302,6 +314,8 @@ export async function introspectTable(client: Client, tableName: string, schema:
   if (checks.length > 0) result.checks = checks;
   if (triggers.length > 0) result.triggers = triggers;
   if (policies.length > 0) result.policies = policies;
+  if (rlsInfo.rls) result.rls = true;
+  if (rlsInfo.force_rls) result.force_rls = true;
   if (tableComment) result.comment = tableComment;
   const allGrants = [...columnGrants, ...tableGrants];
   if (allGrants.length > 0) result.grants = allGrants;
@@ -673,6 +687,27 @@ async function getTableLevelGrants(client: Client, table: string, schema: string
   }
 
   return Array.from(mergeMap.values());
+}
+
+async function getRlsStatus(
+  client: Client,
+  table: string,
+  schema: string,
+): Promise<{ rls: boolean; force_rls: boolean }> {
+  const result = await client.query(
+    `SELECT c.relrowsecurity AS rls, c.relforcerowsecurity AS force_rls
+     FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.relname = $1
+       AND n.nspname = $2
+       AND c.relkind = 'r'`,
+    [table, schema],
+  );
+  if (result.rows.length === 0) return { rls: false, force_rls: false };
+  return {
+    rls: result.rows[0].rls === true,
+    force_rls: result.rows[0].force_rls === true,
+  };
 }
 
 async function getTableComment(client: Client, table: string, schema: string): Promise<string | undefined> {
