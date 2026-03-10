@@ -234,9 +234,7 @@ describe('Executor', () => {
         },
       ];
 
-      await expect(
-        execute({ connectionString: DATABASE_URL, operations: ops, logger }),
-      ).rejects.toThrow();
+      await expect(execute({ connectionString: DATABASE_URL, operations: ops, logger })).rejects.toThrow();
 
       // good_table should NOT exist (transaction rolled back)
       const pool = getPool(DATABASE_URL);
@@ -288,7 +286,9 @@ describe('Executor', () => {
         await client.query(`CREATE SCHEMA "${testSchema}"`);
         await client.query(`CREATE TABLE "${testSchema}"."users" ("id" uuid PRIMARY KEY, "email" text)`);
         // Insert a row so VALIDATE CONSTRAINT actually has data to check
-        await client.query(`INSERT INTO "${testSchema}"."users" (id, email) VALUES (gen_random_uuid(), 'test@example.com')`);
+        await client.query(
+          `INSERT INTO "${testSchema}"."users" (id, email) VALUES (gen_random_uuid(), 'test@example.com')`,
+        );
       } finally {
         client.release();
       }
@@ -379,8 +379,12 @@ describe('Executor', () => {
       const client = await pool.connect();
       try {
         await client.query(`CREATE SCHEMA "${testSchema}"`);
-        await client.query(`CREATE TABLE "${testSchema}"."users" ("id" uuid PRIMARY KEY, "email" text NOT NULL, "tenant_id" uuid NOT NULL)`);
-        await client.query(`INSERT INTO "${testSchema}"."users" (id, email, tenant_id) VALUES (gen_random_uuid(), 'a@b.com', gen_random_uuid())`);
+        await client.query(
+          `CREATE TABLE "${testSchema}"."users" ("id" uuid PRIMARY KEY, "email" text NOT NULL, "tenant_id" uuid NOT NULL)`,
+        );
+        await client.query(
+          `INSERT INTO "${testSchema}"."users" (id, email, tenant_id) VALUES (gen_random_uuid(), 'a@b.com', gen_random_uuid())`,
+        );
       } finally {
         client.release();
       }
@@ -440,7 +444,9 @@ describe('Executor', () => {
 
         // Verify uniqueness is enforced: inserting a duplicate should fail
         await expect(
-          client.query(`INSERT INTO "${testSchema}"."users" (id, email, tenant_id) VALUES (gen_random_uuid(), 'a@b.com', (SELECT tenant_id FROM "${testSchema}"."users" LIMIT 1))`),
+          client.query(
+            `INSERT INTO "${testSchema}"."users" (id, email, tenant_id) VALUES (gen_random_uuid(), 'a@b.com', (SELECT tenant_id FROM "${testSchema}"."users" LIMIT 1))`,
+          ),
         ).rejects.toThrow(/unique/i);
       } finally {
         client.release();
@@ -458,7 +464,9 @@ describe('Executor', () => {
       try {
         await client.query(`CREATE SCHEMA "${testSchema}"`);
         // Create a role for grant testing
-        await client.query(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'test_grant_role') THEN CREATE ROLE test_grant_role NOLOGIN; END IF; END $$`);
+        await client.query(
+          `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'test_grant_role') THEN CREATE ROLE test_grant_role NOLOGIN; END IF; END $$`,
+        );
       } finally {
         client.release();
       }
@@ -763,8 +771,12 @@ describe('Executor', () => {
       try {
         await client.query(`CREATE SCHEMA "${testSchema}"`);
         // Create a source table for the materialized view
-        await client.query(`CREATE TABLE "${testSchema}"."orders" ("id" serial PRIMARY KEY, "user_id" integer NOT NULL, "amount" numeric)`);
-        await client.query(`INSERT INTO "${testSchema}"."orders" ("user_id", "amount") VALUES (1, 100), (1, 200), (2, 50)`);
+        await client.query(
+          `CREATE TABLE "${testSchema}"."orders" ("id" serial PRIMARY KEY, "user_id" integer NOT NULL, "amount" numeric)`,
+        );
+        await client.query(
+          `INSERT INTO "${testSchema}"."orders" ("user_id", "amount") VALUES (1, 100), (1, 200), (2, 50)`,
+        );
       } finally {
         client.release();
       }
@@ -876,7 +888,9 @@ describe('Executor', () => {
       try {
         await client.query(`CREATE SCHEMA "${testSchema}"`);
         // Create a source table for the view
-        await client.query(`CREATE TABLE "${testSchema}"."users" ("id" serial PRIMARY KEY, "email" text, "active" boolean DEFAULT true)`);
+        await client.query(
+          `CREATE TABLE "${testSchema}"."users" ("id" serial PRIMARY KEY, "email" text, "active" boolean DEFAULT true)`,
+        );
       } finally {
         client.release();
       }
@@ -977,10 +991,7 @@ describe('Executor', () => {
       const path = await import('node:path');
       const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'executor-test-'));
       const preSqlPath = path.join(tmpDir, 'pre.sql');
-      await fs.writeFile(
-        preSqlPath,
-        `CREATE TABLE "${testSchema}"."from_pre_script" ("id" integer)`,
-      );
+      await fs.writeFile(preSqlPath, `CREATE TABLE "${testSchema}"."from_pre_script" ("id" integer)`);
 
       const { hashFile } = await import('../../core/files.js');
       const hash = await hashFile(preSqlPath);
@@ -1069,10 +1080,7 @@ describe('Executor', () => {
       const path = await import('node:path');
       const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'executor-test-'));
       const postSqlPath = path.join(tmpDir, 'post.sql');
-      await fs.writeFile(
-        postSqlPath,
-        `CREATE TABLE "${testSchema}"."from_post_script" ("id" integer)`,
-      );
+      await fs.writeFile(postSqlPath, `CREATE TABLE "${testSchema}"."from_post_script" ("id" integer)`);
 
       const { hashFile } = await import('../../core/files.js');
       const hash = await hashFile(postSqlPath);
@@ -1649,9 +1657,9 @@ describe('Executor', () => {
         },
       ];
 
-      await expect(
-        execute({ connectionString: DATABASE_URL, operations: ops, logger }),
-      ).rejects.toThrow('Precheck failed: Orphaned rows exist — clean up before migration');
+      await expect(execute({ connectionString: DATABASE_URL, operations: ops, logger })).rejects.toThrow(
+        'Precheck failed: Orphaned rows exist — clean up before migration',
+      );
 
       // The add_column should NOT have been applied
       const pool = getPool(DATABASE_URL);
@@ -1680,9 +1688,9 @@ describe('Executor', () => {
         },
       ];
 
-      await expect(
-        execute({ connectionString: DATABASE_URL, operations: ops, logger }),
-      ).rejects.toThrow('Precheck failed: Check returned null');
+      await expect(execute({ connectionString: DATABASE_URL, operations: ops, logger })).rejects.toThrow(
+        'Precheck failed: Check returned null',
+      );
     });
 
     it('should pass multiple prechecks when all return truthy', async () => {
@@ -1968,9 +1976,7 @@ describe('Executor', () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        const res = await client.query(
-          `SELECT id, name FROM "${testSchema}"."statuses" ORDER BY id`,
-        );
+        const res = await client.query(`SELECT id, name FROM "${testSchema}"."statuses" ORDER BY id`);
         expect(res.rows).toHaveLength(2);
         expect(res.rows[0]).toEqual({ id: 1, name: 'active' });
         expect(res.rows[1]).toEqual({ id: 2, name: 'inactive' });
@@ -1984,9 +1990,7 @@ describe('Executor', () => {
       const client = await pool.connect();
       try {
         // Create table and insert initial data
-        await client.query(
-          `CREATE TABLE "${testSchema}"."statuses" ("id" integer PRIMARY KEY, "name" text NOT NULL)`,
-        );
+        await client.query(`CREATE TABLE "${testSchema}"."statuses" ("id" integer PRIMARY KEY, "name" text NOT NULL)`);
         await client.query(
           `INSERT INTO "${testSchema}"."statuses" ("id", "name") VALUES (1, 'old_name'), (2, 'old_inactive')`,
         );
@@ -2030,9 +2034,7 @@ describe('Executor', () => {
       const client2 = pool.connect();
       const c = await client2;
       try {
-        const res = await c.query(
-          `SELECT id, name FROM "${testSchema}"."statuses" ORDER BY id`,
-        );
+        const res = await c.query(`SELECT id, name FROM "${testSchema}"."statuses" ORDER BY id`);
         expect(res.rows).toHaveLength(3);
         expect(res.rows[0]).toEqual({ id: 1, name: 'active' });
         expect(res.rows[1]).toEqual({ id: 2, name: 'inactive' });
@@ -2071,9 +2073,7 @@ describe('Executor', () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        const res = await client.query(
-          `SELECT id, email, name FROM "${testSchema}"."users"`,
-        );
+        const res = await client.query(`SELECT id, email, name FROM "${testSchema}"."users"`);
         expect(res.rows).toHaveLength(1);
         expect(res.rows[0].email).toBe('admin@example.com');
         expect(res.rows[0].name).toBe('Admin');
@@ -2118,9 +2118,7 @@ describe('Executor', () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        const res = await client.query(
-          `SELECT key, value, enabled FROM "${testSchema}"."settings" ORDER BY key`,
-        );
+        const res = await client.query(`SELECT key, value, enabled FROM "${testSchema}"."settings" ORDER BY key`);
         expect(res.rows).toHaveLength(2);
         expect(res.rows[0]).toEqual({ key: 'maintenance', value: null, enabled: false });
         expect(res.rows[1]).toEqual({ key: 'notifications', value: 'email', enabled: true });
@@ -2140,7 +2138,9 @@ describe('Executor', () => {
       try {
         await client.query(`CREATE SCHEMA "${testSchema}"`);
         await client.query(`CREATE TABLE "${testSchema}"."users" (id uuid PRIMARY KEY DEFAULT gen_random_uuid())`);
-        await client.query(`CREATE TABLE "${testSchema}"."orders" (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid)`);
+        await client.query(
+          `CREATE TABLE "${testSchema}"."orders" (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid)`,
+        );
       } finally {
         client.release();
       }
@@ -2471,7 +2471,9 @@ describe('Executor', () => {
       try {
         await client.query(`CREATE SCHEMA "${testSchema}"`);
         await client.query(`CREATE TABLE "${testSchema}"."docs" (id serial PRIMARY KEY, title text)`);
-        await client.query(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${roleName}') THEN CREATE ROLE "${roleName}" NOLOGIN; END IF; END $$`);
+        await client.query(
+          `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${roleName}') THEN CREATE ROLE "${roleName}" NOLOGIN; END IF; END $$`,
+        );
       } finally {
         client.release();
       }
@@ -2707,7 +2709,8 @@ describe('Executor', () => {
         await client.query(`CREATE INDEX idx_val ON "${testSchema}".idx_test (val)`);
 
         // Mark the index as invalid (simulating a failed CONCURRENTLY operation)
-        await client.query(`
+        await client.query(
+          `
           UPDATE pg_catalog.pg_index
           SET indisvalid = false
           WHERE indexrelid = (
@@ -2715,7 +2718,9 @@ describe('Executor', () => {
             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
             WHERE c.relname = 'idx_val' AND n.nspname = $1
           )
-        `, [testSchema]);
+        `,
+          [testSchema],
+        );
 
         // detectInvalidIndexes should find it
         const invalid = await detectInvalidIndexes(client, testSchema);
@@ -2771,14 +2776,16 @@ describe('Executor', () => {
         // Use buildPlan to generate expand operations (simulating normal run)
         const { buildPlan } = await import('../../planner/index.js');
         const desired = {
-          tables: [{
-            table: 'users',
-            columns: [
-              { name: 'id', type: 'serial', primary_key: true },
-              { name: 'email', type: 'text', nullable: false },
-              { name: 'email_lower', type: 'text', expand: { from: 'email', transform: 'lower(email)' } },
-            ],
-          }],
+          tables: [
+            {
+              table: 'users',
+              columns: [
+                { name: 'id', type: 'serial', primary_key: true },
+                { name: 'email', type: 'text', nullable: false },
+                { name: 'email_lower', type: 'text', expand: { from: 'email', transform: 'lower(email)' } },
+              ],
+            },
+          ],
           enums: [],
           functions: [],
           views: [],
@@ -2787,13 +2794,18 @@ describe('Executor', () => {
           extensions: null,
         };
         const actual = {
-          tables: new Map([['users', {
-            table: 'users',
-            columns: [
-              { name: 'id', type: 'serial', primary_key: true },
-              { name: 'email', type: 'text', nullable: false },
+          tables: new Map([
+            [
+              'users',
+              {
+                table: 'users',
+                columns: [
+                  { name: 'id', type: 'serial', primary_key: true },
+                  { name: 'email', type: 'text', nullable: false },
+                ],
+              },
             ],
-          }]]),
+          ]),
           enums: new Map(),
           functions: new Map(),
           views: new Map(),
@@ -2832,9 +2844,7 @@ describe('Executor', () => {
           expect(backfilled.rows[1].email_lower).toBe('bob@test.org');
 
           // Check dual-write trigger fires on new INSERT
-          await verifyClient.query(
-            `INSERT INTO "${testSchema}".users (email) VALUES ('Charlie@NewDomain.io')`,
-          );
+          await verifyClient.query(`INSERT INTO "${testSchema}".users (email) VALUES ('Charlie@NewDomain.io')`);
           const newRow = await verifyClient.query(
             `SELECT email_lower FROM "${testSchema}".users WHERE email = 'Charlie@NewDomain.io'`,
           );

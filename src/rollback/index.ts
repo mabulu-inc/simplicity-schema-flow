@@ -51,11 +51,7 @@ export async function ensureSnapshotsTable(client: pg.PoolClient): Promise<void>
 /**
  * Save a migration snapshot.
  */
-export async function saveSnapshot(
-  client: pg.PoolClient,
-  operations: Operation[],
-  pgSchema: string,
-): Promise<number> {
+export async function saveSnapshot(client: pg.PoolClient, operations: Operation[], pgSchema: string): Promise<number> {
   const res = await client.query(
     `INSERT INTO _simplicity.snapshots (operations, pg_schema)
      VALUES ($1, $2) RETURNING id`,
@@ -67,9 +63,7 @@ export async function saveSnapshot(
 /**
  * Get the most recent migration snapshot, or null if none exist.
  */
-export async function getLatestSnapshot(
-  client: pg.PoolClient,
-): Promise<MigrationSnapshot | null> {
+export async function getLatestSnapshot(client: pg.PoolClient): Promise<MigrationSnapshot | null> {
   const res = await client.query(
     `SELECT id, operations, pg_schema, created_at
      FROM _simplicity.snapshots
@@ -82,9 +76,7 @@ export async function getLatestSnapshot(
 /**
  * List all snapshots in reverse chronological order.
  */
-export async function listSnapshots(
-  client: pg.PoolClient,
-): Promise<MigrationSnapshot[]> {
+export async function listSnapshots(client: pg.PoolClient): Promise<MigrationSnapshot[]> {
   const res = await client.query(
     `SELECT id, operations, pg_schema, created_at
      FROM _simplicity.snapshots
@@ -96,10 +88,7 @@ export async function listSnapshots(
 /**
  * Delete a snapshot by ID.
  */
-export async function deleteSnapshot(
-  client: pg.PoolClient,
-  snapshotId: number,
-): Promise<void> {
+export async function deleteSnapshot(client: pg.PoolClient, snapshotId: number): Promise<void> {
   await client.query('DELETE FROM _simplicity.snapshots WHERE id = $1', [snapshotId]);
 }
 
@@ -168,10 +157,7 @@ export function computeRollback(snapshot: MigrationSnapshot): RollbackResult {
   return { operations, skipped };
 }
 
-function computeReverseOperation(
-  op: Operation,
-  pgSchema: string,
-): Operation | null {
+function computeReverseOperation(op: Operation, pgSchema: string): Operation | null {
   const q = (name: string) => `"${name}"`;
 
   switch (op.type) {
@@ -358,10 +344,7 @@ export interface RunDownOptions {
  * Execute a rollback: load the latest snapshot, compute reverse operations,
  * execute them, and delete the snapshot.
  */
-export async function runDown(
-  connectionString: string,
-  options: RunDownOptions = {},
-): Promise<RunDownResult> {
+export async function runDown(connectionString: string, options: RunDownOptions = {}): Promise<RunDownResult> {
   const { logger } = options;
   const pool = getPool(connectionString);
   const lockClient = await pool.connect();

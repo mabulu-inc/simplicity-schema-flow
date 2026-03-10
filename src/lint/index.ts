@@ -4,7 +4,7 @@
  * Analyzes a PlanResult for dangerous patterns and produces warnings.
  */
 
-import type { Operation, PlanResult } from '../planner/index.js';
+import type { PlanResult } from '../planner/index.js';
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -175,10 +175,7 @@ export function lintPlan(plan: PlanResult): LintResult {
       const fkCol = extractFkColumn(op.sql);
       if (fkCol) {
         const hasIndex = allOps.some(
-          (o) =>
-            o.type === 'add_index' &&
-            o.objectName === op.objectName &&
-            indexCoversColumn(o.sql, fkCol),
+          (o) => o.type === 'add_index' && o.objectName === op.objectName && indexCoversColumn(o.sql, fkCol),
         );
         if (!hasIndex) {
           warnings.push({

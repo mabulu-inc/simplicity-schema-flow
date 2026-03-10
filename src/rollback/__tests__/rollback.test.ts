@@ -148,12 +148,16 @@ describe('Rollback', () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        await saveSnapshot(client, [
-          { type: 'create_table', phase: 6, objectName: 'first', sql: 'S1', destructive: false },
-        ], 'public');
-        await saveSnapshot(client, [
-          { type: 'create_table', phase: 6, objectName: 'second', sql: 'S2', destructive: false },
-        ], 'public');
+        await saveSnapshot(
+          client,
+          [{ type: 'create_table', phase: 6, objectName: 'first', sql: 'S1', destructive: false }],
+          'public',
+        );
+        await saveSnapshot(
+          client,
+          [{ type: 'create_table', phase: 6, objectName: 'second', sql: 'S2', destructive: false }],
+          'public',
+        );
 
         const list = await listSnapshots(client);
         expect(list).toHaveLength(2);
@@ -230,7 +234,13 @@ describe('Rollback', () => {
       const result = computeRollback({
         id: 1,
         operations: [
-          { type: 'create_function', phase: 5, objectName: 'update_timestamp', sql: 'CREATE FUNCTION ...', destructive: false },
+          {
+            type: 'create_function',
+            phase: 5,
+            objectName: 'update_timestamp',
+            sql: 'CREATE FUNCTION ...',
+            destructive: false,
+          },
         ],
         pgSchema: 'public',
         createdAt: new Date(),
@@ -258,7 +268,13 @@ describe('Rollback', () => {
       const result = computeRollback({
         id: 1,
         operations: [
-          { type: 'create_materialized_view', phase: 10, objectName: 'user_stats', sql: 'CREATE MATERIALIZED VIEW ...', destructive: false },
+          {
+            type: 'create_materialized_view',
+            phase: 10,
+            objectName: 'user_stats',
+            sql: 'CREATE MATERIALIZED VIEW ...',
+            destructive: false,
+          },
         ],
         pgSchema: 'public',
         createdAt: new Date(),
@@ -272,7 +288,13 @@ describe('Rollback', () => {
       const result = computeRollback({
         id: 1,
         operations: [
-          { type: 'create_trigger', phase: 11, objectName: 'users.set_updated_at', sql: 'CREATE TRIGGER ...', destructive: false },
+          {
+            type: 'create_trigger',
+            phase: 11,
+            objectName: 'users.set_updated_at',
+            sql: 'CREATE TRIGGER ...',
+            destructive: false,
+          },
         ],
         pgSchema: 'public',
         createdAt: new Date(),
@@ -300,7 +322,13 @@ describe('Rollback', () => {
       const result = computeRollback({
         id: 1,
         operations: [
-          { type: 'create_policy', phase: 12, objectName: 'users.users_own_data', sql: 'CREATE POLICY ...', destructive: false },
+          {
+            type: 'create_policy',
+            phase: 12,
+            objectName: 'users.users_own_data',
+            sql: 'CREATE POLICY ...',
+            destructive: false,
+          },
         ],
         pgSchema: 'public',
         createdAt: new Date(),
@@ -314,7 +342,13 @@ describe('Rollback', () => {
       const result = computeRollback({
         id: 1,
         operations: [
-          { type: 'create_extension', phase: 2, objectName: 'pgcrypto', sql: 'CREATE EXTENSION ...', destructive: false },
+          {
+            type: 'create_extension',
+            phase: 2,
+            objectName: 'pgcrypto',
+            sql: 'CREATE EXTENSION ...',
+            destructive: false,
+          },
         ],
         pgSchema: 'public',
         createdAt: new Date(),
@@ -342,35 +376,57 @@ describe('Rollback', () => {
       const result = computeRollback({
         id: 1,
         operations: [
-          { type: 'add_foreign_key', phase: 8, objectName: 'orders.fk_orders_user_id', sql: 'ALTER TABLE ...', destructive: false },
+          {
+            type: 'add_foreign_key',
+            phase: 8,
+            objectName: 'orders.fk_orders_user_id',
+            sql: 'ALTER TABLE ...',
+            destructive: false,
+          },
         ],
         pgSchema: 'public',
         createdAt: new Date(),
       });
 
       expect(result.operations).toHaveLength(1);
-      expect(result.operations[0].sql).toBe('ALTER TABLE "public"."orders" DROP CONSTRAINT IF EXISTS "fk_orders_user_id"');
+      expect(result.operations[0].sql).toBe(
+        'ALTER TABLE "public"."orders" DROP CONSTRAINT IF EXISTS "fk_orders_user_id"',
+      );
     });
 
     it('should reverse add_foreign_key_not_valid to DROP CONSTRAINT', () => {
       const result = computeRollback({
         id: 1,
         operations: [
-          { type: 'add_foreign_key_not_valid', phase: 8, objectName: 'orders.fk_orders_user_id', sql: 'ALTER TABLE ...', destructive: false },
+          {
+            type: 'add_foreign_key_not_valid',
+            phase: 8,
+            objectName: 'orders.fk_orders_user_id',
+            sql: 'ALTER TABLE ...',
+            destructive: false,
+          },
         ],
         pgSchema: 'public',
         createdAt: new Date(),
       });
 
       expect(result.operations).toHaveLength(1);
-      expect(result.operations[0].sql).toBe('ALTER TABLE "public"."orders" DROP CONSTRAINT IF EXISTS "fk_orders_user_id"');
+      expect(result.operations[0].sql).toBe(
+        'ALTER TABLE "public"."orders" DROP CONSTRAINT IF EXISTS "fk_orders_user_id"',
+      );
     });
 
     it('should reverse add_check to DROP CONSTRAINT', () => {
       const result = computeRollback({
         id: 1,
         operations: [
-          { type: 'add_check', phase: 6, objectName: 'users.email_not_empty', sql: 'ALTER TABLE ...', destructive: false },
+          {
+            type: 'add_check',
+            phase: 6,
+            objectName: 'users.email_not_empty',
+            sql: 'ALTER TABLE ...',
+            destructive: false,
+          },
         ],
         pgSchema: 'public',
         createdAt: new Date(),
@@ -384,7 +440,13 @@ describe('Rollback', () => {
       const result = computeRollback({
         id: 1,
         operations: [
-          { type: 'add_unique_constraint', phase: 6, objectName: 'users.uq_email', sql: 'ALTER TABLE ...', destructive: false },
+          {
+            type: 'add_unique_constraint',
+            phase: 6,
+            objectName: 'users.uq_email',
+            sql: 'ALTER TABLE ...',
+            destructive: false,
+          },
         ],
         pgSchema: 'public',
         createdAt: new Date(),
@@ -398,7 +460,13 @@ describe('Rollback', () => {
       const result = computeRollback({
         id: 1,
         operations: [
-          { type: 'grant_table', phase: 13, objectName: 'users.app_readonly', sql: 'GRANT SELECT ON "public"."users" TO "app_readonly"', destructive: false },
+          {
+            type: 'grant_table',
+            phase: 13,
+            objectName: 'users.app_readonly',
+            sql: 'GRANT SELECT ON "public"."users" TO "app_readonly"',
+            destructive: false,
+          },
         ],
         pgSchema: 'public',
         createdAt: new Date(),
@@ -416,9 +484,21 @@ describe('Rollback', () => {
           { type: 'add_enum_value', phase: 3, objectName: 'status', sql: 'ALTER TYPE ...', destructive: false },
           { type: 'alter_column', phase: 6, objectName: 'users.email', sql: 'ALTER TABLE ...', destructive: false },
           { type: 'add_seed', phase: 15, objectName: 'users', sql: 'INSERT INTO ...', destructive: false },
-          { type: 'validate_constraint', phase: 8, objectName: 'orders.fk', sql: 'ALTER TABLE ...', destructive: false },
+          {
+            type: 'validate_constraint',
+            phase: 8,
+            objectName: 'orders.fk',
+            sql: 'ALTER TABLE ...',
+            destructive: false,
+          },
           { type: 'set_comment', phase: 14, objectName: 'users', sql: 'COMMENT ON ...', destructive: false },
-          { type: 'refresh_materialized_view', phase: 10, objectName: 'user_stats', sql: 'REFRESH ...', destructive: false },
+          {
+            type: 'refresh_materialized_view',
+            phase: 10,
+            objectName: 'user_stats',
+            sql: 'REFRESH ...',
+            destructive: false,
+          },
         ],
         pgSchema: 'public',
         createdAt: new Date(),
@@ -581,9 +661,7 @@ describe('Rollback', () => {
     });
 
     it('should throw when no snapshots exist', async () => {
-      await expect(runDown(DATABASE_URL, { logger })).rejects.toThrow(
-        'No migration snapshot found',
-      );
+      await expect(runDown(DATABASE_URL, { logger })).rejects.toThrow('No migration snapshot found');
     });
 
     it('should delete the snapshot after successful rollback', async () => {

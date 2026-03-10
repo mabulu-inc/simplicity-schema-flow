@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pg from 'pg';
 import {
   getExistingTables,
@@ -173,7 +173,9 @@ describe('introspectTable', () => {
     await exec(`COMMENT ON TABLE products IS 'Product catalog'`);
     await exec(`COMMENT ON COLUMN products.name IS 'Product display name'`);
     // Add a foreign key from orders to users
-    await exec(`ALTER TABLE orders ADD CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL`);
+    await exec(
+      `ALTER TABLE orders ADD CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL`,
+    );
     // Add a trigger
     await exec(`
       CREATE TRIGGER set_products_updated_at
@@ -388,9 +390,7 @@ describe('column-level grants introspection', () => {
       secret text
     )`);
     await client.query(`CREATE ROLE "${roleName}"`);
-    await client.query(
-      `GRANT SELECT ("id", "email") ON "${TEST_SCHEMA}"."grant_test" TO "${roleName}"`,
-    );
+    await client.query(`GRANT SELECT ("id", "email") ON "${TEST_SCHEMA}"."grant_test" TO "${roleName}"`);
   });
 
   afterAll(async () => {

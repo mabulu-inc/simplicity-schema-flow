@@ -1,12 +1,5 @@
 import { describe, it, expect, afterAll, beforeEach } from 'vitest';
-import {
-  ensureExpandStateTable,
-  planExpandColumn,
-  runBackfill,
-  runContract,
-  getExpandStatus,
-} from '../index.js';
-import type { Operation } from '../../planner/index.js';
+import { ensureExpandStateTable, planExpandColumn, runBackfill, runContract, getExpandStatus } from '../index.js';
 import { closePool, getPool } from '../../core/db.js';
 import { createLogger } from '../../core/logger.js';
 
@@ -123,10 +116,16 @@ describe('Expand/Contract', () => {
       const pool = getPool(DATABASE_URL);
 
       // Plan and execute expand operations
-      const ops = planExpandColumn('users', 'email_lower', 'text', {
-        from: 'email',
-        transform: 'lower(email)',
-      }, testSchema);
+      const ops = planExpandColumn(
+        'users',
+        'email_lower',
+        'text',
+        {
+          from: 'email',
+          transform: 'lower(email)',
+        },
+        testSchema,
+      );
 
       const client = await pool.connect();
       try {
@@ -139,7 +138,13 @@ describe('Expand/Contract', () => {
         await client.query(
           `INSERT INTO _simplicity.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
            VALUES ($1, $2, $3, $4, $5, 'expanded')`,
-          [`${testSchema}.users`, 'email_lower', 'email', 'lower(email)', `_simplicity_dw_${testSchema}_users_email_lower`],
+          [
+            `${testSchema}.users`,
+            'email_lower',
+            'email',
+            'lower(email)',
+            `_simplicity_dw_${testSchema}_users_email_lower`,
+          ],
         );
         await client.query('COMMIT');
 
@@ -152,9 +157,7 @@ describe('Expand/Contract', () => {
         expect(colRes.rows.length).toBe(1);
 
         // Verify backfill happened
-        const dataRes = await client.query(
-          `SELECT email_lower FROM ${testSchema}.users ORDER BY id`,
-        );
+        const dataRes = await client.query(`SELECT email_lower FROM ${testSchema}.users ORDER BY id`);
         expect(dataRes.rows[0].email_lower).toBe('foo@bar.com');
         expect(dataRes.rows[1].email_lower).toBe('hello@world.com');
 
@@ -195,9 +198,7 @@ describe('Expand/Contract', () => {
         expect(result.rowsUpdated).toBe(52); // 2 original + 50 new
 
         // All rows should be backfilled
-        const res = await client.query(
-          `SELECT count(*) as cnt FROM ${testSchema}.users WHERE email_lower IS NULL`,
-        );
+        const res = await client.query(`SELECT count(*) as cnt FROM ${testSchema}.users WHERE email_lower IS NULL`);
         expect(Number(res.rows[0].cnt)).toBe(0);
       } finally {
         client.release();
@@ -210,18 +211,24 @@ describe('Expand/Contract', () => {
       try {
         // No expand state initially
         const emptyStatus = await getExpandStatus(client);
-        const filtered = emptyStatus.filter(s => s.table_name.includes(testSchema));
+        const filtered = emptyStatus.filter((s) => s.table_name.includes(testSchema));
         expect(filtered.length).toBe(0);
 
         // Insert a state record
         await client.query(
           `INSERT INTO _simplicity.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
            VALUES ($1, $2, $3, $4, $5, 'expanded')`,
-          [`${testSchema}.users`, 'email_lower', 'email', 'lower(email)', `_simplicity_dw_${testSchema}_users_email_lower`],
+          [
+            `${testSchema}.users`,
+            'email_lower',
+            'email',
+            'lower(email)',
+            `_simplicity_dw_${testSchema}_users_email_lower`,
+          ],
         );
 
         const status = await getExpandStatus(client);
-        const relevant = status.filter(s => s.table_name.includes(testSchema));
+        const relevant = status.filter((s) => s.table_name.includes(testSchema));
         expect(relevant.length).toBe(1);
         expect(relevant[0].status).toBe('expanded');
         expect(relevant[0].new_column).toBe('email_lower');
@@ -236,10 +243,16 @@ describe('Expand/Contract', () => {
       const client = await pool.connect();
       try {
         // First do the expand phase
-        const ops = planExpandColumn('users', 'email_lower', 'text', {
-          from: 'email',
-          transform: 'lower(email)',
-        }, testSchema);
+        const ops = planExpandColumn(
+          'users',
+          'email_lower',
+          'text',
+          {
+            from: 'email',
+            transform: 'lower(email)',
+          },
+          testSchema,
+        );
 
         await client.query('BEGIN');
         for (const op of ops) {
@@ -248,7 +261,13 @@ describe('Expand/Contract', () => {
         await client.query(
           `INSERT INTO _simplicity.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
            VALUES ($1, $2, $3, $4, $5, 'expanded')`,
-          [`${testSchema}.users`, 'email_lower', 'email', 'lower(email)', `_simplicity_dw_${testSchema}_users_email_lower`],
+          [
+            `${testSchema}.users`,
+            'email_lower',
+            'email',
+            'lower(email)',
+            `_simplicity_dw_${testSchema}_users_email_lower`,
+          ],
         );
         await client.query('COMMIT');
 
@@ -320,7 +339,13 @@ describe('Expand/Contract', () => {
         await client.query(
           `INSERT INTO _simplicity.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
            VALUES ($1, $2, $3, $4, $5, 'contracted')`,
-          [`${testSchema}.users`, 'email_lower', 'email', 'lower(email)', `_simplicity_dw_${testSchema}_users_email_lower`],
+          [
+            `${testSchema}.users`,
+            'email_lower',
+            'email',
+            'lower(email)',
+            `_simplicity_dw_${testSchema}_users_email_lower`,
+          ],
         );
       } finally {
         client.release();

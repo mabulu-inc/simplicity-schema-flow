@@ -3,13 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { parse as parseYaml } from 'yaml';
-import {
-  scaffoldInit,
-  scaffoldPre,
-  scaffoldPost,
-  scaffoldMixin,
-  generateFromDb,
-} from '../index.js';
+import { scaffoldInit, scaffoldPre, scaffoldPost, scaffoldMixin, generateFromDb } from '../index.js';
 import type {
   TableSchema,
   EnumSchema,
@@ -138,9 +132,7 @@ describe('generateFromDb', () => {
   });
 
   it('generates YAML files for enums', () => {
-    const enums: EnumSchema[] = [
-      { name: 'status', values: ['active', 'inactive', 'pending'] },
-    ];
+    const enums: EnumSchema[] = [{ name: 'status', values: ['active', 'inactive', 'pending'] }];
 
     const result = generateFromDb({
       tables: [],
@@ -194,9 +186,7 @@ describe('generateFromDb', () => {
   });
 
   it('generates YAML files for views', () => {
-    const views: ViewSchema[] = [
-      { name: 'active_users', query: 'SELECT * FROM users WHERE active = true' },
-    ];
+    const views: ViewSchema[] = [{ name: 'active_users', query: 'SELECT * FROM users WHERE active = true' }];
 
     const result = generateFromDb({
       tables: [],
@@ -242,9 +232,7 @@ describe('generateFromDb', () => {
   });
 
   it('generates YAML files for roles', () => {
-    const roles: RoleSchema[] = [
-      { role: 'app_reader', login: true, superuser: false },
-    ];
+    const roles: RoleSchema[] = [{ role: 'app_reader', login: true, superuser: false }];
 
     const result = generateFromDb({
       tables: [],
@@ -267,7 +255,9 @@ describe('generateFromDb', () => {
     const result = generateFromDb({
       tables: [{ table: 't1', columns: [{ name: 'id', type: 'integer' }] }],
       enums: [{ name: 'e1', values: ['a'] }],
-      functions: [{ name: 'f1', language: 'sql', returns: 'void', body: 'SELECT 1', security: 'invoker', volatility: 'volatile' }],
+      functions: [
+        { name: 'f1', language: 'sql', returns: 'void', body: 'SELECT 1', security: 'invoker', volatility: 'volatile' },
+      ],
       views: [{ name: 'v1', query: 'SELECT 1' }],
       materializedViews: [{ name: 'mv1', materialized: true, query: 'SELECT 1' }],
       roles: [{ role: 'r1', login: false }],
@@ -285,13 +275,15 @@ describe('generateFromDb', () => {
 
   it('omits default/false values from column definitions', () => {
     const result = generateFromDb({
-      tables: [{
-        table: 'items',
-        columns: [
-          { name: 'id', type: 'integer', primary_key: true, nullable: false },
-          { name: 'name', type: 'text', nullable: true },
-        ],
-      }],
+      tables: [
+        {
+          table: 'items',
+          columns: [
+            { name: 'id', type: 'integer', primary_key: true, nullable: false },
+            { name: 'name', type: 'text', nullable: true },
+          ],
+        },
+      ],
       enums: [],
       functions: [],
       views: [],
@@ -307,17 +299,19 @@ describe('generateFromDb', () => {
 
   it('includes foreign key references in columns', () => {
     const result = generateFromDb({
-      tables: [{
-        table: 'orders',
-        columns: [
-          { name: 'id', type: 'integer', primary_key: true },
-          {
-            name: 'user_id',
-            type: 'integer',
-            references: { table: 'users', column: 'id', on_delete: 'CASCADE' },
-          },
-        ],
-      }],
+      tables: [
+        {
+          table: 'orders',
+          columns: [
+            { name: 'id', type: 'integer', primary_key: true },
+            {
+              name: 'user_id',
+              type: 'integer',
+              references: { table: 'users', column: 'id', on_delete: 'CASCADE' },
+            },
+          ],
+        },
+      ],
       enums: [],
       functions: [],
       views: [],

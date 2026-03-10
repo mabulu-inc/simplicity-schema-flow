@@ -12,7 +12,6 @@ import type {
   ViewSchema,
   MaterializedViewSchema,
   RoleSchema,
-  ColumnDef,
 } from '../schema/types.js';
 
 // ─── Types ─────────────────────────────────────────────────────
@@ -223,7 +222,11 @@ export function scaffoldInit(baseDir: string): void {
 
 function timestamp(): string {
   const now = new Date();
-  return now.toISOString().replace(/[-:T]/g, '').replace(/\.\d+Z$/, '').slice(0, 14);
+  return now
+    .toISOString()
+    .replace(/[-:T]/g, '')
+    .replace(/\.\d+Z$/, '')
+    .slice(0, 14);
 }
 
 /**
@@ -257,9 +260,7 @@ export function scaffoldMixin(baseDir: string, name: string): string {
   const filePath = path.join(baseDir, 'mixins', `${name}.yaml`);
   const template = {
     mixin: name,
-    columns: [
-      { name: 'example_column', type: 'text', nullable: true },
-    ],
+    columns: [{ name: 'example_column', type: 'text', nullable: true }],
   };
   fs.writeFileSync(filePath, yamlStringify(template), 'utf-8');
   return filePath;

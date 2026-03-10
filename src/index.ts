@@ -12,7 +12,21 @@ export type { Logger, LoggerOptions } from './core/logger.js';
 export { LogLevel } from './core/logger.js';
 
 // Schema parsing
-export { parseTable, parseEnum, parseFunction, parseView, parseRole, parseExtensions, parseMixin, parseSchemaFile, parseTableFile, parseFunctionFile, parseEnumFile, parseViewFile, parseRoleFile } from './schema/parser.js';
+export {
+  parseTable,
+  parseEnum,
+  parseFunction,
+  parseView,
+  parseRole,
+  parseExtensions,
+  parseMixin,
+  parseSchemaFile,
+  parseTableFile,
+  parseFunctionFile,
+  parseEnumFile,
+  parseViewFile,
+  parseRoleFile,
+} from './schema/parser.js';
 export type { SchemaKind, ParsedSchema } from './schema/parser.js';
 export { loadMixins, applyMixins } from './schema/mixins.js';
 export type { MixinRegistry } from './schema/mixins.js';
@@ -69,7 +83,13 @@ export { buildPlan } from './planner/index.js';
 export type { OperationType, Operation, DesiredState, ActualState, PlanOptions, PlanResult } from './planner/index.js';
 
 // Executor
-export { execute, acquireAdvisoryLock, releaseAdvisoryLock, detectInvalidIndexes, reindexInvalid } from './executor/index.js';
+export {
+  execute,
+  acquireAdvisoryLock,
+  releaseAdvisoryLock,
+  detectInvalidIndexes,
+  reindexInvalid,
+} from './executor/index.js';
 export type { ExecuteOptions, ExecuteResult, InvalidIndex } from './executor/index.js';
 
 // Drift detection
@@ -81,12 +101,28 @@ export { lintPlan } from './lint/index.js';
 export type { LintSeverity, LintWarning, LintResult } from './lint/index.js';
 
 // Rollback
-export { ensureSnapshotsTable, saveSnapshot, getLatestSnapshot, listSnapshots, deleteSnapshot, computeRollback, runDown } from './rollback/index.js';
+export {
+  ensureSnapshotsTable,
+  saveSnapshot,
+  getLatestSnapshot,
+  listSnapshots,
+  deleteSnapshot,
+  computeRollback,
+  runDown,
+} from './rollback/index.js';
 export type { MigrationSnapshot, RollbackResult, RunDownOptions, RunDownResult } from './rollback/index.js';
 
 // Expand/contract
 export { ensureExpandStateTable, planExpandColumn, runBackfill, runContract, getExpandStatus } from './expand/index.js';
-export type { ExpandOperationType, ExpandOperation, ExpandState, BackfillOptions, BackfillResult, ContractOptions, ContractResult } from './expand/index.js';
+export type {
+  ExpandOperationType,
+  ExpandOperation,
+  ExpandState,
+  BackfillOptions,
+  BackfillResult,
+  ContractOptions,
+  ContractResult,
+} from './expand/index.js';
 
 // Scaffold / generate
 export { generateFromDb, scaffoldInit, scaffoldPre, scaffoldPost, scaffoldMixin } from './scaffold/index.js';
@@ -100,5 +136,15 @@ export type { GenerateSqlOptions } from './sql/index.js';
 export { generateErd } from './erd/index.js';
 
 // CLI pipeline
-export { runPipeline, runAll, runPre, runMigrate, runPost, runValidate, runBaseline, initProject, getStatus } from './cli/pipeline.js';
+export {
+  runPipeline,
+  runAll,
+  runPre,
+  runMigrate,
+  runPost,
+  runValidate,
+  runBaseline,
+  initProject,
+  getStatus,
+} from './cli/pipeline.js';
 export type { PipelineOptions, StatusResult, BaselineResult } from './cli/pipeline.js';

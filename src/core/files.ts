@@ -54,15 +54,19 @@ export async function discoverSchemaFiles(baseDir: string): Promise<DiscoveredFi
 
   const [preFiles, schemaFiles, postFiles] = await Promise.all([
     discoverPhaseFiles(abs, ['pre/*.sql'], 'pre'),
-    discoverPhaseFiles(abs, [
-      'tables/*.yaml',
-      'enums/*.yaml',
-      'functions/*.yaml',
-      'views/*.yaml',
-      'roles/*.yaml',
-      'mixins/*.yaml',
-      'extensions.yaml',
-    ], 'schema'),
+    discoverPhaseFiles(
+      abs,
+      [
+        'tables/*.yaml',
+        'enums/*.yaml',
+        'functions/*.yaml',
+        'views/*.yaml',
+        'roles/*.yaml',
+        'mixins/*.yaml',
+        'extensions.yaml',
+      ],
+      'schema',
+    ),
     discoverPhaseFiles(abs, ['post/*.sql'], 'post'),
   ]);
 
@@ -73,11 +77,7 @@ export async function discoverSchemaFiles(baseDir: string): Promise<DiscoveredFi
   };
 }
 
-async function discoverPhaseFiles(
-  baseDir: string,
-  patterns: string[],
-  phase: Phase,
-): Promise<SchemaFile[]> {
+async function discoverPhaseFiles(baseDir: string, patterns: string[], phase: Phase): Promise<SchemaFile[]> {
   const allPaths: string[] = [];
 
   for (const pattern of patterns) {

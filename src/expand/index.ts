@@ -169,15 +169,7 @@ export interface BackfillResult {
  * Backfill a column in batches.
  */
 export async function runBackfill(options: BackfillOptions): Promise<BackfillResult> {
-  const {
-    connectionString,
-    tableName,
-    newColumn,
-    transform,
-    batchSize = 1000,
-    pgSchema,
-    logger,
-  } = options;
+  const { connectionString, tableName, newColumn, transform, batchSize = 1000, pgSchema, logger } = options;
 
   const qualifiedTable = pgSchema ? `${pgSchema}.${tableName}` : tableName;
   const pool = getPool(connectionString);
@@ -226,13 +218,7 @@ export interface ContractResult {
  * Complete the contract phase: drop old column and dual-write trigger.
  */
 export async function runContract(options: ContractOptions): Promise<ContractResult> {
-  const {
-    connectionString,
-    tableName,
-    newColumn,
-    pgSchema,
-    logger,
-  } = options;
+  const { connectionString, tableName, newColumn, pgSchema, logger } = options;
 
   const qualifiedTableName = pgSchema ? `${pgSchema}.${tableName}` : tableName;
   const pool = getPool(connectionString);
@@ -287,10 +273,7 @@ export async function runContract(options: ContractOptions): Promise<ContractRes
       logger?.info(`Dropped column ${qualifiedTable}.${state.old_column}`);
 
       // Update expand state
-      await client.query(
-        `UPDATE _simplicity.expand_state SET status = 'contracted' WHERE id = $1`,
-        [state.id],
-      );
+      await client.query(`UPDATE _simplicity.expand_state SET status = 'contracted' WHERE id = $1`, [state.id]);
 
       await client.query('COMMIT');
     } catch (err) {
@@ -317,8 +300,6 @@ export async function runContract(options: ContractOptions): Promise<ContractRes
  */
 export async function getExpandStatus(client: pg.PoolClient): Promise<ExpandState[]> {
   await ensureExpandStateTable(client);
-  const res = await client.query(
-    `SELECT * FROM _simplicity.expand_state ORDER BY created_at DESC`,
-  );
+  const res = await client.query(`SELECT * FROM _simplicity.expand_state ORDER BY created_at DESC`);
   return res.rows as ExpandState[];
 }

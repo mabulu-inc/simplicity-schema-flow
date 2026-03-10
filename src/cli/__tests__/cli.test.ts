@@ -146,9 +146,15 @@ describe('CLI argument parsing', () => {
 
   it('should parse multiple flags together', () => {
     const result = parseArgs([
-      'node', 'simplicity-schema', 'run',
-      '--verbose', '--allow-destructive', '--dir', './schemas',
-      '--connection-string', 'postgres://localhost/mydb',
+      'node',
+      'simplicity-schema',
+      'run',
+      '--verbose',
+      '--allow-destructive',
+      '--dir',
+      './schemas',
+      '--connection-string',
+      'postgres://localhost/mydb',
     ]);
     expect(result.command).toBe('run');
     expect(result.overrides.verbose).toBe(true);
@@ -297,21 +303,24 @@ describe('CLI pipeline', () => {
     fs.mkdirSync(path.join(tmpDir, 'tables'), { recursive: true });
 
     const logger = createLogger({ verbose: false, quiet: true, json: false });
-    const result = await runPipeline({
-      connectionString: DATABASE_URL,
-      baseDir: tmpDir,
-      pgSchema: 'public',
-      dryRun: false,
-      allowDestructive: false,
-      skipChecks: false,
-      lockTimeout: 5000,
-      statementTimeout: 30000,
-      maxRetries: 3,
-      historyTable: 'history',
-      verbose: false,
-      quiet: true,
-      json: false,
-    }, logger);
+    const result = await runPipeline(
+      {
+        connectionString: DATABASE_URL,
+        baseDir: tmpDir,
+        pgSchema: 'public',
+        dryRun: false,
+        allowDestructive: false,
+        skipChecks: false,
+        lockTimeout: 5000,
+        statementTimeout: 30000,
+        maxRetries: 3,
+        historyTable: 'history',
+        verbose: false,
+        quiet: true,
+        json: false,
+      },
+      logger,
+    );
 
     expect(result.executed).toBe(0);
     expect(result.dryRun).toBe(false);
@@ -319,7 +328,9 @@ describe('CLI pipeline', () => {
 
   it('should run plan (dry-run) pipeline', async () => {
     fs.mkdirSync(path.join(tmpDir, 'tables'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, 'tables', 'test_cli_table.yaml'), `
+    fs.writeFileSync(
+      path.join(tmpDir, 'tables', 'test_cli_table.yaml'),
+      `
 table: test_cli_plan_table
 columns:
   - name: id
@@ -329,55 +340,66 @@ columns:
   - name: name
     type: text
     nullable: false
-`);
+`,
+    );
 
     const logger = createLogger({ verbose: false, quiet: true, json: false });
-    const result = await runPipeline({
-      connectionString: DATABASE_URL,
-      baseDir: tmpDir,
-      pgSchema: 'public',
-      dryRun: true,
-      allowDestructive: false,
-      skipChecks: false,
-      lockTimeout: 5000,
-      statementTimeout: 30000,
-      maxRetries: 3,
-      historyTable: 'history',
-      verbose: false,
-      quiet: true,
-      json: false,
-    }, logger);
+    const result = await runPipeline(
+      {
+        connectionString: DATABASE_URL,
+        baseDir: tmpDir,
+        pgSchema: 'public',
+        dryRun: true,
+        allowDestructive: false,
+        skipChecks: false,
+        lockTimeout: 5000,
+        statementTimeout: 30000,
+        maxRetries: 3,
+        historyTable: 'history',
+        verbose: false,
+        quiet: true,
+        json: false,
+      },
+      logger,
+    );
 
     expect(result.dryRun).toBe(true);
   });
 
   it('should run validate pipeline', async () => {
     fs.mkdirSync(path.join(tmpDir, 'tables'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, 'tables', 'test_validate.yaml'), `
+    fs.writeFileSync(
+      path.join(tmpDir, 'tables', 'test_validate.yaml'),
+      `
 table: test_cli_validate_table
 columns:
   - name: id
     type: uuid
     primary_key: true
     default: gen_random_uuid()
-`);
+`,
+    );
 
     const logger = createLogger({ verbose: false, quiet: true, json: false });
-    const result = await runPipeline({
-      connectionString: DATABASE_URL,
-      baseDir: tmpDir,
-      pgSchema: 'public',
-      dryRun: false,
-      allowDestructive: false,
-      skipChecks: false,
-      lockTimeout: 5000,
-      statementTimeout: 30000,
-      maxRetries: 3,
-      historyTable: 'history',
-      verbose: false,
-      quiet: true,
-      json: false,
-    }, logger, { validateOnly: true });
+    const result = await runPipeline(
+      {
+        connectionString: DATABASE_URL,
+        baseDir: tmpDir,
+        pgSchema: 'public',
+        dryRun: false,
+        allowDestructive: false,
+        skipChecks: false,
+        lockTimeout: 5000,
+        statementTimeout: 30000,
+        maxRetries: 3,
+        historyTable: 'history',
+        verbose: false,
+        quiet: true,
+        json: false,
+      },
+      logger,
+      { validateOnly: true },
+    );
 
     expect(result.validated).toBe(true);
   });
@@ -386,21 +408,25 @@ columns:
     fs.mkdirSync(path.join(tmpDir, 'pre'), { recursive: true });
 
     const logger = createLogger({ verbose: false, quiet: true, json: false });
-    const result = await runPipeline({
-      connectionString: DATABASE_URL,
-      baseDir: tmpDir,
-      pgSchema: 'public',
-      dryRun: false,
-      allowDestructive: false,
-      skipChecks: false,
-      lockTimeout: 5000,
-      statementTimeout: 30000,
-      maxRetries: 3,
-      historyTable: 'history',
-      verbose: false,
-      quiet: true,
-      json: false,
-    }, logger, { phaseFilter: 'pre' });
+    const result = await runPipeline(
+      {
+        connectionString: DATABASE_URL,
+        baseDir: tmpDir,
+        pgSchema: 'public',
+        dryRun: false,
+        allowDestructive: false,
+        skipChecks: false,
+        lockTimeout: 5000,
+        statementTimeout: 30000,
+        maxRetries: 3,
+        historyTable: 'history',
+        verbose: false,
+        quiet: true,
+        json: false,
+      },
+      logger,
+      { phaseFilter: 'pre' },
+    );
 
     expect(result.executed).toBe(0);
   });
@@ -423,21 +449,24 @@ columns:
   it('should run status command', async () => {
     const logger = createLogger({ verbose: false, quiet: true, json: false });
     const { getStatus } = await import('../pipeline.js');
-    const status = await getStatus({
-      connectionString: DATABASE_URL,
-      baseDir: tmpDir,
-      pgSchema: 'public',
-      dryRun: false,
-      allowDestructive: false,
-      skipChecks: false,
-      lockTimeout: 5000,
-      statementTimeout: 30000,
-      maxRetries: 3,
-      historyTable: 'history',
-      verbose: false,
-      quiet: true,
-      json: false,
-    }, logger);
+    const status = await getStatus(
+      {
+        connectionString: DATABASE_URL,
+        baseDir: tmpDir,
+        pgSchema: 'public',
+        dryRun: false,
+        allowDestructive: false,
+        skipChecks: false,
+        lockTimeout: 5000,
+        statementTimeout: 30000,
+        maxRetries: 3,
+        historyTable: 'history',
+        verbose: false,
+        quiet: true,
+        json: false,
+      },
+      logger,
+    );
 
     expect(status).toBeDefined();
     expect(typeof status.appliedFiles).toBe('number');
@@ -465,7 +494,9 @@ describe('CLI baseline command', () => {
     // Create schema files
     fs.mkdirSync(path.join(tmpDir, 'tables'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, 'enums'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, 'tables', 'users.yaml'), `
+    fs.writeFileSync(
+      path.join(tmpDir, 'tables', 'users.yaml'),
+      `
 table: users
 columns:
   - name: id
@@ -475,51 +506,61 @@ columns:
   - name: email
     type: text
     nullable: false
-`);
-    fs.writeFileSync(path.join(tmpDir, 'enums', 'status.yaml'), `
+`,
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'enums', 'status.yaml'),
+      `
 enum: status
 values:
   - active
   - inactive
-`);
+`,
+    );
 
     const logger = createLogger({ verbose: false, quiet: true, json: false });
     const { runBaseline } = await import('../pipeline.js');
-    const result = await runBaseline({
-      connectionString: DATABASE_URL,
-      baseDir: tmpDir,
-      pgSchema: 'public',
-      dryRun: false,
-      allowDestructive: false,
-      skipChecks: false,
-      lockTimeout: 5000,
-      statementTimeout: 30000,
-      maxRetries: 3,
-      historyTable: 'history',
-      verbose: false,
-      quiet: true,
-      json: false,
-    }, logger);
+    const result = await runBaseline(
+      {
+        connectionString: DATABASE_URL,
+        baseDir: tmpDir,
+        pgSchema: 'public',
+        dryRun: false,
+        allowDestructive: false,
+        skipChecks: false,
+        lockTimeout: 5000,
+        statementTimeout: 30000,
+        maxRetries: 3,
+        historyTable: 'history',
+        verbose: false,
+        quiet: true,
+        json: false,
+      },
+      logger,
+    );
 
     expect(result.filesRecorded).toBe(2);
 
     // Verify files are recorded in history — status should show 0 pending
     const { getStatus } = await import('../pipeline.js');
-    const status = await getStatus({
-      connectionString: DATABASE_URL,
-      baseDir: tmpDir,
-      pgSchema: 'public',
-      dryRun: false,
-      allowDestructive: false,
-      skipChecks: false,
-      lockTimeout: 5000,
-      statementTimeout: 30000,
-      maxRetries: 3,
-      historyTable: 'history',
-      verbose: false,
-      quiet: true,
-      json: false,
-    }, logger);
+    const status = await getStatus(
+      {
+        connectionString: DATABASE_URL,
+        baseDir: tmpDir,
+        pgSchema: 'public',
+        dryRun: false,
+        allowDestructive: false,
+        skipChecks: false,
+        lockTimeout: 5000,
+        statementTimeout: 30000,
+        maxRetries: 3,
+        historyTable: 'history',
+        verbose: false,
+        quiet: true,
+        json: false,
+      },
+      logger,
+    );
 
     expect(status.appliedFiles).toBeGreaterThanOrEqual(2);
     expect(status.pendingChanges).toBe(0);
@@ -531,31 +572,37 @@ values:
     fs.mkdirSync(path.join(tmpDir, 'tables'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, 'pre', '001_setup.sql'), 'SELECT 1;');
     fs.writeFileSync(path.join(tmpDir, 'post', '001_cleanup.sql'), 'SELECT 1;');
-    fs.writeFileSync(path.join(tmpDir, 'tables', 'items.yaml'), `
+    fs.writeFileSync(
+      path.join(tmpDir, 'tables', 'items.yaml'),
+      `
 table: items
 columns:
   - name: id
     type: serial
     primary_key: true
-`);
+`,
+    );
 
     const logger = createLogger({ verbose: false, quiet: true, json: false });
     const { runBaseline } = await import('../pipeline.js');
-    const result = await runBaseline({
-      connectionString: DATABASE_URL,
-      baseDir: tmpDir,
-      pgSchema: 'public',
-      dryRun: false,
-      allowDestructive: false,
-      skipChecks: false,
-      lockTimeout: 5000,
-      statementTimeout: 30000,
-      maxRetries: 3,
-      historyTable: 'history',
-      verbose: false,
-      quiet: true,
-      json: false,
-    }, logger);
+    const result = await runBaseline(
+      {
+        connectionString: DATABASE_URL,
+        baseDir: tmpDir,
+        pgSchema: 'public',
+        dryRun: false,
+        allowDestructive: false,
+        skipChecks: false,
+        lockTimeout: 5000,
+        statementTimeout: 30000,
+        maxRetries: 3,
+        historyTable: 'history',
+        verbose: false,
+        quiet: true,
+        json: false,
+      },
+      logger,
+    );
 
     expect(result.filesRecorded).toBe(3);
   });

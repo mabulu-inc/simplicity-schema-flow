@@ -60,9 +60,7 @@ const DEFAULTS: SimplicitySchemaConfig = {
 };
 
 function resolveConnectionString(): string {
-  return process.env.SIMPLICITY_SCHEMA_DATABASE_URL
-    ?? process.env.DATABASE_URL
-    ?? '';
+  return process.env.SIMPLICITY_SCHEMA_DATABASE_URL ?? process.env.DATABASE_URL ?? '';
 }
 
 export function resolveConfig(overrides: ConfigOverrides = {}): SimplicitySchemaConfig {

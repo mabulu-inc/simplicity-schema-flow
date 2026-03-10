@@ -79,10 +79,7 @@ function toFileConfigValues(raw: Record<string, unknown>): FileConfigValues {
 /**
  * Load and parse the config file. Returns null if no config file found.
  */
-export function loadConfigFile(
-  configPath?: string,
-  environment?: string,
-): FileConfigValues | null {
+export function loadConfigFile(configPath?: string, environment?: string): FileConfigValues | null {
   const filePath = configPath ?? resolve(process.cwd(), DEFAULT_CONFIG_FILENAME);
 
   if (!existsSync(filePath)) {

@@ -55,7 +55,9 @@ export async function runPipeline(
 
   // 1. Discover files
   const discovered = await discoverSchemaFiles(config.baseDir);
-  logger.debug(`Discovered ${discovered.pre.length} pre, ${discovered.schema.length} schema, ${discovered.post.length} post files`);
+  logger.debug(
+    `Discovered ${discovered.pre.length} pre, ${discovered.schema.length} schema, ${discovered.post.length} post files`,
+  );
 
   // If phase-filtered, skip irrelevant work
   const preScripts = phaseFilter === 'migrate' || phaseFilter === 'post' ? [] : discovered.pre;
@@ -63,7 +65,7 @@ export async function runPipeline(
   const shouldMigrate = !phaseFilter || phaseFilter === 'migrate';
 
   let operations: ReturnType<typeof buildPlan>['operations'] = [];
-  let blocked: ReturnType<typeof buildPlan>['blocked'] = [];
+  let blocked: ReturnType<typeof buildPlan>['blocked'] = []; // eslint-disable-line no-useless-assignment
 
   if (shouldMigrate && discovered.schema.length > 0) {
     // 2. Parse YAML files
@@ -173,10 +175,7 @@ async function parseDesiredState(
 /**
  * Introspect the live database to get the ActualState.
  */
-async function introspectDatabase(
-  config: SimplicitySchemaConfig,
-  logger: Logger,
-): Promise<ActualState> {
+async function introspectDatabase(config: SimplicitySchemaConfig, logger: Logger): Promise<ActualState> {
   const pool = getPool(config.connectionString);
   const client = await pool.connect();
 
@@ -213,9 +212,7 @@ async function introspectDatabase(
     for (const r of roleList) rolesMap.set(r.role, r);
 
     // Get installed extensions
-    const extResult = await client.query(
-      "SELECT extname FROM pg_extension WHERE extname != 'plpgsql'",
-    );
+    const extResult = await client.query("SELECT extname FROM pg_extension WHERE extname != 'plpgsql'");
     const extensions = extResult.rows.map((r: { extname: string }) => r.extname);
 
     logger.debug(`Introspected: ${tableNames.length} tables, ${enumList.length} enums, ${fnList.length} functions`);
@@ -250,10 +247,7 @@ export async function buildDesiredAndActual(
 /**
  * Build a migration plan without executing.
  */
-export async function getPlan(
-  config: SimplicitySchemaConfig,
-  logger: Logger,
-): Promise<ReturnType<typeof buildPlan>> {
+export async function getPlan(config: SimplicitySchemaConfig, logger: Logger): Promise<ReturnType<typeof buildPlan>> {
   const { desired, actual } = await buildDesiredAndActual(config, logger);
   return buildPlan(desired, actual, {
     allowDestructive: config.allowDestructive,
@@ -282,10 +276,7 @@ export interface BaselineResult {
  * Mark the current DB state as baseline by recording all current schema files
  * in the history table without running any migrations.
  */
-export async function runBaseline(
-  config: SimplicitySchemaConfig,
-  logger: Logger,
-): Promise<BaselineResult> {
+export async function runBaseline(config: SimplicitySchemaConfig, logger: Logger): Promise<BaselineResult> {
   const pool = getPool(config.connectionString);
   const client = await pool.connect();
 
@@ -321,57 +312,39 @@ export interface StatusResult {
 /**
  * Pipeline convenience: run all phases.
  */
-export async function runAll(
-  config: SimplicitySchemaConfig,
-  logger: Logger,
-): Promise<ExecuteResult> {
+export async function runAll(config: SimplicitySchemaConfig, logger: Logger): Promise<ExecuteResult> {
   return runPipeline(config, logger);
 }
 
 /**
  * Pipeline convenience: run only pre scripts.
  */
-export async function runPre(
-  config: SimplicitySchemaConfig,
-  logger: Logger,
-): Promise<ExecuteResult> {
+export async function runPre(config: SimplicitySchemaConfig, logger: Logger): Promise<ExecuteResult> {
   return runPipeline(config, logger, { phaseFilter: 'pre' });
 }
 
 /**
  * Pipeline convenience: run only migrate phase.
  */
-export async function runMigrate(
-  config: SimplicitySchemaConfig,
-  logger: Logger,
-): Promise<ExecuteResult> {
+export async function runMigrate(config: SimplicitySchemaConfig, logger: Logger): Promise<ExecuteResult> {
   return runPipeline(config, logger, { phaseFilter: 'migrate' });
 }
 
 /**
  * Pipeline convenience: run only post scripts.
  */
-export async function runPost(
-  config: SimplicitySchemaConfig,
-  logger: Logger,
-): Promise<ExecuteResult> {
+export async function runPost(config: SimplicitySchemaConfig, logger: Logger): Promise<ExecuteResult> {
   return runPipeline(config, logger, { phaseFilter: 'post' });
 }
 
 /**
  * Pipeline convenience: validate mode (rolled-back transaction).
  */
-export async function runValidate(
-  config: SimplicitySchemaConfig,
-  logger: Logger,
-): Promise<ExecuteResult> {
+export async function runValidate(config: SimplicitySchemaConfig, logger: Logger): Promise<ExecuteResult> {
   return runPipeline(config, logger, { validateOnly: true });
 }
 
-export async function getStatus(
-  config: SimplicitySchemaConfig,
-  logger: Logger,
-): Promise<StatusResult> {
+export async function getStatus(config: SimplicitySchemaConfig, _logger: Logger): Promise<StatusResult> {
   const pool = getPool(config.connectionString);
   const client = await pool.connect();
 

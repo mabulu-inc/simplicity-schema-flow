@@ -52,10 +52,9 @@ describe('useTestProject', () => {
     const pool = getPool(DATABASE_URL);
     const client = await pool.connect();
     try {
-      const result = await client.query(
-        `SELECT 1 FROM information_schema.schemata WHERE schema_name = $1`,
-        [schemaName],
-      );
+      const result = await client.query(`SELECT 1 FROM information_schema.schemata WHERE schema_name = $1`, [
+        schemaName,
+      ]);
       expect(result.rows.length).toBe(0);
     } finally {
       client.release();
@@ -121,17 +120,13 @@ columns:
 
       // Before migration, drift should show missing table
       const driftBefore = await project.drift();
-      const missingTable = driftBefore.items.find(
-        (i) => i.type === 'table' && i.status === 'missing_in_db',
-      );
+      const missingTable = driftBefore.items.find((i) => i.type === 'table' && i.status === 'missing_in_db');
       expect(missingTable).toBeDefined();
 
       // After migration, table should no longer be missing
       await project.migrate();
       const driftAfter = await project.drift();
-      const stillMissing = driftAfter.items.find(
-        (i) => i.type === 'table' && i.status === 'missing_in_db',
-      );
+      const stillMissing = driftAfter.items.find((i) => i.type === 'table' && i.status === 'missing_in_db');
       expect(stillMissing).toBeUndefined();
     } finally {
       await project.cleanup();
@@ -150,9 +145,7 @@ describe('writeSchema', () => {
 
       expect(fs.existsSync(path.join(tmpDir, 'tables', 'users.yaml'))).toBe(true);
       expect(fs.existsSync(path.join(tmpDir, 'enums', 'status.yaml'))).toBe(true);
-      expect(fs.readFileSync(path.join(tmpDir, 'tables', 'users.yaml'), 'utf-8')).toBe(
-        'name: users\ncolumns: []',
-      );
+      expect(fs.readFileSync(path.join(tmpDir, 'tables', 'users.yaml'), 'utf-8')).toBe('name: users\ncolumns: []');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -165,9 +158,7 @@ describe('writeSchema', () => {
         'deeply/nested/dir/file.yaml': 'content: here',
       });
 
-      expect(
-        fs.readFileSync(path.join(tmpDir, 'deeply', 'nested', 'dir', 'file.yaml'), 'utf-8'),
-      ).toBe('content: here');
+      expect(fs.readFileSync(path.join(tmpDir, 'deeply', 'nested', 'dir', 'file.yaml'), 'utf-8')).toBe('content: here');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

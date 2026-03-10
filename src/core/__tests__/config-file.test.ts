@@ -58,12 +58,15 @@ describe('loadConfigFile', () => {
 
   it('loads default section values', () => {
     const configPath = join(tmpDir, 'config.yaml');
-    writeFileSync(configPath, `
+    writeFileSync(
+      configPath,
+      `
 default:
   connectionString: postgres://localhost/mydb
   pgSchema: app
   lockTimeout: 3000
-`);
+`,
+    );
     const result = loadConfigFile(configPath);
     expect(result).not.toBeNull();
     expect(result!.connectionString).toBe('postgres://localhost/mydb');
@@ -74,17 +77,22 @@ default:
   it('interpolates environment variables', () => {
     process.env.TEST_DB_URL = 'postgres://localhost/interpolated';
     const configPath = join(tmpDir, 'config.yaml');
-    writeFileSync(configPath, `
+    writeFileSync(
+      configPath,
+      `
 default:
   connectionString: \${TEST_DB_URL}
-`);
+`,
+    );
     const result = loadConfigFile(configPath);
     expect(result!.connectionString).toBe('postgres://localhost/interpolated');
   });
 
   it('overlays environment-specific config on top of defaults', () => {
     const configPath = join(tmpDir, 'config.yaml');
-    writeFileSync(configPath, `
+    writeFileSync(
+      configPath,
+      `
 default:
   connectionString: postgres://localhost/default
   pgSchema: public
@@ -94,7 +102,8 @@ environments:
   staging:
     connectionString: postgres://staging/db
     lockTimeout: 3000
-`);
+`,
+    );
     const result = loadConfigFile(configPath, 'staging');
     expect(result!.connectionString).toBe('postgres://staging/db');
     expect(result!.pgSchema).toBe('public'); // inherited from default
@@ -103,10 +112,13 @@ environments:
 
   it('returns default values when environment not found', () => {
     const configPath = join(tmpDir, 'config.yaml');
-    writeFileSync(configPath, `
+    writeFileSync(
+      configPath,
+      `
 default:
   pgSchema: myschema
-`);
+`,
+    );
     const result = loadConfigFile(configPath, 'nonexistent');
     expect(result!.pgSchema).toBe('myschema');
   });
@@ -120,12 +132,15 @@ default:
 
   it('parses boolean config values', () => {
     const configPath = join(tmpDir, 'config.yaml');
-    writeFileSync(configPath, `
+    writeFileSync(
+      configPath,
+      `
 default:
   dryRun: true
   allowDestructive: true
   verbose: false
-`);
+`,
+    );
     const result = loadConfigFile(configPath);
     expect(result!.dryRun).toBe(true);
     expect(result!.allowDestructive).toBe(true);

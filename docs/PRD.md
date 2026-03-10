@@ -97,10 +97,10 @@ columns:
     type: text
     nullable: false
     unique: true
-    unique_name: uq_users_email       # Custom unique constraint name (optional)
-    check: "length(email) > 0"        # Column-level check sugar (optional)
+    unique_name: uq_users_email # Custom unique constraint name (optional)
+    check: 'length(email) > 0' # Column-level check sugar (optional)
     comment: "User's primary email address"
-    description: "Same as comment"     # Alias for comment (either works)
+    description: 'Same as comment' # Alias for comment (either works)
   - name: name
     type: text
     nullable: false
@@ -109,9 +109,9 @@ columns:
     references:
       table: roles
       column: id
-      name: fk_users_role             # Custom FK constraint name (optional)
-      schema: public                   # Cross-schema FK (optional, defaults to target schema)
-      on_delete: SET NULL              # CASCADE | SET NULL | SET DEFAULT | RESTRICT | NO ACTION
+      name: fk_users_role # Custom FK constraint name (optional)
+      schema: public # Cross-schema FK (optional, defaults to target schema)
+      on_delete: SET NULL # CASCADE | SET NULL | SET DEFAULT | RESTRICT | NO ACTION
       on_update: NO ACTION
       deferrable: false
       initially_deferred: false
@@ -120,80 +120,80 @@ columns:
     default: "'{}'::jsonb"
   - name: total
     type: numeric
-    generated: "price * quantity"      # GENERATED ALWAYS AS (expr) STORED
+    generated: 'price * quantity' # GENERATED ALWAYS AS (expr) STORED
   - name: old_email
     type: text
-    expand:                            # Zero-downtime column migration
+    expand: # Zero-downtime column migration
       from: email
-      transform: "lower(email)"
-      reverse: "email"                 # Reverse transform for dual-write (new → old)
-      batch_size: 5000                 # Backfill batch size (default: 1000)
+      transform: 'lower(email)'
+      reverse: 'email' # Reverse transform for dual-write (new → old)
+      batch_size: 5000 # Backfill batch size (default: 1000)
 
-primary_key: [id]                      # Composite PK alternative to column-level
-primary_key_name: pk_users             # Custom PK constraint name (optional)
+primary_key: [id] # Composite PK alternative to column-level
+primary_key_name: pk_users # Custom PK constraint name (optional)
 
 indexes:
   - columns: [email]
     unique: true
-    comment: "Ensure email uniqueness"
+    comment: 'Ensure email uniqueness'
   - name: idx_users_metadata
     columns: [metadata]
-    method: gin                        # btree (default) | gin | gist | hash | brin
+    method: gin # btree (default) | gin | gist | hash | brin
   - columns: [created_at]
-    where: "deleted_at IS NULL"        # Partial index
+    where: 'deleted_at IS NULL' # Partial index
   - columns: [name]
-    include: [email]                   # Covering index (INCLUDE)
+    include: [email] # Covering index (INCLUDE)
     opclass: text_pattern_ops
 
 checks:
   - name: email_not_empty
-    expression: "length(email) > 0"
-    comment: "Ensure email is not blank"
+    expression: 'length(email) > 0'
+    comment: 'Ensure email is not blank'
 
 unique_constraints:
   - columns: [email, tenant_id]
     name: uq_users_email_tenant
-    comment: "One email per tenant"
+    comment: 'One email per tenant'
 
 triggers:
   - name: set_updated_at
-    timing: BEFORE                     # BEFORE | AFTER | INSTEAD OF
-    events: [UPDATE]                   # INSERT | UPDATE | DELETE | TRUNCATE
+    timing: BEFORE # BEFORE | AFTER | INSTEAD OF
+    events: [UPDATE] # INSERT | UPDATE | DELETE | TRUNCATE
     function: update_timestamp
-    for_each: ROW                      # ROW | STATEMENT
-    when: "OLD.* IS DISTINCT FROM NEW.*"
-    comment: "Auto-update timestamp"
+    for_each: ROW # ROW | STATEMENT
+    when: 'OLD.* IS DISTINCT FROM NEW.*'
+    comment: 'Auto-update timestamp'
 
-rls: true                              # Enable row-level security
-force_rls: true                        # Force RLS even on table owner
+rls: true # Enable row-level security
+force_rls: true # Force RLS even on table owner
 
 policies:
   - name: users_own_data
-    for: SELECT                        # SELECT | INSERT | UPDATE | DELETE | ALL
-    to: app_user                       # Role name
+    for: SELECT # SELECT | INSERT | UPDATE | DELETE | ALL
+    to: app_user # Role name
     using: "id = current_setting('app.user_id')::uuid"
     check: "id = current_setting('app.user_id')::uuid"
-    permissive: true                   # true (PERMISSIVE) | false (RESTRICTIVE)
-    comment: "Users can only see their own data"
+    permissive: true # true (PERMISSIVE) | false (RESTRICTIVE)
+    comment: 'Users can only see their own data'
 
 grants:
   - to: app_readonly
     privileges: [SELECT]
-    columns: [id, email, name]         # Column-level grants (optional)
+    columns: [id, email, name] # Column-level grants (optional)
     with_grant_option: false
 
 prechecks:
   - name: ensure_no_orphans
-    query: "SELECT count(*) = 0 FROM orders WHERE user_id NOT IN (SELECT id FROM users)"
-    message: "Orphaned orders exist — fix before migrating"
+    query: 'SELECT count(*) = 0 FROM orders WHERE user_id NOT IN (SELECT id FROM users)'
+    message: 'Orphaned orders exist — fix before migrating'
 
 seeds:
-  - id: "00000000-0000-0000-0000-000000000001"
-    email: "admin@example.com"
-    name: "Admin"
-seeds_on_conflict: "DO NOTHING"        # "DO NOTHING" for insert-only; omit for default upsert
+  - id: '00000000-0000-0000-0000-000000000001'
+    email: 'admin@example.com'
+    name: 'Admin'
+seeds_on_conflict: 'DO NOTHING' # "DO NOTHING" for insert-only; omit for default upsert
 
-comment: "Core user accounts table"
+comment: 'Core user accounts table'
 ```
 
 #### Table Name
@@ -204,34 +204,34 @@ The `table` field is required. One YAML file per table.
 
 All PostgreSQL types are supported. Common ones:
 
-| Type | Notes |
-|------|-------|
-| `uuid` | Recommended for PKs |
-| `text` | Variable-length string |
-| `varchar(N)` | Bounded string |
-| `integer`, `bigint`, `smallint` | Integers |
-| `serial`, `bigserial` | Auto-increment integers |
-| `numeric`, `decimal` | Exact numeric |
-| `boolean` | true/false |
-| `timestamptz` | Timestamp with timezone (preferred) |
-| `timestamp` | Timestamp without timezone |
-| `date`, `time`, `interval` | Date/time |
-| `jsonb`, `json` | JSON data |
-| `bytea` | Binary data |
-| `inet`, `cidr`, `macaddr` | Network types |
-| `point`, `polygon`, `circle` | Geometric types |
-| `text[]`, `integer[]` | Arrays |
-| Custom enum names | User-defined enums |
+| Type                            | Notes                               |
+| ------------------------------- | ----------------------------------- |
+| `uuid`                          | Recommended for PKs                 |
+| `text`                          | Variable-length string              |
+| `varchar(N)`                    | Bounded string                      |
+| `integer`, `bigint`, `smallint` | Integers                            |
+| `serial`, `bigserial`           | Auto-increment integers             |
+| `numeric`, `decimal`            | Exact numeric                       |
+| `boolean`                       | true/false                          |
+| `timestamptz`                   | Timestamp with timezone (preferred) |
+| `timestamp`                     | Timestamp without timezone          |
+| `date`, `time`, `interval`      | Date/time                           |
+| `jsonb`, `json`                 | JSON data                           |
+| `bytea`                         | Binary data                         |
+| `inet`, `cidr`, `macaddr`       | Network types                       |
+| `point`, `polygon`, `circle`    | Geometric types                     |
+| `text[]`, `integer[]`           | Arrays                              |
+| Custom enum names               | User-defined enums                  |
 
 #### Foreign Key Actions
 
-| Action | Behavior |
-|--------|----------|
-| `CASCADE` | Delete/update child rows |
-| `SET NULL` | Set FK column to NULL |
-| `SET DEFAULT` | Set FK column to default |
-| `RESTRICT` | Prevent if children exist (immediate) |
-| `NO ACTION` | Prevent if children exist (deferred, default) |
+| Action        | Behavior                                      |
+| ------------- | --------------------------------------------- |
+| `CASCADE`     | Delete/update child rows                      |
+| `SET NULL`    | Set FK column to NULL                         |
+| `SET DEFAULT` | Set FK column to default                      |
+| `RESTRICT`    | Prevent if children exist (immediate)         |
+| `NO ACTION`   | Prevent if children exist (deferred, default) |
 
 #### Column-Level Check Sugar
 
@@ -240,7 +240,7 @@ Columns support an inline `check` field as syntactic sugar:
 ```yaml
 - name: age
   type: integer
-  check: "age >= 0"                    # Generates a named CHECK constraint
+  check: 'age >= 0' # Generates a named CHECK constraint
 ```
 
 This is equivalent to:
@@ -248,7 +248,7 @@ This is equivalent to:
 ```yaml
 checks:
   - name: chk_<table>_<column>
-    expression: "age >= 0"
+    expression: 'age >= 0'
 ```
 
 #### Description Alias
@@ -261,12 +261,13 @@ Seeds support literal values and SQL expressions:
 
 ```yaml
 seeds:
-  - id: "00000000-0000-0000-0000-000000000001"
-    email: "admin@example.com"
-    created_at: !sql now()             # SQL expression (not a string literal)
+  - id: '00000000-0000-0000-0000-000000000001'
+    email: 'admin@example.com'
+    created_at: !sql now() # SQL expression (not a string literal)
 ```
 
 The `seeds_on_conflict` field controls conflict behavior:
+
 - **Omitted (default)**: `INSERT ... ON CONFLICT (pk) DO UPDATE SET ...` — upsert
 - **`"DO NOTHING"`**: `INSERT ... ON CONFLICT (pk) DO NOTHING` — insert-only, skip existing rows
 
@@ -280,7 +281,7 @@ values:
   - shipped
   - delivered
   - cancelled
-comment: "Order lifecycle states"
+comment: 'Order lifecycle states'
 ```
 
 - Values are **append-only** — new values can be added but existing values cannot be removed or reordered (PostgreSQL limitation)
@@ -290,31 +291,31 @@ comment: "Order lifecycle states"
 
 ```yaml
 name: update_timestamp
-language: plpgsql              # plpgsql | sql | etc.
+language: plpgsql # plpgsql | sql | etc.
 returns: trigger
 args:
   - name: target_column
     type: text
-    mode: IN                   # IN (default) | OUT | INOUT | VARIADIC
+    mode: IN # IN (default) | OUT | INOUT | VARIADIC
     default: "'updated_at'"
 body: |
   BEGIN
     NEW.updated_at = now();
     RETURN NEW;
   END;
-security: invoker              # invoker (default) | definer
-volatility: volatile           # volatile (default) | stable | immutable
-parallel: unsafe               # unsafe (default) | safe | restricted
-strict: false                  # RETURNS NULL ON NULL INPUT
+security: invoker # invoker (default) | definer
+volatility: volatile # volatile (default) | stable | immutable
+parallel: unsafe # unsafe (default) | safe | restricted
+strict: false # RETURNS NULL ON NULL INPUT
 leakproof: false
 cost: 100
-rows: 0                        # Estimated rows for set-returning functions
-set:                           # SET configuration parameters
+rows: 0 # Estimated rows for set-returning functions
+set: # SET configuration parameters
   search_path: public
 grants:
   - to: app_user
     privileges: [EXECUTE]
-comment: "Auto-update timestamp trigger function"
+comment: 'Auto-update timestamp trigger function'
 ```
 
 ### 4.4 Views
@@ -328,7 +329,7 @@ query: |
 grants:
   - to: app_readonly
     privileges: [SELECT]
-comment: "Users who have not been soft-deleted"
+comment: 'Users who have not been soft-deleted'
 ```
 
 ### 4.5 Materialized Views
@@ -346,7 +347,7 @@ indexes:
 grants:
   - to: app_readonly
     privileges: [SELECT]
-comment: "Aggregated user order statistics"
+comment: 'Aggregated user order statistics'
 ```
 
 - When a materialized view's query changes, the tool recreates and refreshes it
@@ -363,9 +364,9 @@ createrole: false
 inherit: true
 bypassrls: false
 replication: false
-connection_limit: -1           # -1 = unlimited
-in: [app_group]                # Group memberships
-comment: "Read-only application role"
+connection_limit: -1 # -1 = unlimited
+in: [app_group] # Group memberships
+comment: 'Read-only application role'
 ```
 
 ### 4.7 Extensions
@@ -375,7 +376,7 @@ extensions:
   - pgcrypto
   - pg_trgm
   - uuid-ossp
-schema_grants:                 # Optional: grant usage on extension schemas
+schema_grants: # Optional: grant usage on extension schemas
   - to: app_user
     schemas: [public]
 ```
@@ -398,21 +399,21 @@ columns:
 indexes:
   - columns: [created_at]
 triggers:
-  - name: set_{table}_updated_at    # {table} is replaced with the consuming table name
+  - name: set_{table}_updated_at # {table} is replaced with the consuming table name
     timing: BEFORE
     events: [UPDATE]
     function: update_timestamp
     for_each: ROW
 checks:
   - name: chk_{table}_dates
-    expression: "updated_at >= created_at"
-rls: true                          # Enable RLS on consuming tables
-force_rls: true                    # Force RLS on consuming tables
+    expression: 'updated_at >= created_at'
+rls: true # Enable RLS on consuming tables
+force_rls: true # Force RLS on consuming tables
 policies:
-  - name: "{table}_owner_policy"
+  - name: '{table}_owner_policy'
     for: ALL
     to: app_user
-    using: "owner_id = current_user_id()"
+    using: 'owner_id = current_user_id()'
 grants:
   - to: app_readonly
     privileges: [SELECT]
@@ -475,21 +476,21 @@ environments:
 
 ### 5.3 Configuration Options
 
-| Option | CLI Flag | Default | Description |
-|--------|----------|---------|-------------|
-| `connectionString` | `--connection-string`, `--db` | env vars | PostgreSQL connection string |
-| `baseDir` | `--dir` | `./schema` | Root schema directory |
-| `pgSchema` | `--schema` | `public` | Target PostgreSQL schema for user-defined objects |
-| `dryRun` | `--dry-run` | `false` | Plan only, don't execute |
-| `allowDestructive` | `--allow-destructive` | `false` | Allow drops and destructive changes |
-| `skipChecks` | `--skip-checks` | `false` | Skip pre-migration checks |
-| `lockTimeout` | `--lock-timeout` | `5000` (ms) | Lock acquisition timeout |
-| `statementTimeout` | `--statement-timeout` | `30000` (ms) | Statement execution timeout |
-| `maxRetries` | `--max-retries` | `3` | Max retries on transient errors |
-| `historyTable` | — | `history` | Migration tracking table name (always in `_simplicity` schema) |
-| `verbose` | `--verbose` | `false` | Verbose output |
-| `quiet` | `--quiet` | `false` | Suppress non-error output |
-| `json` | `--json` | `false` | Output in JSON format |
+| Option             | CLI Flag                      | Default      | Description                                                    |
+| ------------------ | ----------------------------- | ------------ | -------------------------------------------------------------- |
+| `connectionString` | `--connection-string`, `--db` | env vars     | PostgreSQL connection string                                   |
+| `baseDir`          | `--dir`                       | `./schema`   | Root schema directory                                          |
+| `pgSchema`         | `--schema`                    | `public`     | Target PostgreSQL schema for user-defined objects              |
+| `dryRun`           | `--dry-run`                   | `false`      | Plan only, don't execute                                       |
+| `allowDestructive` | `--allow-destructive`         | `false`      | Allow drops and destructive changes                            |
+| `skipChecks`       | `--skip-checks`               | `false`      | Skip pre-migration checks                                      |
+| `lockTimeout`      | `--lock-timeout`              | `5000` (ms)  | Lock acquisition timeout                                       |
+| `statementTimeout` | `--statement-timeout`         | `30000` (ms) | Statement execution timeout                                    |
+| `maxRetries`       | `--max-retries`               | `3`          | Max retries on transient errors                                |
+| `historyTable`     | —                             | `history`    | Migration tracking table name (always in `_simplicity` schema) |
+| `verbose`          | `--verbose`                   | `false`      | Verbose output                                                 |
+| `quiet`            | `--quiet`                     | `false`      | Suppress non-error output                                      |
+| `json`             | `--json`                      | `false`      | Output in JSON format                                          |
 
 ---
 
@@ -497,52 +498,52 @@ environments:
 
 ### 6.1 Core Migration
 
-| Command | Description |
-|---------|-------------|
-| `simplicity-schema run` | Run full migration (pre → migrate → post) |
-| `simplicity-schema run pre` | Run only pre-scripts |
-| `simplicity-schema run migrate` | Run only schema migration phase |
-| `simplicity-schema run post` | Run only post-scripts |
-| `simplicity-schema plan` | Dry-run — show planned operations without executing |
-| `simplicity-schema validate` | Execute plan in a rollback transaction to verify SQL validity |
-| `simplicity-schema baseline` | Mark current DB state as baseline (create history entries without running migrations) |
+| Command                         | Description                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------- |
+| `simplicity-schema run`         | Run full migration (pre → migrate → post)                                             |
+| `simplicity-schema run pre`     | Run only pre-scripts                                                                  |
+| `simplicity-schema run migrate` | Run only schema migration phase                                                       |
+| `simplicity-schema run post`    | Run only post-scripts                                                                 |
+| `simplicity-schema plan`        | Dry-run — show planned operations without executing                                   |
+| `simplicity-schema validate`    | Execute plan in a rollback transaction to verify SQL validity                         |
+| `simplicity-schema baseline`    | Mark current DB state as baseline (create history entries without running migrations) |
 
 ### 6.2 Analysis
 
-| Command | Description |
-|---------|-------------|
-| `simplicity-schema drift` | Compare YAML definitions to live DB; report differences |
+| Command                           | Description                                                   |
+| --------------------------------- | ------------------------------------------------------------- |
+| `simplicity-schema drift`         | Compare YAML definitions to live DB; report differences       |
 | `simplicity-schema drift --apply` | Detect drift and apply fixes (respects `--allow-destructive`) |
-| `simplicity-schema lint` | Static analysis of migration plan for dangerous patterns |
-| `simplicity-schema status` | Show migration status (applied files, pending changes) |
+| `simplicity-schema lint`          | Static analysis of migration plan for dangerous patterns      |
+| `simplicity-schema status`        | Show migration status (applied files, pending changes)        |
 
 ### 6.3 Generation
 
-| Command | Flags | Description |
-|---------|-------|-------------|
-| `simplicity-schema generate` | `--output-dir`, `--seeds` | Generate YAML from existing database |
-| `simplicity-schema sql` | `--output` | Generate standalone `.sql` migration file from plan |
-| `simplicity-schema erd` | `--output` | Generate Mermaid ER diagram from YAML |
-| `simplicity-schema new pre` | `--name` | Create timestamped pre-script template |
-| `simplicity-schema new post` | `--name` | Create timestamped post-script template |
-| `simplicity-schema new mixin` | `--name` | Create mixin template |
-| `simplicity-schema init` | — | Initialize a new schema project directory |
+| Command                       | Flags                     | Description                                         |
+| ----------------------------- | ------------------------- | --------------------------------------------------- |
+| `simplicity-schema generate`  | `--output-dir`, `--seeds` | Generate YAML from existing database                |
+| `simplicity-schema sql`       | `--output`                | Generate standalone `.sql` migration file from plan |
+| `simplicity-schema erd`       | `--output`                | Generate Mermaid ER diagram from YAML               |
+| `simplicity-schema new pre`   | `--name`                  | Create timestamped pre-script template              |
+| `simplicity-schema new post`  | `--name`                  | Create timestamped post-script template             |
+| `simplicity-schema new mixin` | `--name`                  | Create mixin template                               |
+| `simplicity-schema init`      | —                         | Initialize a new schema project directory           |
 
 ### 6.4 Rollback & Expand/Contract
 
-| Command | Description |
-|---------|-------------|
-| `simplicity-schema down` | Rollback to previous migration snapshot |
-| `simplicity-schema contract` | Complete contract phase of expand/contract migration |
+| Command                           | Description                                           |
+| --------------------------------- | ----------------------------------------------------- |
+| `simplicity-schema down`          | Rollback to previous migration snapshot               |
+| `simplicity-schema contract`      | Complete contract phase of expand/contract migration  |
 | `simplicity-schema expand-status` | Show status of in-progress expand/contract migrations |
 
 ### 6.5 Utility
 
-| Command | Description |
-|---------|-------------|
-| `simplicity-schema docs` | Print YAML format reference |
-| `simplicity-schema help` | Show help |
-| `simplicity-schema --version` | Show version |
+| Command                       | Description                 |
+| ----------------------------- | --------------------------- |
+| `simplicity-schema docs`      | Print YAML format reference |
+| `simplicity-schema help`      | Show help                   |
+| `simplicity-schema --version` | Show version                |
 
 ### 6.6 Global Flags
 
@@ -569,26 +570,26 @@ DISCOVER → PARSE → EXPAND → INTROSPECT → PLAN → EXECUTE
 
 Operations execute in strict dependency order:
 
-| Phase | Object Type | Notes |
-|-------|-------------|-------|
-| 0 | Internal schema | `CREATE SCHEMA IF NOT EXISTS _simplicity` (tool bookkeeping) |
-| 0+ | Prechecks | Pre-migration assertions (abort if falsy) |
-| 1 | Pre-scripts | SQL scripts in `pre/`, alphabetical order |
-| 2 | Extensions | `CREATE EXTENSION IF NOT EXISTS` |
-| 3 | Enums | `CREATE TYPE ... AS ENUM`, `ALTER TYPE ... ADD VALUE` |
-| 4 | Roles | `CREATE ROLE`, `ALTER ROLE`, `GRANT` membership |
-| 5 | Functions | `CREATE OR REPLACE FUNCTION` |
-| 6 | Tables | `CREATE TABLE`, `ALTER TABLE` (columns, checks, unique constraints) — **without FKs** |
-| 7 | Indexes | Created outside transaction using `CONCURRENTLY` where possible |
-| 8 | Foreign keys | Added as `NOT VALID`, then validated in separate step |
-| 9 | Views | `CREATE OR REPLACE VIEW` |
-| 10 | Materialized views | `CREATE MATERIALIZED VIEW`, `REFRESH` |
-| 11 | Triggers | `CREATE TRIGGER` |
-| 12 | RLS policies | `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, `CREATE POLICY` |
-| 13 | Grants | `GRANT`/`REVOKE` on tables, columns, sequences, functions, schemas |
-| 14 | Comments | `COMMENT ON` for all object types |
-| 15 | Seeds | `INSERT ... ON CONFLICT` (upsert or DO NOTHING) |
-| 16 | Post-scripts | SQL scripts in `post/`, alphabetical order |
+| Phase | Object Type        | Notes                                                                                 |
+| ----- | ------------------ | ------------------------------------------------------------------------------------- |
+| 0     | Internal schema    | `CREATE SCHEMA IF NOT EXISTS _simplicity` (tool bookkeeping)                          |
+| 0+    | Prechecks          | Pre-migration assertions (abort if falsy)                                             |
+| 1     | Pre-scripts        | SQL scripts in `pre/`, alphabetical order                                             |
+| 2     | Extensions         | `CREATE EXTENSION IF NOT EXISTS`                                                      |
+| 3     | Enums              | `CREATE TYPE ... AS ENUM`, `ALTER TYPE ... ADD VALUE`                                 |
+| 4     | Roles              | `CREATE ROLE`, `ALTER ROLE`, `GRANT` membership                                       |
+| 5     | Functions          | `CREATE OR REPLACE FUNCTION`                                                          |
+| 6     | Tables             | `CREATE TABLE`, `ALTER TABLE` (columns, checks, unique constraints) — **without FKs** |
+| 7     | Indexes            | Created outside transaction using `CONCURRENTLY` where possible                       |
+| 8     | Foreign keys       | Added as `NOT VALID`, then validated in separate step                                 |
+| 9     | Views              | `CREATE OR REPLACE VIEW`                                                              |
+| 10    | Materialized views | `CREATE MATERIALIZED VIEW`, `REFRESH`                                                 |
+| 11    | Triggers           | `CREATE TRIGGER`                                                                      |
+| 12    | RLS policies       | `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, `CREATE POLICY`                          |
+| 13    | Grants             | `GRANT`/`REVOKE` on tables, columns, sequences, functions, schemas                    |
+| 14    | Comments           | `COMMENT ON` for all object types                                                     |
+| 15    | Seeds              | `INSERT ... ON CONFLICT` (upsert or DO NOTHING)                                       |
+| 16    | Post-scripts       | SQL scripts in `post/`, alphabetical order                                            |
 
 ### 7.3 Operation Types
 
@@ -663,23 +664,28 @@ The following operations are **blocked by default** and require `--allow-destruc
 ### 8.3 Zero-Downtime Patterns
 
 **Foreign keys:**
+
 - Added as `NOT VALID` (no full table scan at creation time)
 - Validated in a separate step (`VALIDATE CONSTRAINT`)
 
 **Safe NOT NULL:**
+
 1. Add `CHECK (column IS NOT NULL) NOT VALID`
 2. `VALIDATE CONSTRAINT` (scans table without holding ACCESS EXCLUSIVE lock)
 3. `ALTER COLUMN SET NOT NULL` (instant — PostgreSQL trusts the validated check)
 4. Drop the redundant check constraint
 
 **Safe unique constraints:**
+
 1. `CREATE UNIQUE INDEX CONCURRENTLY` (non-blocking)
 2. `ALTER TABLE ADD CONSTRAINT ... USING INDEX` (instant)
 
 **Indexes:**
+
 - Created using `CONCURRENTLY` outside of a transaction where possible
 
 **Expand/Contract column migrations:**
+
 1. Add new column
 2. Create dual-write trigger (copies data from old column to new on write)
 3. Backfill existing rows (configurable batch size, default 1000)
@@ -690,6 +696,7 @@ The following operations are **blocked by default** and require `--allow-destruc
 ### 8.4 Intermediate State Recovery
 
 If a migration is interrupted:
+
 - Re-running picks up where it left off (file tracker knows which files were applied)
 - Transactional phases either fully commit or fully roll back
 - CONCURRENTLY operations that fail leave invalid indexes that can be detected and retried
@@ -700,16 +707,16 @@ If a migration is interrupted:
 
 Static analysis applied to migration plans before execution:
 
-| Rule | Severity | Description |
-|------|----------|-------------|
-| `set-not-null-direct` | Warning | Direct `SET NOT NULL` without the safe CHECK pattern |
-| `add-column-with-default` | Warning | Adding a column with a volatile default (may lock table on older PG) |
-| `drop-column` | Warning | Dropping a column (data loss) |
-| `drop-table` | Warning | Dropping a table (data loss) |
-| `type-narrowing` | Warning | Narrowing a column type (potential data loss) |
-| `type-change` | Warning | Changing column type (may require table rewrite) |
-| `missing-fk-index` | Info | Foreign key column without an index (slow joins/cascades) |
-| `rename-detection` | Info | Detected possible rename (drop + add with same type) |
+| Rule                      | Severity | Description                                                          |
+| ------------------------- | -------- | -------------------------------------------------------------------- |
+| `set-not-null-direct`     | Warning  | Direct `SET NOT NULL` without the safe CHECK pattern                 |
+| `add-column-with-default` | Warning  | Adding a column with a volatile default (may lock table on older PG) |
+| `drop-column`             | Warning  | Dropping a column (data loss)                                        |
+| `drop-table`              | Warning  | Dropping a table (data loss)                                         |
+| `type-narrowing`          | Warning  | Narrowing a column type (potential data loss)                        |
+| `type-change`             | Warning  | Changing column type (may require table rewrite)                     |
+| `missing-fk-index`        | Info     | Foreign key column without an index (slow joins/cascades)            |
+| `rename-detection`        | Info     | Detected possible rename (drop + add with same type)                 |
 
 ---
 
@@ -726,14 +733,26 @@ interface DriftReport {
 }
 
 interface DriftItem {
-  type: 'table' | 'column' | 'index' | 'constraint' | 'enum' | 'function' |
-        'view' | 'materialized_view' | 'role' | 'grant' | 'trigger' |
-        'policy' | 'comment' | 'seed';
-  object: string;          // e.g., "users.email"
+  type:
+    | 'table'
+    | 'column'
+    | 'index'
+    | 'constraint'
+    | 'enum'
+    | 'function'
+    | 'view'
+    | 'materialized_view'
+    | 'role'
+    | 'grant'
+    | 'trigger'
+    | 'policy'
+    | 'comment'
+    | 'seed';
+  object: string; // e.g., "users.email"
   status: 'missing_in_db' | 'missing_in_yaml' | 'different';
-  expected?: string;       // YAML value
-  actual?: string;         // DB value
-  detail?: string;         // Human-readable description
+  expected?: string; // YAML value
+  actual?: string; // DB value
+  detail?: string; // Human-readable description
 }
 ```
 
@@ -810,9 +829,9 @@ Zero-downtime column migrations for type changes, renames, or transforms:
      type: text
      expand:
        from: email
-       transform: "lower(email)"
-       reverse: "email"              # Optional: dual-write new→old
-       batch_size: 5000              # Optional: override default 1000
+       transform: 'lower(email)'
+       reverse: 'email' # Optional: dual-write new→old
+       batch_size: 5000 # Optional: override default 1000
    ```
 2. `simplicity-schema run` creates the new column and dual-write trigger
 3. Backfill runs to populate existing rows (batched by configurable size)
@@ -850,8 +869,8 @@ Tables can define `prechecks` — SQL queries that must pass before migration pr
 ```yaml
 prechecks:
   - name: no_orphaned_rows
-    query: "SELECT count(*) = 0 FROM child WHERE parent_id NOT IN (SELECT id FROM parent)"
-    message: "Orphaned rows exist — clean up before migration"
+    query: 'SELECT count(*) = 0 FROM child WHERE parent_id NOT IN (SELECT id FROM parent)'
+    message: 'Orphaned rows exist — clean up before migration'
 ```
 
 If any precheck query returns a falsy value, migration aborts with the provided message.
@@ -864,12 +883,12 @@ If any precheck query returns a falsy value, migration aborts with the provided 
 
 The history table lives in the `_simplicity` internal schema, separate from user objects.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `file_path` | `text` (PK) | Relative path to the schema file |
-| `file_hash` | `text` | SHA-256 hash of file contents |
-| `phase` | `text` | `pre` / `schema` / `post` |
-| `applied_at` | `timestamptz` | When the file was last applied |
+| Column       | Type          | Description                      |
+| ------------ | ------------- | -------------------------------- |
+| `file_path`  | `text` (PK)   | Relative path to the schema file |
+| `file_hash`  | `text`        | SHA-256 hash of file contents    |
+| `phase`      | `text`        | `pre` / `schema` / `post`        |
+| `applied_at` | `timestamptz` | When the file was last applied   |
 
 ### Tracking Rules
 
@@ -883,97 +902,97 @@ The package exports all core functionality for programmatic use from `@mabulu-in
 
 ### Core
 
-| Export | Description |
-|--------|-------------|
-| `resolveConfig(opts?)` | Resolve configuration from all sources |
-| `withClient(connStr, fn, opts?)` | Execute function with a pooled PG client |
-| `withTransaction(connStr, fn, opts?)` | Execute function within a transaction |
-| `closePool()` | Shut down the connection pool |
-| `testConnection(connStr)` | Verify database connectivity |
+| Export                                | Description                              |
+| ------------------------------------- | ---------------------------------------- |
+| `resolveConfig(opts?)`                | Resolve configuration from all sources   |
+| `withClient(connStr, fn, opts?)`      | Execute function with a pooled PG client |
+| `withTransaction(connStr, fn, opts?)` | Execute function within a transaction    |
+| `closePool()`                         | Shut down the connection pool            |
+| `testConnection(connStr)`             | Verify database connectivity             |
 
 ### Pipeline
 
-| Export | Description |
-|--------|-------------|
-| `discoverSchemaFiles(config)` | Find all YAML/SQL files |
-| `parseTableFile(path)` | Parse a table YAML file |
-| `parseFunctionFile(path)` | Parse a function YAML file |
-| `parseEnumFile(path)` | Parse an enum YAML file |
-| `parseViewFile(path)` | Parse a view YAML file |
-| `parseRoleFile(path)` | Parse a role YAML file |
-| `buildPlan(config)` | Run discover → parse → introspect → plan |
-| `runAll(config)` | Run full migration |
-| `runPre(config)` | Run pre-scripts only |
-| `runMigrate(config)` | Run schema migration only |
-| `runPost(config)` | Run post-scripts only |
-| `runValidate(config)` | Validate plan in rollback transaction |
-| `runBaseline(config)` | Record current state as baseline |
+| Export                        | Description                              |
+| ----------------------------- | ---------------------------------------- |
+| `discoverSchemaFiles(config)` | Find all YAML/SQL files                  |
+| `parseTableFile(path)`        | Parse a table YAML file                  |
+| `parseFunctionFile(path)`     | Parse a function YAML file               |
+| `parseEnumFile(path)`         | Parse an enum YAML file                  |
+| `parseViewFile(path)`         | Parse a view YAML file                   |
+| `parseRoleFile(path)`         | Parse a role YAML file                   |
+| `buildPlan(config)`           | Run discover → parse → introspect → plan |
+| `runAll(config)`              | Run full migration                       |
+| `runPre(config)`              | Run pre-scripts only                     |
+| `runMigrate(config)`          | Run schema migration only                |
+| `runPost(config)`             | Run post-scripts only                    |
+| `runValidate(config)`         | Validate plan in rollback transaction    |
+| `runBaseline(config)`         | Record current state as baseline         |
 
 ### Introspection
 
-| Export | Description |
-|--------|-------------|
-| `introspectTable(client, table, schema)` | Read table structure from DB |
-| `getExistingTables(client, schema)` | List all tables |
-| `getExistingEnums(client, schema)` | List all enum types and values |
-| `getExistingFunctions(client, schema)` | List all functions |
-| `getExistingViews(client, schema)` | List all views |
-| `getExistingMaterializedViews(client, schema)` | List all materialized views |
-| `getExistingRoles(client)` | List all roles with attributes |
+| Export                                         | Description                    |
+| ---------------------------------------------- | ------------------------------ |
+| `introspectTable(client, table, schema)`       | Read table structure from DB   |
+| `getExistingTables(client, schema)`            | List all tables                |
+| `getExistingEnums(client, schema)`             | List all enum types and values |
+| `getExistingFunctions(client, schema)`         | List all functions             |
+| `getExistingViews(client, schema)`             | List all views                 |
+| `getExistingMaterializedViews(client, schema)` | List all materialized views    |
+| `getExistingRoles(client)`                     | List all roles with attributes |
 
 ### Analysis
 
-| Export | Description |
-|--------|-------------|
+| Export                | Description                            |
+| --------------------- | -------------------------------------- |
 | `detectDrift(config)` | Compare YAML to DB; return DriftReport |
-| `lintPlan(plan)` | Run lint rules on a migration plan |
+| `lintPlan(plan)`      | Run lint rules on a migration plan     |
 
 ### Rollback & Expand
 
-| Export | Description |
-|--------|-------------|
-| `computeRollback(snapshot)` | Generate reverse operations |
-| `runDown(config)` | Execute rollback |
-| `ensureSnapshotsTable(client)` | Create snapshots table |
-| `saveSnapshot(client, snapshot)` | Save a migration snapshot |
-| `getLatestSnapshot(client)` | Get most recent snapshot |
-| `listSnapshots(client)` | List all snapshots |
-| `deleteSnapshot(client, id)` | Delete a snapshot |
-| `ensureExpandStateTable(client)` | Create expand state table |
-| `planExpandColumn(...)` | Plan an expand/contract migration |
-| `runBackfill(opts)` | Backfill expanded column |
-| `runContract(opts)` | Complete contract phase |
-| `getExpandStatus(client)` | List in-progress expand/contract |
+| Export                           | Description                       |
+| -------------------------------- | --------------------------------- |
+| `computeRollback(snapshot)`      | Generate reverse operations       |
+| `runDown(config)`                | Execute rollback                  |
+| `ensureSnapshotsTable(client)`   | Create snapshots table            |
+| `saveSnapshot(client, snapshot)` | Save a migration snapshot         |
+| `getLatestSnapshot(client)`      | Get most recent snapshot          |
+| `listSnapshots(client)`          | List all snapshots                |
+| `deleteSnapshot(client, id)`     | Delete a snapshot                 |
+| `ensureExpandStateTable(client)` | Create expand state table         |
+| `planExpandColumn(...)`          | Plan an expand/contract migration |
+| `runBackfill(opts)`              | Backfill expanded column          |
+| `runContract(opts)`              | Complete contract phase           |
+| `getExpandStatus(client)`        | List in-progress expand/contract  |
 
 ### Generation
 
-| Export | Description |
-|--------|-------------|
-| `generateFromDb(config)` | Generate YAML from existing DB |
-| `generateSql(plan, opts?)` | Render plan as SQL string |
-| `generateSqlFile(plan, output)` | Render plan as .sql file |
-| `formatMigrationSql(operations)` | Format operations as SQL string |
-| `generateErd(tables)` | Generate Mermaid ER diagram |
-| `scaffoldInit(dir)` | Create project directory structure |
-| `scaffoldPre(dir, name)` | Create pre-script template |
-| `scaffoldPost(dir, name)` | Create post-script template |
-| `scaffoldMixin(dir, name)` | Create mixin template |
+| Export                           | Description                        |
+| -------------------------------- | ---------------------------------- |
+| `generateFromDb(config)`         | Generate YAML from existing DB     |
+| `generateSql(plan, opts?)`       | Render plan as SQL string          |
+| `generateSqlFile(plan, output)`  | Render plan as .sql file           |
+| `formatMigrationSql(operations)` | Format operations as SQL string    |
+| `generateErd(tables)`            | Generate Mermaid ER diagram        |
+| `scaffoldInit(dir)`              | Create project directory structure |
+| `scaffoldPre(dir, name)`         | Create pre-script template         |
+| `scaffoldPost(dir, name)`        | Create post-script template        |
+| `scaffoldMixin(dir, name)`       | Create mixin template              |
 
 ### Executor
 
-| Export | Description |
-|--------|-------------|
-| `execute(opts)` | Run planned operations |
-| `acquireAdvisoryLock(client)` | Acquire migration lock |
-| `releaseAdvisoryLock(client)` | Release migration lock |
-| `detectInvalidIndexes(client, schema)` | Find invalid indexes from failed CONCURRENTLY |
-| `reindexInvalid(client, schema, logger)` | Reindex invalid indexes |
+| Export                                   | Description                                   |
+| ---------------------------------------- | --------------------------------------------- |
+| `execute(opts)`                          | Run planned operations                        |
+| `acquireAdvisoryLock(client)`            | Acquire migration lock                        |
+| `releaseAdvisoryLock(client)`            | Release migration lock                        |
+| `detectInvalidIndexes(client, schema)`   | Find invalid indexes from failed CONCURRENTLY |
+| `reindexInvalid(client, schema, logger)` | Reindex invalid indexes                       |
 
 ### Testing (`@mabulu-inc/simplicity-schema/testing`)
 
-| Export | Description |
-|--------|-------------|
-| `useTestProject(t)` | Create isolated PG schema for a test |
+| Export                    | Description                          |
+| ------------------------- | ------------------------------------ |
+| `useTestProject(t)`       | Create isolated PG schema for a test |
 | `writeSchema(dir, files)` | Write YAML files to a temp directory |
 
 ### Types

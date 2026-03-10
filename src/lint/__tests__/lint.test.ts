@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lintPlan, type LintResult, type LintSeverity } from '../index.js';
+import { lintPlan, type LintResult } from '../index.js';
 import type { Operation, PlanResult } from '../../planner/index.js';
 
 function makePlan(operations: Operation[], blocked: Operation[] = []): PlanResult {
@@ -115,7 +115,7 @@ describe('lintPlan', () => {
       makePlan([
         makeOp({
           type: 'add_column',
-          sql: "ALTER TABLE users ADD COLUMN created_at timestamptz DEFAULT now()",
+          sql: 'ALTER TABLE users ADD COLUMN created_at timestamptz DEFAULT now()',
           objectName: 'users',
         }),
       ]),
@@ -130,7 +130,7 @@ describe('lintPlan', () => {
       makePlan([
         makeOp({
           type: 'add_column',
-          sql: "ALTER TABLE users ADD COLUMN active boolean DEFAULT true",
+          sql: 'ALTER TABLE users ADD COLUMN active boolean DEFAULT true',
           objectName: 'users',
         }),
       ]),

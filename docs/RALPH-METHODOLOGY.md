@@ -12,13 +12,13 @@ Each iteration is stateless: boot from disk, find next task, red/green TDD, comm
 
 ## Artifacts
 
-| Artifact | Path | Purpose |
-|----------|------|---------|
-| PRD | `docs/PRD.md` | What to build. Source of truth for requirements. |
-| Task files | `docs/tasks/T-NNN.md` | What to do next. One file per task, status tracked inline. |
-| Milestones | `docs/MILESTONES.md` | Quick-scan index of tasks grouped by milestone. Not authoritative. |
-| CLAUDE.md | `.claude/CLAUDE.md` | Project config. References this methodology + project-specific setup. |
-| ralph.sh | `ralph.sh` | The automation loop. Runs Claude Code headlessly. |
+| Artifact   | Path                  | Purpose                                                               |
+| ---------- | --------------------- | --------------------------------------------------------------------- |
+| PRD        | `docs/PRD.md`         | What to build. Source of truth for requirements.                      |
+| Task files | `docs/tasks/T-NNN.md` | What to do next. One file per task, status tracked inline.            |
+| Milestones | `docs/MILESTONES.md`  | Quick-scan index of tasks grouped by milestone. Not authoritative.    |
+| CLAUDE.md  | `.claude/CLAUDE.md`   | Project config. References this methodology + project-specific setup. |
+| ralph.sh   | `ralph.sh`            | The automation loop. Runs Claude Code headlessly.                     |
 
 ## Task File Format
 
@@ -29,17 +29,20 @@ Each iteration is stateless: boot from disk, find next task, red/green TDD, comm
 - **Milestone**: N — Name
 - **Depends**: T-XXX, T-YYY (or "none")
 - **PRD Reference**: §N.N
-- **Completed**: YYYY-MM-DD HH:MM (Nm duration)  ← added on completion
-- **Commit**: <SHA>                                ← added on completion
+- **Completed**: YYYY-MM-DD HH:MM (Nm duration) ← added on completion
+- **Commit**: <SHA> ← added on completion
 
 ## Description
+
 What to implement and why.
 
 ## Produces
+
 - `path/to/file.ts`
 - Tests
 
-## Completion Notes                                ← added on completion
+## Completion Notes ← added on completion
+
 What was done. Test count.
 ```
 
@@ -53,12 +56,24 @@ What was done. Test count.
 ├─ Execute ───────────────────────────────────┤
 │  RED:   Write failing behavioral tests      │
 │  GREEN: Implement minimum to pass           │
-│  VERIFY: Full test suite, no regressions    │
+│  VERIFY: pnpm check (lint+format+types+test)│
 ├─ Complete ──────────────────────────────────┤
 │  Commit: "T-NNN: short description"         │
 │  Update task file: Status→DONE, SHA, notes  │
 └─────────────────────────────────────────────┘
 ```
+
+## Quality Gates
+
+Every task must pass `pnpm check` before committing:
+
+```
+pnpm check = lint → format → typecheck → build → test:coverage
+```
+
+Pre-commit hooks (husky + lint-staged) enforce lint and format on every commit — including ralph's.
+
+T-000 sets up: ESLint, Prettier, husky, lint-staged, coverage config, and `pnpm check`.
 
 ## Rules
 
@@ -67,6 +82,7 @@ What was done. Test count.
 - **Minimal green** — implement only what failing tests require
 - **No scope creep** — if the task is done, commit. Don't improve adjacent code.
 - **No pushing** — ralph.sh handles git push after each iteration
+- **All checks pass** — `pnpm check` must succeed before committing
 
 ---
 
@@ -83,9 +99,11 @@ What was done. Test count.
 # PROJECT — Claude Code Instructions
 
 ## Methodology
+
 Follow the Ralph Methodology defined in `docs/RALPH-METHODOLOGY.md`.
 
 ## Project-Specific Config
+
 - **Language**: TypeScript / Python / etc.
 - **Package manager**: pnpm / npm / etc.
 - **Testing framework**: Vitest / pytest / etc.
@@ -98,7 +116,7 @@ Follow the Ralph Methodology defined in `docs/RALPH-METHODOLOGY.md`.
 
 ### Task Design
 
-- **T-000 is always infrastructure**: Docker, test DB, CI — the foundation everything else needs
+- **T-000 is always infrastructure**: Docker, test DB, `.env`, quality tooling (ESLint, Prettier, husky, lint-staged, coverage), `pnpm check` script
 - **Size**: One task = one test file + one commit. If it needs multiple test files, split it.
 - **Dependencies**: Explicit in the `Depends` field. Tasks without unmet deps can run.
 - **Milestones**: Group related tasks. Numbering within a milestone implies build order.
@@ -107,6 +125,7 @@ Follow the Ralph Methodology defined in `docs/RALPH-METHODOLOGY.md`.
 ### Gap Analysis
 
 After initial task decomposition, audit coverage by:
+
 1. Walking each PRD section and checking it has at least one task
 2. Running the system and noting untested behaviors
 3. Adding new task files (next available T-NNN) with proper dependencies
@@ -114,6 +133,7 @@ After initial task decomposition, audit coverage by:
 ### Blocker Handling
 
 When a task can't be completed:
+
 1. Add a `## Blocked` section to the task file explaining why
 2. Leave Status as TODO
 3. The loop automatically skips it (unmet deps or manual block) and picks the next eligible task
@@ -131,6 +151,7 @@ The shell script that drives the loop:
 - **Logging**: Each iteration logs to `.ralph-logs/T-NNN-TIMESTAMP.jsonl`
 
 Usage:
+
 ```bash
 ./ralph.sh              # 10 iterations (default)
 ./ralph.sh -n 0         # unlimited — run until all tasks DONE

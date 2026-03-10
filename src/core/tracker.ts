@@ -48,14 +48,8 @@ export async function getHistory(client: pg.PoolClient): Promise<HistoryEntry[]>
 /**
  * Get the stored hash for a specific file, or null if not tracked.
  */
-export async function getFileHash(
-  client: pg.PoolClient,
-  filePath: string,
-): Promise<string | null> {
-  const result = await client.query(
-    'SELECT file_hash FROM _simplicity.history WHERE file_path = $1',
-    [filePath],
-  );
+export async function getFileHash(client: pg.PoolClient, filePath: string): Promise<string | null> {
+  const result = await client.query('SELECT file_hash FROM _simplicity.history WHERE file_path = $1', [filePath]);
   return result.rows.length > 0 ? result.rows[0].file_hash : null;
 }
 
@@ -82,11 +76,7 @@ export async function recordFile(
 /**
  * Check if a file needs to be re-run (new file or hash changed).
  */
-export async function fileNeedsApply(
-  client: pg.PoolClient,
-  filePath: string,
-  currentHash: string,
-): Promise<boolean> {
+export async function fileNeedsApply(client: pg.PoolClient, filePath: string, currentHash: string): Promise<boolean> {
   const storedHash = await getFileHash(client, filePath);
   return storedHash !== currentHash;
 }
@@ -94,13 +84,7 @@ export async function fileNeedsApply(
 /**
  * Remove a file's history entry (e.g., when file is deleted).
  */
-export async function removeFileHistory(
-  client: pg.PoolClient,
-  filePath: string,
-): Promise<boolean> {
-  const result = await client.query(
-    'DELETE FROM _simplicity.history WHERE file_path = $1',
-    [filePath],
-  );
+export async function removeFileHistory(client: pg.PoolClient, filePath: string): Promise<boolean> {
+  const result = await client.query('DELETE FROM _simplicity.history WHERE file_path = $1', [filePath]);
   return (result.rowCount ?? 0) > 0;
 }

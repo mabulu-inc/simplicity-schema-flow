@@ -15,6 +15,7 @@ Follow the Ralph Methodology defined in `docs/RALPH-METHODOLOGY.md`.
 - **File naming**: kebab-case
 - **Package manager**: pnpm
 - **Testing framework**: Vitest
+- **Quality check**: `pnpm check` (lint → format → typecheck → build → test:coverage)
 - **Test command**: `pnpm test`
 - **Testing policy**: NEVER mock PostgreSQL — always use real instances via Docker container
 

@@ -46,7 +46,7 @@ export async function closePool(): Promise<void> {
 
 function isTransientError(err: unknown): boolean {
   if (err && typeof err === 'object' && 'code' in err) {
-    return TRANSIENT_ERROR_CODES.includes((err as { code: string }).code as typeof TRANSIENT_ERROR_CODES[number]);
+    return TRANSIENT_ERROR_CODES.includes((err as { code: string }).code as (typeof TRANSIENT_ERROR_CODES)[number]);
   }
   return false;
 }

@@ -1,18 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  buildPlan,
-  type DesiredState,
-  type ActualState,
-  type Operation,
-} from '../index.js';
-import type {
-  TableSchema,
-  EnumSchema,
-  FunctionSchema,
-  ViewSchema,
-  MaterializedViewSchema,
-  RoleSchema,
-} from '../../schema/types.js';
+import { buildPlan, type DesiredState, type ActualState } from '../index.js';
 
 // ─── Helpers ───────────────────────────────────────────────────
 
@@ -204,10 +191,7 @@ describe('Planner', () => {
 
     it('produces grant_membership when role has in field', () => {
       const desired = emptyDesired();
-      desired.roles = [
-        { role: 'app_group' },
-        { role: 'app_readonly', login: false, in: ['app_group'] },
-      ];
+      desired.roles = [{ role: 'app_group' }, { role: 'app_readonly', login: false, in: ['app_group'] }];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_membership');
       expect(ops).toHaveLength(1);
@@ -217,11 +201,7 @@ describe('Planner', () => {
 
     it('produces multiple grant_membership for multiple groups', () => {
       const desired = emptyDesired();
-      desired.roles = [
-        { role: 'group_a' },
-        { role: 'group_b' },
-        { role: 'app_user', in: ['group_a', 'group_b'] },
-      ];
+      desired.roles = [{ role: 'group_a' }, { role: 'group_b' }, { role: 'app_user', in: ['group_a', 'group_b'] }];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_membership');
       expect(ops).toHaveLength(2);
@@ -231,10 +211,7 @@ describe('Planner', () => {
 
     it('skips grant_membership when membership already exists', () => {
       const desired = emptyDesired();
-      desired.roles = [
-        { role: 'app_group' },
-        { role: 'app_readonly', login: false, in: ['app_group'] },
-      ];
+      desired.roles = [{ role: 'app_group' }, { role: 'app_readonly', login: false, in: ['app_group'] }];
       const actual = emptyActual();
       actual.roles.set('app_group', { role: 'app_group' });
       actual.roles.set('app_readonly', { role: 'app_readonly', login: false, in: ['app_group'] });
@@ -244,11 +221,7 @@ describe('Planner', () => {
 
     it('produces grant_membership for new group when role already exists', () => {
       const desired = emptyDesired();
-      desired.roles = [
-        { role: 'group_a' },
-        { role: 'group_b' },
-        { role: 'app_user', in: ['group_a', 'group_b'] },
-      ];
+      desired.roles = [{ role: 'group_a' }, { role: 'group_b' }, { role: 'app_user', in: ['group_a', 'group_b'] }];
       const actual = emptyActual();
       actual.roles.set('group_a', { role: 'group_a' });
       actual.roles.set('app_user', { role: 'app_user', in: ['group_a'] });
@@ -260,17 +233,19 @@ describe('Planner', () => {
 
     it('creates role with all attributes', () => {
       const desired = emptyDesired();
-      desired.roles = [{
-        role: 'power_user',
-        login: true,
-        superuser: true,
-        createdb: true,
-        createrole: true,
-        inherit: false,
-        bypassrls: true,
-        replication: true,
-        connection_limit: 10,
-      }];
+      desired.roles = [
+        {
+          role: 'power_user',
+          login: true,
+          superuser: true,
+          createdb: true,
+          createrole: true,
+          inherit: false,
+          bypassrls: true,
+          replication: true,
+          connection_limit: 10,
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_role');
       expect(ops).toHaveLength(1);
@@ -286,15 +261,17 @@ describe('Planner', () => {
 
     it('alters role attributes correctly', () => {
       const desired = emptyDesired();
-      desired.roles = [{
-        role: 'app_user',
-        superuser: true,
-        createdb: true,
-        createrole: true,
-        inherit: false,
-        bypassrls: true,
-        replication: true,
-      }];
+      desired.roles = [
+        {
+          role: 'app_user',
+          superuser: true,
+          createdb: true,
+          createrole: true,
+          inherit: false,
+          bypassrls: true,
+          replication: true,
+        },
+      ];
       const actual = emptyActual();
       actual.roles.set('app_user', {
         role: 'app_user',
@@ -331,14 +308,16 @@ describe('Planner', () => {
   describe('functions', () => {
     it('creates function with CREATE OR REPLACE', () => {
       const desired = emptyDesired();
-      desired.functions = [{
-        name: 'update_timestamp',
-        language: 'plpgsql',
-        returns: 'trigger',
-        body: 'BEGIN NEW.updated_at = now(); RETURN NEW; END;',
-        security: 'invoker',
-        volatility: 'volatile',
-      }];
+      desired.functions = [
+        {
+          name: 'update_timestamp',
+          language: 'plpgsql',
+          returns: 'trigger',
+          body: 'BEGIN NEW.updated_at = now(); RETURN NEW; END;',
+          security: 'invoker',
+          volatility: 'volatile',
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_function');
       expect(ops).toHaveLength(1);
@@ -349,13 +328,15 @@ describe('Planner', () => {
 
     it('includes PARALLEL SAFE in function SQL', () => {
       const desired = emptyDesired();
-      desired.functions = [{
-        name: 'safe_func',
-        language: 'sql',
-        returns: 'integer',
-        body: 'SELECT 1',
-        parallel: 'safe',
-      }];
+      desired.functions = [
+        {
+          name: 'safe_func',
+          language: 'sql',
+          returns: 'integer',
+          body: 'SELECT 1',
+          parallel: 'safe',
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_function');
       expect(ops).toHaveLength(1);
@@ -364,14 +345,16 @@ describe('Planner', () => {
 
     it('includes STRICT in function SQL', () => {
       const desired = emptyDesired();
-      desired.functions = [{
-        name: 'strict_func',
-        language: 'sql',
-        returns: 'integer',
-        body: 'SELECT $1',
-        args: [{ name: 'x', type: 'integer' }],
-        strict: true,
-      }];
+      desired.functions = [
+        {
+          name: 'strict_func',
+          language: 'sql',
+          returns: 'integer',
+          body: 'SELECT $1',
+          args: [{ name: 'x', type: 'integer' }],
+          strict: true,
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_function');
       expect(ops[0].sql).toContain('STRICT');
@@ -379,13 +362,15 @@ describe('Planner', () => {
 
     it('includes LEAKPROOF in function SQL', () => {
       const desired = emptyDesired();
-      desired.functions = [{
-        name: 'leak_func',
-        language: 'sql',
-        returns: 'boolean',
-        body: 'SELECT true',
-        leakproof: true,
-      }];
+      desired.functions = [
+        {
+          name: 'leak_func',
+          language: 'sql',
+          returns: 'boolean',
+          body: 'SELECT true',
+          leakproof: true,
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_function');
       expect(ops[0].sql).toContain('LEAKPROOF');
@@ -393,14 +378,16 @@ describe('Planner', () => {
 
     it('includes COST and ROWS in function SQL', () => {
       const desired = emptyDesired();
-      desired.functions = [{
-        name: 'cost_func',
-        language: 'sql',
-        returns: 'SETOF integer',
-        body: 'SELECT generate_series(1, 10)',
-        cost: 200,
-        rows: 10,
-      }];
+      desired.functions = [
+        {
+          name: 'cost_func',
+          language: 'sql',
+          returns: 'SETOF integer',
+          body: 'SELECT generate_series(1, 10)',
+          cost: 200,
+          rows: 10,
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_function');
       expect(ops[0].sql).toContain('COST 200');
@@ -409,14 +396,16 @@ describe('Planner', () => {
 
     it('includes SET configuration parameters in function SQL', () => {
       const desired = emptyDesired();
-      desired.functions = [{
-        name: 'secure_func',
-        language: 'plpgsql',
-        returns: 'void',
-        body: 'BEGIN END;',
-        security: 'definer',
-        set: { search_path: 'public', statement_timeout: '5s' },
-      }];
+      desired.functions = [
+        {
+          name: 'secure_func',
+          language: 'plpgsql',
+          returns: 'void',
+          body: 'BEGIN END;',
+          security: 'definer',
+          set: { search_path: 'public', statement_timeout: '5s' },
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_function');
       expect(ops[0].sql).toContain('SET search_path = public');
@@ -425,19 +414,21 @@ describe('Planner', () => {
 
     it('includes all function options combined', () => {
       const desired = emptyDesired();
-      desired.functions = [{
-        name: 'full_func',
-        language: 'sql',
-        returns: 'integer',
-        body: 'SELECT 1',
-        security: 'definer',
-        volatility: 'immutable',
-        parallel: 'safe',
-        strict: true,
-        leakproof: true,
-        cost: 100,
-        set: { search_path: 'public' },
-      }];
+      desired.functions = [
+        {
+          name: 'full_func',
+          language: 'sql',
+          returns: 'integer',
+          body: 'SELECT 1',
+          security: 'definer',
+          volatility: 'immutable',
+          parallel: 'safe',
+          strict: true,
+          leakproof: true,
+          cost: 100,
+          set: { search_path: 'public' },
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_function');
       expect(ops[0].sql).toContain('IMMUTABLE');
@@ -453,13 +444,15 @@ describe('Planner', () => {
   describe('tables', () => {
     it('creates new table', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true, default: 'gen_random_uuid()' },
-          { name: 'email', type: 'text', nullable: false },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true, default: 'gen_random_uuid()' },
+            { name: 'email', type: 'text', nullable: false },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_table');
       expect(ops).toHaveLength(1);
@@ -471,14 +464,16 @@ describe('Planner', () => {
 
     it('adds column to existing table', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text', nullable: false },
-          { name: 'name', type: 'text', nullable: false },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text', nullable: false },
+            { name: 'name', type: 'text', nullable: false },
+          ],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -495,10 +490,12 @@ describe('Planner', () => {
 
     it('drops column (destructive)', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -514,10 +511,12 @@ describe('Planner', () => {
 
     it('alters column type', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'name', type: 'varchar(255)' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'name', type: 'varchar(255)' }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -531,10 +530,12 @@ describe('Planner', () => {
 
     it('alters column nullability using safe NOT NULL pattern', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'name', type: 'text', nullable: false }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'name', type: 'text', nullable: false }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -566,10 +567,12 @@ describe('Planner', () => {
 
     it('alters column default', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'status', type: 'text', default: "'active'" }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'status', type: 'text', default: "'active'" }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -594,14 +597,16 @@ describe('Planner', () => {
 
     it('creates table with indexes', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-        ],
-        indexes: [{ columns: ['email'], unique: true }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+          ],
+          indexes: [{ columns: ['email'], unique: true }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'add_index');
       expect(ops).toHaveLength(1);
@@ -611,11 +616,13 @@ describe('Planner', () => {
 
     it('creates table with check constraints', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'email', type: 'text' }],
-        checks: [{ name: 'email_not_empty', expression: "length(email) > 0" }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'email', type: 'text' }],
+          checks: [{ name: 'email_not_empty', expression: 'length(email) > 0' }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_table');
       expect(ops).toHaveLength(1);
@@ -624,13 +631,15 @@ describe('Planner', () => {
 
     it('creates table with foreign keys as NOT VALID', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'orders',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'user_id', type: 'uuid', references: { table: 'users', column: 'id', on_delete: 'CASCADE' } },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'orders',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'user_id', type: 'uuid', references: { table: 'users', column: 'id', on_delete: 'CASCADE' } },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const fkOps = findOps(result.operations, 'add_foreign_key_not_valid');
       expect(fkOps).toHaveLength(1);
@@ -643,13 +652,19 @@ describe('Planner', () => {
 
     it('creates FK with on_update option', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'orders',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'user_id', type: 'uuid', references: { table: 'users', column: 'id', on_delete: 'SET NULL', on_update: 'CASCADE' } },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'orders',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            {
+              name: 'user_id',
+              type: 'uuid',
+              references: { table: 'users', column: 'id', on_delete: 'SET NULL', on_update: 'CASCADE' },
+            },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const fkOps = findOps(result.operations, 'add_foreign_key_not_valid');
       expect(fkOps).toHaveLength(1);
@@ -659,13 +674,19 @@ describe('Planner', () => {
 
     it('creates FK with deferrable initially deferred', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'orders',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'user_id', type: 'uuid', references: { table: 'users', column: 'id', deferrable: true, initially_deferred: true } },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'orders',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            {
+              name: 'user_id',
+              type: 'uuid',
+              references: { table: 'users', column: 'id', deferrable: true, initially_deferred: true },
+            },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const fkOps = findOps(result.operations, 'add_foreign_key_not_valid');
       expect(fkOps).toHaveLength(1);
@@ -674,13 +695,19 @@ describe('Planner', () => {
 
     it('creates FK with deferrable initially immediate', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'orders',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'user_id', type: 'uuid', references: { table: 'users', column: 'id', deferrable: true, initially_deferred: false } },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'orders',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            {
+              name: 'user_id',
+              type: 'uuid',
+              references: { table: 'users', column: 'id', deferrable: true, initially_deferred: false },
+            },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const fkOps = findOps(result.operations, 'add_foreign_key_not_valid');
       expect(fkOps).toHaveLength(1);
@@ -690,17 +717,21 @@ describe('Planner', () => {
 
     it('creates table with triggers', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        triggers: [{
-          name: 'set_updated_at',
-          timing: 'BEFORE',
-          events: ['UPDATE'],
-          function: 'update_timestamp',
-          for_each: 'ROW',
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          triggers: [
+            {
+              name: 'set_updated_at',
+              timing: 'BEFORE',
+              events: ['UPDATE'],
+              function: 'update_timestamp',
+              for_each: 'ROW',
+            },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_trigger');
       expect(ops).toHaveLength(1);
@@ -710,17 +741,21 @@ describe('Planner', () => {
 
     it('creates table with RLS policies', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        policies: [{
-          name: 'users_own_data',
-          for: 'SELECT',
-          to: 'app_user',
-          using: "id = current_user_id()",
-          permissive: true,
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          policies: [
+            {
+              name: 'users_own_data',
+              for: 'SELECT',
+              to: 'app_user',
+              using: 'id = current_user_id()',
+              permissive: true,
+            },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const rlsOps = findOps(result.operations, 'enable_rls');
       expect(rlsOps).toHaveLength(1);
@@ -732,17 +767,21 @@ describe('Planner', () => {
 
     it('creates table with RESTRICTIVE policy', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        policies: [{
-          name: 'restrict_delete',
-          for: 'DELETE',
-          to: 'app_user',
-          using: 'false',
-          permissive: false,
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          policies: [
+            {
+              name: 'restrict_delete',
+              for: 'DELETE',
+              to: 'app_user',
+              using: 'false',
+              permissive: false,
+            },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const policyOps = findOps(result.operations, 'create_policy');
       expect(policyOps).toHaveLength(1);
@@ -753,11 +792,13 @@ describe('Planner', () => {
 
     it('creates table with grants', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_table');
       expect(ops).toHaveLength(1);
@@ -767,11 +808,13 @@ describe('Planner', () => {
 
     it('creates table with comment', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        comment: 'Main users table',
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          comment: 'Main users table',
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'set_comment');
       expect(ops.some((o) => o.sql.includes('Main users table'))).toBe(true);
@@ -779,14 +822,16 @@ describe('Planner', () => {
 
     it('creates table with seeds', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-        ],
-        seeds: [{ id: '00000000-0000-0000-0000-000000000001', email: 'admin@example.com' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+          ],
+          seeds: [{ id: '00000000-0000-0000-0000-000000000001', email: 'admin@example.com' }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'add_seed');
       expect(ops).toHaveLength(1);
@@ -796,14 +841,16 @@ describe('Planner', () => {
 
     it('creates table with column-level grants', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-        ],
-        grants: [{ to: 'app_readonly', privileges: ['SELECT'], columns: ['id', 'email'] }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+          ],
+          grants: [{ to: 'app_readonly', privileges: ['SELECT'], columns: ['id', 'email'] }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_column');
       expect(ops).toHaveLength(1);
@@ -812,15 +859,17 @@ describe('Planner', () => {
 
     it('produces grant_column for column-level grants on existing table', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-          { name: 'name', type: 'text' },
-        ],
-        grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['id', 'email', 'name'] }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+            { name: 'name', type: 'text' },
+          ],
+          grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['id', 'email', 'name'] }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -839,11 +888,13 @@ describe('Planner', () => {
 
     it('produces grant_table (not grant_column) for table-level grants without columns', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        grants: [{ to: 'admin', privileges: ['ALL'] }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          grants: [{ to: 'admin', privileges: ['ALL'] }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const tableGrants = findOps(result.operations, 'grant_table');
       const colGrants = findOps(result.operations, 'grant_column');
@@ -853,14 +904,16 @@ describe('Planner', () => {
 
     it('creates table with unique constraints', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'email', type: 'text' },
-          { name: 'tenant_id', type: 'uuid' },
-        ],
-        unique_constraints: [{ columns: ['email', 'tenant_id'], name: 'uq_email_tenant' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'email', type: 'text' },
+            { name: 'tenant_id', type: 'uuid' },
+          ],
+          unique_constraints: [{ columns: ['email', 'tenant_id'], name: 'uq_email_tenant' }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_table');
       expect(ops[0].sql).toContain('uq_email_tenant');
@@ -869,14 +922,16 @@ describe('Planner', () => {
 
     it('creates table with composite primary key', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'user_roles',
-        columns: [
-          { name: 'user_id', type: 'uuid' },
-          { name: 'role_id', type: 'uuid' },
-        ],
-        primary_key: ['user_id', 'role_id'],
-      }];
+      desired.tables = [
+        {
+          table: 'user_roles',
+          columns: [
+            { name: 'user_id', type: 'uuid' },
+            { name: 'role_id', type: 'uuid' },
+          ],
+          primary_key: ['user_id', 'role_id'],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_table');
       expect(ops[0].sql).toContain('PRIMARY KEY ("user_id", "role_id")');
@@ -886,10 +941,12 @@ describe('Planner', () => {
   describe('views', () => {
     it('creates new view', () => {
       const desired = emptyDesired();
-      desired.views = [{
-        name: 'active_users',
-        query: 'SELECT id, email FROM users WHERE active = true',
-      }];
+      desired.views = [
+        {
+          name: 'active_users',
+          query: 'SELECT id, email FROM users WHERE active = true',
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_view');
       expect(ops).toHaveLength(1);
@@ -905,11 +962,13 @@ describe('Planner', () => {
 
     it('produces grant_table operations for view grants', () => {
       const desired = emptyDesired();
-      desired.views = [{
-        name: 'active_users',
-        query: 'SELECT id, email FROM users WHERE active = true',
-        grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
-      }];
+      desired.views = [
+        {
+          name: 'active_users',
+          query: 'SELECT id, email FROM users WHERE active = true',
+          grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const grantOps = findOps(result.operations, 'grant_table');
       expect(grantOps).toHaveLength(1);
@@ -921,14 +980,16 @@ describe('Planner', () => {
 
     it('produces multiple grant_table operations for view with multiple grants', () => {
       const desired = emptyDesired();
-      desired.views = [{
-        name: 'active_users',
-        query: 'SELECT id, email FROM users WHERE active = true',
-        grants: [
-          { to: 'app_readonly', privileges: ['SELECT'] },
-          { to: 'app_writer', privileges: ['SELECT', 'INSERT'] },
-        ],
-      }];
+      desired.views = [
+        {
+          name: 'active_users',
+          query: 'SELECT id, email FROM users WHERE active = true',
+          grants: [
+            { to: 'app_readonly', privileges: ['SELECT'] },
+            { to: 'app_writer', privileges: ['SELECT', 'INSERT'] },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const grantOps = findOps(result.operations, 'grant_table');
       expect(grantOps).toHaveLength(2);
@@ -941,11 +1002,13 @@ describe('Planner', () => {
   describe('materialized views', () => {
     it('creates new materialized view', () => {
       const desired = emptyDesired();
-      desired.materializedViews = [{
-        name: 'user_stats',
-        materialized: true,
-        query: 'SELECT user_id, count(*) FROM orders GROUP BY user_id',
-      }];
+      desired.materializedViews = [
+        {
+          name: 'user_stats',
+          materialized: true,
+          query: 'SELECT user_id, count(*) FROM orders GROUP BY user_id',
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_materialized_view');
       expect(ops).toHaveLength(1);
@@ -954,11 +1017,13 @@ describe('Planner', () => {
 
     it('recreates materialized view when query changes (destructive)', () => {
       const desired = emptyDesired();
-      desired.materializedViews = [{
-        name: 'user_stats',
-        materialized: true,
-        query: 'SELECT user_id, count(*) AS cnt FROM orders GROUP BY user_id',
-      }];
+      desired.materializedViews = [
+        {
+          name: 'user_stats',
+          materialized: true,
+          query: 'SELECT user_id, count(*) AS cnt FROM orders GROUP BY user_id',
+        },
+      ];
       const actual = emptyActual();
       actual.materializedViews.set('user_stats', {
         name: 'user_stats',
@@ -972,11 +1037,13 @@ describe('Planner', () => {
 
     it('produces refresh_materialized_view when query changes', () => {
       const desired = emptyDesired();
-      desired.materializedViews = [{
-        name: 'user_stats',
-        materialized: true,
-        query: 'SELECT user_id, count(*) AS cnt FROM orders GROUP BY user_id',
-      }];
+      desired.materializedViews = [
+        {
+          name: 'user_stats',
+          materialized: true,
+          query: 'SELECT user_id, count(*) AS cnt FROM orders GROUP BY user_id',
+        },
+      ];
       const actual = emptyActual();
       actual.materializedViews.set('user_stats', {
         name: 'user_stats',
@@ -992,12 +1059,14 @@ describe('Planner', () => {
 
     it('produces grant_table operations for materialized view grants', () => {
       const desired = emptyDesired();
-      desired.materializedViews = [{
-        name: 'user_stats',
-        materialized: true,
-        query: 'SELECT user_id, count(*) FROM orders GROUP BY user_id',
-        grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
-      }];
+      desired.materializedViews = [
+        {
+          name: 'user_stats',
+          materialized: true,
+          query: 'SELECT user_id, count(*) FROM orders GROUP BY user_id',
+          grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const grantOps = findOps(result.operations, 'grant_table');
       expect(grantOps).toHaveLength(1);
@@ -1009,12 +1078,14 @@ describe('Planner', () => {
 
     it('produces set_comment operations for materialized view comments', () => {
       const desired = emptyDesired();
-      desired.materializedViews = [{
-        name: 'user_stats',
-        materialized: true,
-        query: 'SELECT user_id, count(*) FROM orders GROUP BY user_id',
-        comment: 'Aggregated user order statistics',
-      }];
+      desired.materializedViews = [
+        {
+          name: 'user_stats',
+          materialized: true,
+          query: 'SELECT user_id, count(*) FROM orders GROUP BY user_id',
+          comment: 'Aggregated user order statistics',
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const commentOps = findOps(result.operations, 'set_comment');
       expect(commentOps).toHaveLength(1);
@@ -1029,10 +1100,12 @@ describe('Planner', () => {
       const desired = emptyDesired();
       desired.extensions = { extensions: ['pgcrypto'] };
       desired.enums = [{ name: 'status', values: ['active'] }];
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const phases = result.operations.map((o) => o.phase);
       // Check phases are non-decreasing
@@ -1049,13 +1122,15 @@ describe('Planner', () => {
 
     it('places FKs after table creation', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'orders',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'user_id', type: 'uuid', references: { table: 'users', column: 'id' } },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'orders',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'user_id', type: 'uuid', references: { table: 'users', column: 'id' } },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const tableOp = result.operations.find((o) => o.type === 'create_table')!;
       const fkOp = result.operations.find((o) => o.type === 'add_foreign_key_not_valid')!;
@@ -1064,16 +1139,20 @@ describe('Planner', () => {
 
     it('places triggers after tables', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        triggers: [{
-          name: 'trg',
-          timing: 'BEFORE',
-          events: ['INSERT'],
-          function: 'fn',
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          triggers: [
+            {
+              name: 'trg',
+              timing: 'BEFORE',
+              events: ['INSERT'],
+              function: 'fn',
+            },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const tableOp = result.operations.find((o) => o.type === 'create_table')!;
       const trgOp = result.operations.find((o) => o.type === 'create_trigger')!;
@@ -1103,10 +1182,12 @@ describe('Planner', () => {
   describe('pgSchema option', () => {
     it('uses specified pgSchema in SQL', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual(), { pgSchema: 'myschema' });
       const ops = findOps(result.operations, 'create_table');
       expect(ops[0].sql).toContain('"myschema"."users"');
@@ -1116,13 +1197,15 @@ describe('Planner', () => {
   describe('column comment on existing table', () => {
     it('adds column comment when column has one', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text', comment: 'User email' },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text', comment: 'User email' },
+          ],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -1140,11 +1223,13 @@ describe('Planner', () => {
   describe('index diffing on existing table', () => {
     it('adds new index to existing table', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'email', type: 'text' }],
-        indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'email', type: 'text' }],
+          indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -1157,10 +1242,12 @@ describe('Planner', () => {
 
     it('blocks drop of index not in desired', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'email', type: 'text' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'email', type: 'text' }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -1175,20 +1262,24 @@ describe('Planner', () => {
   describe('trigger diffing on existing table', () => {
     it('blocks drop of trigger not in desired', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid' }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
         columns: [{ name: 'id', type: 'uuid' }],
-        triggers: [{
-          name: 'old_trigger',
-          timing: 'BEFORE',
-          events: ['INSERT'],
-          function: 'fn',
-        }],
+        triggers: [
+          {
+            name: 'old_trigger',
+            timing: 'BEFORE',
+            events: ['INSERT'],
+            function: 'fn',
+          },
+        ],
       });
       const result = buildPlan(desired, actual);
       expect(result.blocked.some((o) => o.type === 'drop_trigger')).toBe(true);
@@ -1198,26 +1289,32 @@ describe('Planner', () => {
   describe('policy diffing on existing table', () => {
     it('recreates policy when permissive flag changes', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid' }],
-        policies: [{
-          name: 'user_policy',
-          for: 'SELECT',
-          to: 'public',
-          permissive: false,
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid' }],
+          policies: [
+            {
+              name: 'user_policy',
+              for: 'SELECT',
+              to: 'public',
+              permissive: false,
+            },
+          ],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
         columns: [{ name: 'id', type: 'uuid' }],
-        policies: [{
-          name: 'user_policy',
-          for: 'SELECT',
-          to: 'public',
-          permissive: true,
-        }],
+        policies: [
+          {
+            name: 'user_policy',
+            for: 'SELECT',
+            to: 'public',
+            permissive: true,
+          },
+        ],
       });
       const result = buildPlan(desired, actual);
       const dropOps = findOps(result.operations, 'drop_policy');
@@ -1229,20 +1326,24 @@ describe('Planner', () => {
 
     it('blocks drop of policy not in desired', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid' }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
         columns: [{ name: 'id', type: 'uuid' }],
-        policies: [{
-          name: 'old_policy',
-          for: 'SELECT',
-          to: 'public',
-          permissive: true,
-        }],
+        policies: [
+          {
+            name: 'old_policy',
+            for: 'SELECT',
+            to: 'public',
+            permissive: true,
+          },
+        ],
       });
       const result = buildPlan(desired, actual);
       expect(result.blocked.some((o) => o.type === 'drop_policy')).toBe(true);
@@ -1252,10 +1353,12 @@ describe('Planner', () => {
   describe('type normalization', () => {
     it('treats int and integer as the same type', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'test',
-        columns: [{ name: 'count', type: 'integer' }],
-      }];
+      desired.tables = [
+        {
+          table: 'test',
+          columns: [{ name: 'count', type: 'integer' }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('test', {
         table: 'test',
@@ -1269,11 +1372,13 @@ describe('Planner', () => {
   describe('SQL escaping', () => {
     it('escapes single quotes in comments', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        comment: "User's table",
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          comment: "User's table",
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'set_comment');
       expect(ops[0].sql).toContain("User''s table");
@@ -1283,10 +1388,12 @@ describe('Planner', () => {
   describe('drop default', () => {
     it('drops column default when desired has no default', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'status', type: 'text' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'status', type: 'text' }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -1302,10 +1409,12 @@ describe('Planner', () => {
   describe('safe NOT NULL pattern', () => {
     it('produces 4 operations in correct order for nullable → non-nullable', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'orders',
-        columns: [{ name: 'total', type: 'numeric', nullable: false }],
-      }];
+      desired.tables = [
+        {
+          table: 'orders',
+          columns: [{ name: 'total', type: 'numeric', nullable: false }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('orders', {
         table: 'orders',
@@ -1315,8 +1424,11 @@ describe('Planner', () => {
 
       // Filter to just the NOT NULL-related operations
       const notNullOps = result.operations.filter(
-        (o) => o.type === 'add_check_not_valid' || o.type === 'validate_constraint' ||
-               (o.type === 'alter_column' && o.sql.includes('SET NOT NULL')) || o.type === 'drop_check',
+        (o) =>
+          o.type === 'add_check_not_valid' ||
+          o.type === 'validate_constraint' ||
+          (o.type === 'alter_column' && o.sql.includes('SET NOT NULL')) ||
+          o.type === 'drop_check',
       );
       expect(notNullOps).toHaveLength(4);
       expect(notNullOps[0].type).toBe('add_check_not_valid');
@@ -1327,10 +1439,12 @@ describe('Planner', () => {
 
     it('does NOT use safe pattern for non-nullable → nullable (just DROP NOT NULL)', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'orders',
-        columns: [{ name: 'total', type: 'numeric', nullable: true }],
-      }];
+      desired.tables = [
+        {
+          table: 'orders',
+          columns: [{ name: 'total', type: 'numeric', nullable: true }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('orders', {
         table: 'orders',
@@ -1345,13 +1459,15 @@ describe('Planner', () => {
 
     it('handles multiple columns going non-nullable in same table', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'email', type: 'text', nullable: false },
-          { name: 'name', type: 'text', nullable: false },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'email', type: 'text', nullable: false },
+            { name: 'name', type: 'text', nullable: false },
+          ],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -1368,13 +1484,15 @@ describe('Planner', () => {
 
     it('does not trigger safe pattern on CREATE TABLE (direct NOT NULL is fine)', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text', nullable: false },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text', nullable: false },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       // CREATE TABLE uses inline NOT NULL — no safe pattern needed
       expect(findOps(result.operations, 'add_check_not_valid')).toHaveLength(0);
@@ -1386,14 +1504,16 @@ describe('Planner', () => {
   describe('safe unique constraint pattern', () => {
     it('uses 2-step safe pattern when adding unique constraint to existing table', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'email', type: 'text' },
-          { name: 'tenant_id', type: 'uuid' },
-        ],
-        unique_constraints: [{ columns: ['email', 'tenant_id'], name: 'uq_users_email_tenant' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'email', type: 'text' },
+            { name: 'tenant_id', type: 'uuid' },
+          ],
+          unique_constraints: [{ columns: ['email', 'tenant_id'], name: 'uq_users_email_tenant' }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -1423,11 +1543,13 @@ describe('Planner', () => {
 
     it('generates default name for unique constraint without explicit name', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'email', type: 'text' }],
-        unique_constraints: [{ columns: ['email'] }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'email', type: 'text' }],
+          unique_constraints: [{ columns: ['email'] }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -1441,10 +1563,12 @@ describe('Planner', () => {
 
     it('drops unique constraint not in desired (destructive)', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'email', type: 'text' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'email', type: 'text' }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -1457,11 +1581,13 @@ describe('Planner', () => {
 
     it('does not produce safe pattern ops for new table (inline UNIQUE in CREATE TABLE)', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'email', type: 'text' }],
-        unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'email', type: 'text' }],
+          unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       // New table: unique constraint is inline in CREATE TABLE
       const createOps = findOps(result.operations, 'create_table');
@@ -1473,11 +1599,13 @@ describe('Planner', () => {
 
     it('skips unique constraint that already exists', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'email', type: 'text' }],
-        unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'email', type: 'text' }],
+          unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -1495,15 +1623,17 @@ describe('Planner', () => {
   describe('function grants', () => {
     it('produces grant_function operations from function grants', () => {
       const desired = emptyDesired();
-      desired.functions = [{
-        name: 'get_user',
-        language: 'plpgsql',
-        returns: 'json',
-        body: 'BEGIN RETURN NULL; END;',
-        security: 'invoker',
-        volatility: 'stable',
-        grants: [{ to: 'app_readonly', privileges: ['EXECUTE'] }],
-      }];
+      desired.functions = [
+        {
+          name: 'get_user',
+          language: 'plpgsql',
+          returns: 'json',
+          body: 'BEGIN RETURN NULL; END;',
+          security: 'invoker',
+          volatility: 'stable',
+          grants: [{ to: 'app_readonly', privileges: ['EXECUTE'] }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_function');
       expect(ops).toHaveLength(1);
@@ -1515,14 +1645,16 @@ describe('Planner', () => {
 
     it('produces grant_function with args in signature', () => {
       const desired = emptyDesired();
-      desired.functions = [{
-        name: 'get_user_by_id',
-        language: 'plpgsql',
-        returns: 'json',
-        args: [{ name: 'user_id', type: 'uuid' }],
-        body: 'BEGIN RETURN NULL; END;',
-        grants: [{ to: 'app_user', privileges: ['EXECUTE'] }],
-      }];
+      desired.functions = [
+        {
+          name: 'get_user_by_id',
+          language: 'plpgsql',
+          returns: 'json',
+          args: [{ name: 'user_id', type: 'uuid' }],
+          body: 'BEGIN RETURN NULL; END;',
+          grants: [{ to: 'app_user', privileges: ['EXECUTE'] }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_function');
       expect(ops).toHaveLength(1);
@@ -1531,16 +1663,18 @@ describe('Planner', () => {
 
     it('produces multiple grant_function operations for multiple grantees', () => {
       const desired = emptyDesired();
-      desired.functions = [{
-        name: 'helper_fn',
-        language: 'plpgsql',
-        returns: 'void',
-        body: 'BEGIN END;',
-        grants: [
-          { to: 'role_a', privileges: ['EXECUTE'] },
-          { to: 'role_b', privileges: ['EXECUTE'] },
-        ],
-      }];
+      desired.functions = [
+        {
+          name: 'helper_fn',
+          language: 'plpgsql',
+          returns: 'void',
+          body: 'BEGIN END;',
+          grants: [
+            { to: 'role_a', privileges: ['EXECUTE'] },
+            { to: 'role_b', privileges: ['EXECUTE'] },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_function');
       expect(ops).toHaveLength(2);
@@ -1550,14 +1684,16 @@ describe('Planner', () => {
   describe('sequence grants', () => {
     it('auto-generates grant_sequence for tables with serial columns and grants', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'items',
-        columns: [
-          { name: 'id', type: 'serial', primary_key: true },
-          { name: 'name', type: 'text' },
-        ],
-        grants: [{ to: 'app_user', privileges: ['SELECT', 'INSERT'] }],
-      }];
+      desired.tables = [
+        {
+          table: 'items',
+          columns: [
+            { name: 'id', type: 'serial', primary_key: true },
+            { name: 'name', type: 'text' },
+          ],
+          grants: [{ to: 'app_user', privileges: ['SELECT', 'INSERT'] }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_sequence');
       expect(ops).toHaveLength(1);
@@ -1569,14 +1705,16 @@ describe('Planner', () => {
 
     it('auto-generates grant_sequence for bigserial columns', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'events',
-        columns: [
-          { name: 'id', type: 'bigserial', primary_key: true },
-          { name: 'data', type: 'jsonb' },
-        ],
-        grants: [{ to: 'writer', privileges: ['INSERT'] }],
-      }];
+      desired.tables = [
+        {
+          table: 'events',
+          columns: [
+            { name: 'id', type: 'bigserial', primary_key: true },
+            { name: 'data', type: 'jsonb' },
+          ],
+          grants: [{ to: 'writer', privileges: ['INSERT'] }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_sequence');
       expect(ops).toHaveLength(1);
@@ -1585,14 +1723,16 @@ describe('Planner', () => {
 
     it('does not generate grant_sequence when table has no serial columns', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-        ],
-        grants: [{ to: 'reader', privileges: ['SELECT'] }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+          ],
+          grants: [{ to: 'reader', privileges: ['SELECT'] }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_sequence');
       expect(ops).toHaveLength(0);
@@ -1600,12 +1740,12 @@ describe('Planner', () => {
 
     it('does not generate grant_sequence when table has no grants', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'items',
-        columns: [
-          { name: 'id', type: 'serial', primary_key: true },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'items',
+          columns: [{ name: 'id', type: 'serial', primary_key: true }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_sequence');
       expect(ops).toHaveLength(0);
@@ -1613,16 +1753,16 @@ describe('Planner', () => {
 
     it('generates grant_sequence for each grantee with INSERT/UPDATE/ALL privileges', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'items',
-        columns: [
-          { name: 'id', type: 'serial', primary_key: true },
-        ],
-        grants: [
-          { to: 'writer', privileges: ['INSERT', 'UPDATE'] },
-          { to: 'reader', privileges: ['SELECT'] },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'items',
+          columns: [{ name: 'id', type: 'serial', primary_key: true }],
+          grants: [
+            { to: 'writer', privileges: ['INSERT', 'UPDATE'] },
+            { to: 'reader', privileges: ['SELECT'] },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_sequence');
       // Only the writer needs sequence access (INSERT/UPDATE use sequences), reader doesn't
@@ -1634,14 +1774,16 @@ describe('Planner', () => {
   describe('CONCURRENTLY indexes', () => {
     it('generates CREATE INDEX CONCURRENTLY for new indexes', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-        ],
-        indexes: [{ columns: ['email'] }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+          ],
+          indexes: [{ columns: ['email'] }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'add_index');
       expect(ops).toHaveLength(1);
@@ -1651,14 +1793,16 @@ describe('Planner', () => {
 
     it('generates UNIQUE INDEX CONCURRENTLY for unique indexes', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-        ],
-        indexes: [{ columns: ['email'], unique: true }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+          ],
+          indexes: [{ columns: ['email'], unique: true }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'add_index');
       expect(ops).toHaveLength(1);
@@ -1668,11 +1812,13 @@ describe('Planner', () => {
 
     it('marks add_index operations as concurrent', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'email', type: 'text' }],
-        indexes: [{ name: 'idx_users_email', columns: ['email'] }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'email', type: 'text' }],
+          indexes: [{ name: 'idx_users_email', columns: ['email'] }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -1689,14 +1835,16 @@ describe('Planner', () => {
   describe('index options', () => {
     it('generates index with gin method', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'documents',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'tags', type: 'text[]' },
-        ],
-        indexes: [{ name: 'idx_documents_tags', columns: ['tags'], method: 'gin' }],
-      }];
+      desired.tables = [
+        {
+          table: 'documents',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'tags', type: 'text[]' },
+          ],
+          indexes: [{ name: 'idx_documents_tags', columns: ['tags'], method: 'gin' }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'add_index');
       expect(ops).toHaveLength(1);
@@ -1705,14 +1853,16 @@ describe('Planner', () => {
 
     it('generates index with gist method', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'locations',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'geom', type: 'geometry' },
-        ],
-        indexes: [{ name: 'idx_locations_geom', columns: ['geom'], method: 'gist' }],
-      }];
+      desired.tables = [
+        {
+          table: 'locations',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'geom', type: 'geometry' },
+          ],
+          indexes: [{ name: 'idx_locations_geom', columns: ['geom'], method: 'gist' }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'add_index');
       expect(ops).toHaveLength(1);
@@ -1721,14 +1871,16 @@ describe('Planner', () => {
 
     it('generates index with hash method', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-        ],
-        indexes: [{ name: 'idx_users_email_hash', columns: ['email'], method: 'hash' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+          ],
+          indexes: [{ name: 'idx_users_email_hash', columns: ['email'], method: 'hash' }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'add_index');
       expect(ops).toHaveLength(1);
@@ -1737,14 +1889,16 @@ describe('Planner', () => {
 
     it('generates index with brin method', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'events',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'created_at', type: 'timestamptz' },
-        ],
-        indexes: [{ name: 'idx_events_created_at', columns: ['created_at'], method: 'brin' }],
-      }];
+      desired.tables = [
+        {
+          table: 'events',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'created_at', type: 'timestamptz' },
+          ],
+          indexes: [{ name: 'idx_events_created_at', columns: ['created_at'], method: 'brin' }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'add_index');
       expect(ops).toHaveLength(1);
@@ -1753,15 +1907,17 @@ describe('Planner', () => {
 
     it('generates partial index with WHERE clause', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-          { name: 'active', type: 'boolean' },
-        ],
-        indexes: [{ name: 'idx_users_email_active', columns: ['email'], where: 'active = true' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+            { name: 'active', type: 'boolean' },
+          ],
+          indexes: [{ name: 'idx_users_email_active', columns: ['email'], where: 'active = true' }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'add_index');
       expect(ops).toHaveLength(1);
@@ -1770,15 +1926,17 @@ describe('Planner', () => {
 
     it('generates covering index with INCLUDE', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-          { name: 'name', type: 'text' },
-        ],
-        indexes: [{ name: 'idx_users_email_incl_name', columns: ['email'], include: ['name'] }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+            { name: 'name', type: 'text' },
+          ],
+          indexes: [{ name: 'idx_users_email_incl_name', columns: ['email'], include: ['name'] }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'add_index');
       expect(ops).toHaveLength(1);
@@ -1787,14 +1945,16 @@ describe('Planner', () => {
 
     it('generates index with opclass', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-        ],
-        indexes: [{ name: 'idx_users_email_pattern', columns: ['email'], opclass: 'text_pattern_ops' }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+          ],
+          indexes: [{ name: 'idx_users_email_pattern', columns: ['email'], opclass: 'text_pattern_ops' }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'add_index');
       expect(ops).toHaveLength(1);
@@ -1803,22 +1963,26 @@ describe('Planner', () => {
 
     it('generates index with all options combined', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-          { name: 'name', type: 'text' },
-          { name: 'active', type: 'boolean' },
-        ],
-        indexes: [{
-          name: 'idx_users_complex',
-          columns: ['email'],
-          unique: true,
-          include: ['name'],
-          where: 'active = true',
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+            { name: 'name', type: 'text' },
+            { name: 'active', type: 'boolean' },
+          ],
+          indexes: [
+            {
+              name: 'idx_users_complex',
+              columns: ['email'],
+              unique: true,
+              include: ['name'],
+              where: 'active = true',
+            },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'add_index');
       expect(ops).toHaveLength(1);
@@ -1833,9 +1997,7 @@ describe('Planner', () => {
       const desired = emptyDesired();
       desired.extensions = {
         extensions: ['pgcrypto'],
-        schema_grants: [
-          { to: 'app_user', schemas: ['public'] },
-        ],
+        schema_grants: [{ to: 'app_user', schemas: ['public'] }],
       };
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_schema');
@@ -1882,7 +2044,7 @@ describe('Planner', () => {
           prechecks: [
             {
               name: 'no_orphans',
-              query: "SELECT count(*) = 0 FROM orders WHERE user_id NOT IN (SELECT id FROM users)",
+              query: 'SELECT count(*) = 0 FROM orders WHERE user_id NOT IN (SELECT id FROM users)',
               message: 'Orphaned orders exist — fix before migrating',
             },
           ],
@@ -1893,7 +2055,7 @@ describe('Planner', () => {
       const ops = findOps(result.operations, 'run_precheck');
       expect(ops).toHaveLength(1);
       expect(ops[0].objectName).toBe('users.no_orphans');
-      expect(ops[0].sql).toBe("SELECT count(*) = 0 FROM orders WHERE user_id NOT IN (SELECT id FROM users)");
+      expect(ops[0].sql).toBe('SELECT count(*) = 0 FROM orders WHERE user_id NOT IN (SELECT id FROM users)');
       expect(ops[0].precheckMessage).toBe('Orphaned orders exist — fix before migrating');
       expect(ops[0].phase).toBe(0);
     });
@@ -1910,7 +2072,7 @@ describe('Planner', () => {
           prechecks: [
             {
               name: 'validate_emails',
-              query: "SELECT count(*) = 0 FROM users WHERE email IS NULL",
+              query: 'SELECT count(*) = 0 FROM users WHERE email IS NULL',
               message: 'Null emails exist',
             },
           ],
@@ -1936,9 +2098,7 @@ describe('Planner', () => {
         {
           table: 'users',
           columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-          prechecks: [
-            { name: 'check1', query: 'SELECT true', message: 'fail' },
-          ],
+          prechecks: [{ name: 'check1', query: 'SELECT true', message: 'fail' }],
         },
       ];
 
@@ -1956,15 +2116,17 @@ describe('Planner', () => {
   describe('generated columns', () => {
     it('includes GENERATED ALWAYS AS ... STORED in CREATE TABLE SQL', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'orders',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'price', type: 'numeric' },
-          { name: 'quantity', type: 'integer' },
-          { name: 'total', type: 'numeric', generated: 'price * quantity' },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'orders',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'price', type: 'numeric' },
+            { name: 'quantity', type: 'integer' },
+            { name: 'total', type: 'numeric', generated: 'price * quantity' },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const createOp = findOps(result.operations, 'create_table')[0];
       expect(createOp).toBeDefined();
@@ -1973,15 +2135,17 @@ describe('Planner', () => {
 
     it('includes GENERATED ALWAYS AS ... STORED in ADD COLUMN SQL', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'orders',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'price', type: 'numeric' },
-          { name: 'quantity', type: 'integer' },
-          { name: 'total', type: 'numeric', generated: 'price * quantity' },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'orders',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'price', type: 'numeric' },
+            { name: 'quantity', type: 'integer' },
+            { name: 'total', type: 'numeric', generated: 'price * quantity' },
+          ],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('orders', {
         table: 'orders',
@@ -2001,15 +2165,17 @@ describe('Planner', () => {
   describe('composite primary keys', () => {
     it('does not add individual PRIMARY KEY on columns when composite primary_key is set', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'order_items',
-        columns: [
-          { name: 'order_id', type: 'uuid' },
-          { name: 'product_id', type: 'uuid' },
-          { name: 'quantity', type: 'integer' },
-        ],
-        primary_key: ['order_id', 'product_id'],
-      }];
+      desired.tables = [
+        {
+          table: 'order_items',
+          columns: [
+            { name: 'order_id', type: 'uuid' },
+            { name: 'product_id', type: 'uuid' },
+            { name: 'quantity', type: 'integer' },
+          ],
+          primary_key: ['order_id', 'product_id'],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_table');
       expect(ops).toHaveLength(1);
@@ -2021,15 +2187,17 @@ describe('Planner', () => {
 
     it('creates table with 3-column composite primary key', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'tenant_user_roles',
-        columns: [
-          { name: 'tenant_id', type: 'uuid' },
-          { name: 'user_id', type: 'uuid' },
-          { name: 'role_id', type: 'uuid' },
-        ],
-        primary_key: ['tenant_id', 'user_id', 'role_id'],
-      }];
+      desired.tables = [
+        {
+          table: 'tenant_user_roles',
+          columns: [
+            { name: 'tenant_id', type: 'uuid' },
+            { name: 'user_id', type: 'uuid' },
+            { name: 'role_id', type: 'uuid' },
+          ],
+          primary_key: ['tenant_id', 'user_id', 'role_id'],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_table');
       expect(ops).toHaveLength(1);
@@ -2042,17 +2210,21 @@ describe('Planner', () => {
   describe('trigger for_each and when clause', () => {
     it('creates trigger with FOR EACH STATEMENT', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'audit_log',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        triggers: [{
-          name: 'audit_after_truncate',
-          timing: 'AFTER',
-          events: ['TRUNCATE'],
-          function: 'log_truncate',
-          for_each: 'STATEMENT',
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'audit_log',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          triggers: [
+            {
+              name: 'audit_after_truncate',
+              timing: 'AFTER',
+              events: ['TRUNCATE'],
+              function: 'log_truncate',
+              for_each: 'STATEMENT',
+            },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_trigger');
       expect(ops).toHaveLength(1);
@@ -2064,18 +2236,22 @@ describe('Planner', () => {
 
     it('creates trigger with WHEN clause', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        triggers: [{
-          name: 'set_updated_at',
-          timing: 'BEFORE',
-          events: ['UPDATE'],
-          function: 'update_timestamp',
-          for_each: 'ROW',
-          when: 'OLD.* IS DISTINCT FROM NEW.*',
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          triggers: [
+            {
+              name: 'set_updated_at',
+              timing: 'BEFORE',
+              events: ['UPDATE'],
+              function: 'update_timestamp',
+              for_each: 'ROW',
+              when: 'OLD.* IS DISTINCT FROM NEW.*',
+            },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_trigger');
       expect(ops).toHaveLength(1);
@@ -2085,18 +2261,22 @@ describe('Planner', () => {
 
     it('creates trigger with FOR EACH STATEMENT and WHEN clause', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'orders',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        triggers: [{
-          name: 'check_batch',
-          timing: 'AFTER',
-          events: ['INSERT', 'UPDATE'],
-          function: 'validate_batch',
-          for_each: 'STATEMENT',
-          when: 'pg_trigger_depth() = 0',
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'orders',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          triggers: [
+            {
+              name: 'check_batch',
+              timing: 'AFTER',
+              events: ['INSERT', 'UPDATE'],
+              function: 'validate_batch',
+              for_each: 'STATEMENT',
+              when: 'pg_trigger_depth() = 0',
+            },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_trigger');
       expect(ops).toHaveLength(1);
@@ -2107,16 +2287,20 @@ describe('Planner', () => {
 
     it('defaults for_each to ROW when not specified', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'items',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        triggers: [{
-          name: 'trg_default',
-          timing: 'AFTER',
-          events: ['INSERT'],
-          function: 'notify_insert',
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'items',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          triggers: [
+            {
+              name: 'trg_default',
+              timing: 'AFTER',
+              events: ['INSERT'],
+              function: 'notify_insert',
+            },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_trigger');
       expect(ops).toHaveLength(1);
@@ -2125,28 +2309,34 @@ describe('Planner', () => {
 
     it('recreates trigger when for_each changes', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'events',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        triggers: [{
-          name: 'trg_notify',
-          timing: 'AFTER',
-          events: ['INSERT'],
-          function: 'notify_event',
-          for_each: 'STATEMENT',
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'events',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          triggers: [
+            {
+              name: 'trg_notify',
+              timing: 'AFTER',
+              events: ['INSERT'],
+              function: 'notify_event',
+              for_each: 'STATEMENT',
+            },
+          ],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('events', {
         table: 'events',
         columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        triggers: [{
-          name: 'trg_notify',
-          timing: 'AFTER',
-          events: ['INSERT'],
-          function: 'notify_event',
-          for_each: 'ROW',
-        }],
+        triggers: [
+          {
+            name: 'trg_notify',
+            timing: 'AFTER',
+            events: ['INSERT'],
+            function: 'notify_event',
+            for_each: 'ROW',
+          },
+        ],
       });
       const result = buildPlan(desired, actual);
       const dropOps = findOps(result.operations, 'drop_trigger');
@@ -2158,29 +2348,35 @@ describe('Planner', () => {
 
     it('recreates trigger when when clause changes', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        triggers: [{
-          name: 'trg_audit',
-          timing: 'AFTER',
-          events: ['UPDATE'],
-          function: 'audit_change',
-          for_each: 'ROW',
-          when: 'OLD.email IS DISTINCT FROM NEW.email',
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          triggers: [
+            {
+              name: 'trg_audit',
+              timing: 'AFTER',
+              events: ['UPDATE'],
+              function: 'audit_change',
+              for_each: 'ROW',
+              when: 'OLD.email IS DISTINCT FROM NEW.email',
+            },
+          ],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
         columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        triggers: [{
-          name: 'trg_audit',
-          timing: 'AFTER',
-          events: ['UPDATE'],
-          function: 'audit_change',
-          for_each: 'ROW',
-        }],
+        triggers: [
+          {
+            name: 'trg_audit',
+            timing: 'AFTER',
+            events: ['UPDATE'],
+            function: 'audit_change',
+            for_each: 'ROW',
+          },
+        ],
       });
       const result = buildPlan(desired, actual);
       const dropOps = findOps(result.operations, 'drop_trigger');
@@ -2194,11 +2390,13 @@ describe('Planner', () => {
   describe('with_grant_option', () => {
     it('produces GRANT ... WITH GRANT OPTION for table-level grants', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        grants: [{ to: 'admin', privileges: ['SELECT', 'INSERT'], with_grant_option: true }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          grants: [{ to: 'admin', privileges: ['SELECT', 'INSERT'], with_grant_option: true }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const grantOps = findOps(result.operations, 'grant_table');
       expect(grantOps).toHaveLength(1);
@@ -2207,11 +2405,13 @@ describe('Planner', () => {
 
     it('does not include WITH GRANT OPTION when flag is false', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        grants: [{ to: 'reader', privileges: ['SELECT'], with_grant_option: false }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          grants: [{ to: 'reader', privileges: ['SELECT'], with_grant_option: false }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const grantOps = findOps(result.operations, 'grant_table');
       expect(grantOps).toHaveLength(1);
@@ -2220,14 +2420,16 @@ describe('Planner', () => {
 
     it('produces GRANT ... WITH GRANT OPTION for column-level grants', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-        ],
-        grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['email'], with_grant_option: true }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+          ],
+          grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['email'], with_grant_option: true }],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
       const grantOps = findOps(result.operations, 'grant_column');
       expect(grantOps).toHaveLength(1);
@@ -2239,21 +2441,25 @@ describe('Planner', () => {
   describe('PRD §8.1 destructive operation blocking', () => {
     it('blocks disable_rls when existing table has policies but desired has none', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        // No policies
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          // No policies
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
         columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        policies: [{
-          name: 'user_policy',
-          for: 'SELECT',
-          to: 'public',
-          using: 'true',
-        }],
+        policies: [
+          {
+            name: 'user_policy',
+            for: 'SELECT',
+            to: 'public',
+            using: 'true',
+          },
+        ],
       });
       const result = buildPlan(desired, actual);
       expect(result.blocked.some((o) => o.type === 'disable_rls')).toBe(true);
@@ -2261,20 +2467,24 @@ describe('Planner', () => {
 
     it('allows disable_rls with allowDestructive', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
         columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        policies: [{
-          name: 'user_policy',
-          for: 'SELECT',
-          to: 'public',
-          using: 'true',
-        }],
+        policies: [
+          {
+            name: 'user_policy',
+            for: 'SELECT',
+            to: 'public',
+            using: 'true',
+          },
+        ],
       });
       const result = buildPlan(desired, actual, { allowDestructive: true });
       const ops = findOps(result.operations, 'disable_rls');
@@ -2284,16 +2494,20 @@ describe('Planner', () => {
 
     it('blocks drop_policy when policy exists in DB but not in desired', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
-        policies: [{
-          name: 'keep_policy',
-          for: 'SELECT',
-          to: 'public',
-          using: 'true',
-        }],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          policies: [
+            {
+              name: 'keep_policy',
+              for: 'SELECT',
+              to: 'public',
+              using: 'true',
+            },
+          ],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -2329,14 +2543,16 @@ describe('Planner', () => {
   describe('expand/contract YAML-driven', () => {
     it('produces expand operations when column has expand field on existing table', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-          { name: 'email_lower', type: 'text', expand: { from: 'email', transform: 'lower(email)' } },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+            { name: 'email_lower', type: 'text', expand: { from: 'email', transform: 'lower(email)' } },
+          ],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
@@ -2370,14 +2586,16 @@ describe('Planner', () => {
 
     it('produces expand operations for new table with expand column', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-          { name: 'email_lower', type: 'text', expand: { from: 'email', transform: 'lower(email)' } },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+            { name: 'email_lower', type: 'text', expand: { from: 'email', transform: 'lower(email)' } },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
 
       // create_table should be generated for the table itself
@@ -2397,14 +2615,16 @@ describe('Planner', () => {
 
     it('expand operations have higher phase than table creation', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'email', type: 'text' },
-          { name: 'email_lower', type: 'text', expand: { from: 'email', transform: 'lower(email)' } },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'email', type: 'text' },
+            { name: 'email_lower', type: 'text', expand: { from: 'email', transform: 'lower(email)' } },
+          ],
+        },
+      ];
       const result = buildPlan(desired, emptyActual());
 
       const createOps = findOps(result.operations, 'create_table');
@@ -2420,14 +2640,16 @@ describe('Planner', () => {
 
     it('uses identity transform for simple rename expand', () => {
       const desired = emptyDesired();
-      desired.tables = [{
-        table: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', primary_key: true },
-          { name: 'full_name', type: 'text' },
-          { name: 'display_name', type: 'text', expand: { from: 'full_name', transform: 'full_name' } },
-        ],
-      }];
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'full_name', type: 'text' },
+            { name: 'display_name', type: 'text', expand: { from: 'full_name', transform: 'full_name' } },
+          ],
+        },
+      ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',

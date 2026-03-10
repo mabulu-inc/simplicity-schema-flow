@@ -1,9 +1,23 @@
 import type { ConfigOverrides } from '../core/config.js';
 
 const VALID_COMMANDS = [
-  'run', 'plan', 'validate', 'status', 'init', 'baseline',
-  'drift', 'lint', 'generate', 'sql', 'erd', 'new',
-  'down', 'contract', 'expand-status', 'docs', 'help',
+  'run',
+  'plan',
+  'validate',
+  'status',
+  'init',
+  'baseline',
+  'drift',
+  'lint',
+  'generate',
+  'sql',
+  'erd',
+  'new',
+  'down',
+  'contract',
+  'expand-status',
+  'docs',
+  'help',
 ] as const;
 const RUN_SUBCOMMANDS = ['pre', 'migrate', 'post'] as const;
 const NEW_SUBCOMMANDS = ['pre', 'post', 'mixin'] as const;
@@ -173,8 +187,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 function flagTakesValue(flag: string): boolean {
   return [
-    '--connection-string', '--db', '--dir', '--schema', '--env',
-    '--lock-timeout', '--statement-timeout', '--max-retries',
-    '--output', '--output-dir', '--name',
+    '--connection-string',
+    '--db',
+    '--dir',
+    '--schema',
+    '--env',
+    '--lock-timeout',
+    '--statement-timeout',
+    '--max-retries',
+    '--output',
+    '--output-dir',
+    '--name',
   ].includes(flag);
 }

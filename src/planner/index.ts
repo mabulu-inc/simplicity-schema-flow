@@ -20,7 +20,6 @@ import type {
   MaterializedViewSchema,
   RoleSchema,
   ExtensionsSchema,
-  ForeignKeyRef,
 } from '../schema/types.js';
 import { planExpandColumn } from '../expand/index.js';
 
@@ -145,11 +144,7 @@ export interface PlanResult {
 
 // ─── Main Planner ──────────────────────────────────────────────
 
-export function buildPlan(
-  desired: DesiredState,
-  actual: ActualState,
-  options: PlanOptions = {},
-): PlanResult {
+export function buildPlan(desired: DesiredState, actual: ActualState, options: PlanOptions = {}): PlanResult {
   const { allowDestructive = false, pgSchema = 'public' } = options;
   const allOps: Operation[] = [];
 
@@ -194,10 +189,7 @@ export function buildPlan(
 
 // ─── Extensions ────────────────────────────────────────────────
 
-function diffExtensions(
-  desired: ExtensionsSchema | null,
-  actual: string[],
-): Operation[] {
+function diffExtensions(desired: ExtensionsSchema | null, actual: string[]): Operation[] {
   const ops: Operation[] = [];
   const desiredExts = desired?.extensions ?? [];
 
@@ -246,11 +238,7 @@ function diffExtensions(
 
 // ─── Enums ─────────────────────────────────────────────────────
 
-function diffEnums(
-  desired: EnumSchema[],
-  actual: Map<string, EnumSchema>,
-  _pgSchema: string,
-): Operation[] {
+function diffEnums(desired: EnumSchema[], actual: Map<string, EnumSchema>, _pgSchema: string): Operation[] {
   const ops: Operation[] = [];
 
   for (const desiredEnum of desired) {
@@ -307,10 +295,7 @@ function diffEnums(
 
 // ─── Roles ─────────────────────────────────────────────────────
 
-function diffRoles(
-  desired: RoleSchema[],
-  actual: Map<string, RoleSchema>,
-): Operation[] {
+function diffRoles(desired: RoleSchema[], actual: Map<string, RoleSchema>): Operation[] {
   const ops: Operation[] = [];
 
   for (const desiredRole of desired) {
@@ -415,18 +400,12 @@ function diffRoleAttributes(desired: RoleSchema, actual: RoleSchema): string | n
 
 // ─── Functions ─────────────────────────────────────────────────
 
-function diffFunctions(
-  desired: FunctionSchema[],
-  actual: Map<string, FunctionSchema>,
-  pgSchema: string,
-): Operation[] {
+function diffFunctions(desired: FunctionSchema[], actual: Map<string, FunctionSchema>, pgSchema: string): Operation[] {
   const ops: Operation[] = [];
 
   for (const fn of desired) {
     // CREATE OR REPLACE — always emit for desired functions
-    const args = fn.args
-      ? fn.args.map((a) => `${a.name} ${a.type}`).join(', ')
-      : '';
+    const args = fn.args ? fn.args.map((a) => `${a.name} ${a.type}`).join(', ') : '';
     const security = fn.security === 'definer' ? 'SECURITY DEFINER' : 'SECURITY INVOKER';
     const volatility = (fn.volatility || 'volatile').toUpperCase();
     const language = fn.language || 'plpgsql';
@@ -487,11 +466,7 @@ function diffFunctions(
 
 // ─── Tables ────────────────────────────────────────────────────
 
-function diffTables(
-  desired: TableSchema[],
-  actual: Map<string, TableSchema>,
-  pgSchema: string,
-): Operation[] {
+function diffTables(desired: TableSchema[], actual: Map<string, TableSchema>, pgSchema: string): Operation[] {
   const ops: Operation[] = [];
 
   for (const desiredTable of desired) {
@@ -808,7 +783,14 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
   }
 
   // Diff unique constraints (safe 2-step pattern: CONCURRENTLY index + USING INDEX)
-  ops.push(...diffUniqueConstraints(desired.table, desired.unique_constraints || [], existing.unique_constraints || [], pgSchema));
+  ops.push(
+    ...diffUniqueConstraints(
+      desired.table,
+      desired.unique_constraints || [],
+      existing.unique_constraints || [],
+      pgSchema,
+    ),
+  );
 
   // Diff indexes
   ops.push(...diffIndexes(desired.table, desired.indexes || [], existing.indexes || [], pgSchema));
@@ -852,12 +834,7 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
   return ops;
 }
 
-function diffColumn(
-  table: string,
-  desired: ColumnDef,
-  existing: ColumnDef,
-  pgSchema: string,
-): Operation[] {
+function diffColumn(table: string, desired: ColumnDef, existing: ColumnDef, pgSchema: string): Operation[] {
   const ops: Operation[] = [];
 
   // Type change
@@ -956,16 +933,7 @@ function diffColumn(
 
 // ─── Indexes ───────────────────────────────────────────────────
 
-function indexKey(idx: IndexDef): string {
-  return idx.name || `${idx.columns.join('_')}_${idx.unique ? 'u' : 'i'}_${idx.method || 'btree'}`;
-}
-
-function diffIndexes(
-  table: string,
-  desired: IndexDef[],
-  existing: IndexDef[],
-  pgSchema: string,
-): Operation[] {
+function diffIndexes(table: string, desired: IndexDef[], existing: IndexDef[], pgSchema: string): Operation[] {
   const ops: Operation[] = [];
   const existingByName = new Map<string, IndexDef>();
   for (const idx of existing) {
@@ -980,9 +948,7 @@ function diffIndexes(
   }
 
   // Drop indexes not in desired
-  const desiredNames = new Set(
-    desired.map((idx) => idx.name || `idx_${table}_${idx.columns.join('_')}`),
-  );
+  const desiredNames = new Set(desired.map((idx) => idx.name || `idx_${table}_${idx.columns.join('_')}`));
   for (const idx of existing) {
     if (idx.name && !desiredNames.has(idx.name)) {
       ops.push({
@@ -1002,7 +968,7 @@ function createIndexOp(table: string, idx: IndexDef, pgSchema: string): Operatio
   const name = idx.name || `idx_${table}_${idx.columns.join('_')}`;
   const method = idx.method || 'btree';
   const unique = idx.unique ? 'UNIQUE ' : '';
-  const cols = idx.columns.map((c) => idx.opclass ? `"${c}" ${idx.opclass}` : `"${c}"`).join(', ');
+  const cols = idx.columns.map((c) => (idx.opclass ? `"${c}" ${idx.opclass}` : `"${c}"`)).join(', ');
   let sql = `CREATE ${unique}INDEX CONCURRENTLY "${name}" ON "${pgSchema}"."${table}" USING ${method} (${cols})`;
   if (idx.include && idx.include.length > 0) {
     sql += ` INCLUDE (${idx.include.map((c) => `"${c}"`).join(', ')})`;
@@ -1022,12 +988,7 @@ function createIndexOp(table: string, idx: IndexDef, pgSchema: string): Operatio
 
 // ─── Checks ────────────────────────────────────────────────────
 
-function diffChecks(
-  table: string,
-  desired: CheckDef[],
-  existing: CheckDef[],
-  pgSchema: string,
-): Operation[] {
+function diffChecks(table: string, desired: CheckDef[], existing: CheckDef[], pgSchema: string): Operation[] {
   const ops: Operation[] = [];
   const existingByName = new Map(existing.map((c) => [c.name, c]));
 
@@ -1055,9 +1016,7 @@ function diffUniqueConstraints(
   pgSchema: string,
 ): Operation[] {
   const ops: Operation[] = [];
-  const existingByName = new Map(
-    existing.map((uc) => [uc.name || `uq_${table}_${uc.columns.join('_')}`, uc]),
-  );
+  const existingByName = new Map(existing.map((uc) => [uc.name || `uq_${table}_${uc.columns.join('_')}`, uc]));
 
   for (const uc of desired) {
     const ucName = uc.name || `uq_${table}_${uc.columns.join('_')}`;
@@ -1086,9 +1045,7 @@ function diffUniqueConstraints(
   }
 
   // Drop unique constraints not in desired
-  const desiredNames = new Set(
-    desired.map((uc) => uc.name || `uq_${table}_${uc.columns.join('_')}`),
-  );
+  const desiredNames = new Set(desired.map((uc) => uc.name || `uq_${table}_${uc.columns.join('_')}`));
   for (const [name] of existingByName) {
     if (!desiredNames.has(name)) {
       ops.push({
@@ -1117,12 +1074,7 @@ function triggerNeedsRecreate(desired: TriggerDef, existing: TriggerDef): boolea
   return false;
 }
 
-function diffTriggers(
-  table: string,
-  desired: TriggerDef[],
-  existing: TriggerDef[],
-  pgSchema: string,
-): Operation[] {
+function diffTriggers(table: string, desired: TriggerDef[], existing: TriggerDef[], pgSchema: string): Operation[] {
   const ops: Operation[] = [];
   const existingByName = new Map(existing.map((t) => [t.name, t]));
 
@@ -1177,12 +1129,7 @@ function createTriggerOp(table: string, trigger: TriggerDef, pgSchema: string): 
 
 // ─── Policies ──────────────────────────────────────────────────
 
-function diffPolicies(
-  table: string,
-  desired: PolicyDef[],
-  existing: PolicyDef[],
-  pgSchema: string,
-): Operation[] {
+function diffPolicies(table: string, desired: PolicyDef[], existing: PolicyDef[], pgSchema: string): Operation[] {
   const ops: Operation[] = [];
   const existingByName = new Map(existing.map((p) => [p.name, p]));
 
@@ -1328,11 +1275,7 @@ function createSequenceGrantOps(
 
 // ─── Views ─────────────────────────────────────────────────────
 
-function diffViews(
-  desired: ViewSchema[],
-  actual: Map<string, ViewSchema>,
-  pgSchema: string,
-): Operation[] {
+function diffViews(desired: ViewSchema[], actual: Map<string, ViewSchema>, pgSchema: string): Operation[] {
   const ops: Operation[] = [];
 
   for (const view of desired) {
@@ -1480,12 +1423,7 @@ function diffMaterializedViews(
 
 // ─── Seeds ─────────────────────────────────────────────────────
 
-function createSeedOp(
-  table: string,
-  seed: Record<string, unknown>,
-  columns: ColumnDef[],
-  pgSchema: string,
-): Operation {
+function createSeedOp(table: string, seed: Record<string, unknown>, columns: ColumnDef[], pgSchema: string): Operation {
   const keys = Object.keys(seed);
   const cols = keys.map((k) => `"${k}"`).join(', ');
   const vals = keys.map((k) => formatSeedValue(seed[k])).join(', ');

@@ -32,13 +32,22 @@ describe('generateSql', () => {
   it('renders multiple operations separated by blank lines', () => {
     const plan: PlanResult = {
       operations: [
-        makeOp({ type: 'create_extension', phase: 2, objectName: 'uuid-ossp', sql: 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"' }),
-        makeOp({ type: 'create_table', phase: 6, objectName: 'users', sql: 'CREATE TABLE "public"."users" (\n  "id" uuid PRIMARY KEY\n)' }),
+        makeOp({
+          type: 'create_extension',
+          phase: 2,
+          objectName: 'uuid-ossp',
+          sql: 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"',
+        }),
+        makeOp({
+          type: 'create_table',
+          phase: 6,
+          objectName: 'users',
+          sql: 'CREATE TABLE "public"."users" (\n  "id" uuid PRIMARY KEY\n)',
+        }),
       ],
       blocked: [],
     };
     const result = generateSql(plan);
-    const lines = result.split('\n');
     // Should have both statements
     expect(result).toContain('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
     expect(result).toContain('CREATE TABLE "public"."users"');
@@ -125,7 +134,12 @@ describe('generateSql', () => {
       operations: [
         makeOp({ type: 'create_extension', phase: 2, sql: 'CREATE EXTENSION IF NOT EXISTS "pgcrypto"' }),
         makeOp({ type: 'create_table', phase: 6, sql: 'CREATE TABLE "public"."users" (id int)' }),
-        makeOp({ type: 'add_index', phase: 7, sql: 'CREATE INDEX CONCURRENTLY "idx_users_email" ON "public"."users" ("email")', concurrent: true }),
+        makeOp({
+          type: 'add_index',
+          phase: 7,
+          sql: 'CREATE INDEX CONCURRENTLY "idx_users_email" ON "public"."users" ("email")',
+          concurrent: true,
+        }),
       ],
       blocked: [],
     };
@@ -139,7 +153,12 @@ describe('generateSql', () => {
     const plan: PlanResult = {
       operations: [
         makeOp({ type: 'create_table', phase: 6, sql: 'CREATE TABLE "public"."users" (id int)' }),
-        makeOp({ type: 'add_index', phase: 7, sql: 'CREATE INDEX CONCURRENTLY "idx_email" ON "public"."users" ("email")', concurrent: true }),
+        makeOp({
+          type: 'add_index',
+          phase: 7,
+          sql: 'CREATE INDEX CONCURRENTLY "idx_email" ON "public"."users" ("email")',
+          concurrent: true,
+        }),
       ],
       blocked: [],
     };
@@ -161,7 +180,12 @@ describe('generateSql', () => {
   it('renders concurrent ops without transaction even when wrapInTransaction is false', () => {
     const plan: PlanResult = {
       operations: [
-        makeOp({ type: 'add_index', phase: 7, sql: 'CREATE INDEX CONCURRENTLY "idx_email" ON "public"."users" ("email")', concurrent: true }),
+        makeOp({
+          type: 'add_index',
+          phase: 7,
+          sql: 'CREATE INDEX CONCURRENTLY "idx_email" ON "public"."users" ("email")',
+          concurrent: true,
+        }),
       ],
       blocked: [],
     };
@@ -175,8 +199,18 @@ describe('generateSql', () => {
   it('does not wrap concurrent-only plan in transaction', () => {
     const plan: PlanResult = {
       operations: [
-        makeOp({ type: 'add_index', phase: 7, sql: 'CREATE INDEX CONCURRENTLY "idx_a" ON "public"."t" ("a")', concurrent: true }),
-        makeOp({ type: 'add_index', phase: 7, sql: 'CREATE INDEX CONCURRENTLY "idx_b" ON "public"."t" ("b")', concurrent: true }),
+        makeOp({
+          type: 'add_index',
+          phase: 7,
+          sql: 'CREATE INDEX CONCURRENTLY "idx_a" ON "public"."t" ("a")',
+          concurrent: true,
+        }),
+        makeOp({
+          type: 'add_index',
+          phase: 7,
+          sql: 'CREATE INDEX CONCURRENTLY "idx_b" ON "public"."t" ("b")',
+          concurrent: true,
+        }),
       ],
       blocked: [],
     };

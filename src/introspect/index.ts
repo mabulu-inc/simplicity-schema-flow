@@ -119,7 +119,7 @@ export async function getExistingFunctions(client: Client, schema: string): Prom
     }
 
     // Parse argument list string like "a integer, b integer"
-    const arglist = (r.arglist as string || '').trim();
+    const arglist = ((r.arglist as string) || '').trim();
     if (arglist) {
       const args = parseArgList(arglist);
       if (args.length > 0) fn.args = args;
@@ -163,7 +163,10 @@ function parseArgList(arglist: string): FunctionArg[] {
 
     if (idx + 1 < tokens.length) {
       const name = tokens[idx];
-      const type = tokens.slice(idx + 1).join(' ').replace(/\s+DEFAULT\s+.*/i, '');
+      const type = tokens
+        .slice(idx + 1)
+        .join(' ')
+        .replace(/\s+DEFAULT\s+.*/i, '');
       if (mode !== 'OUT') {
         args.push({ name, type });
       }
@@ -257,18 +260,19 @@ export async function getExistingRoles(client: Client): Promise<RoleSchema[]> {
 
 /** Introspect a single table, returning a TableSchema-compatible structure. */
 export async function introspectTable(client: Client, tableName: string, schema: string): Promise<TableSchema> {
-  const [columns, indexes, checks, triggers, policies, tableComment, fkInfo, columnGrants, compositePk, tableGrants] = await Promise.all([
-    getColumns(client, tableName, schema),
-    getIndexes(client, tableName, schema),
-    getChecks(client, tableName, schema),
-    getTriggers(client, tableName, schema),
-    getPolicies(client, tableName, schema),
-    getTableComment(client, tableName, schema),
-    getForeignKeys(client, tableName, schema),
-    getColumnGrants(client, tableName, schema),
-    getCompositePrimaryKey(client, tableName, schema),
-    getTableLevelGrants(client, tableName, schema),
-  ]);
+  const [columns, indexes, checks, triggers, policies, tableComment, fkInfo, columnGrants, compositePk, tableGrants] =
+    await Promise.all([
+      getColumns(client, tableName, schema),
+      getIndexes(client, tableName, schema),
+      getChecks(client, tableName, schema),
+      getTriggers(client, tableName, schema),
+      getPolicies(client, tableName, schema),
+      getTableComment(client, tableName, schema),
+      getForeignKeys(client, tableName, schema),
+      getColumnGrants(client, tableName, schema),
+      getCompositePrimaryKey(client, tableName, schema),
+      getTableLevelGrants(client, tableName, schema),
+    ]);
 
   // Merge FK info into columns
   for (const fk of fkInfo) {

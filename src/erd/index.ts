@@ -37,9 +37,7 @@ function formatColumn(col: ColumnDef, table: TableSchema): string {
   const parts = [col.type, col.name];
 
   // Determine PK status
-  const isPk =
-    col.primary_key ||
-    (table.primary_key && table.primary_key.includes(col.name));
+  const isPk = col.primary_key || (table.primary_key && table.primary_key.includes(col.name));
   const isFk = !!col.references;
 
   if (isPk) parts.push('PK');

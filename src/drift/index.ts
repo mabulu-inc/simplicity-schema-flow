@@ -80,10 +80,7 @@ export function detectDrift(desired: DesiredState, actual: ActualState): DriftRe
 
 // ─── Extensions ─────────────────────────────────────────────────
 
-function driftExtensions(
-  desired: DesiredState['extensions'],
-  actual: string[],
-): DriftItem[] {
+function driftExtensions(desired: DesiredState['extensions'], actual: string[]): DriftItem[] {
   const items: DriftItem[] = [];
   const desiredExts = desired?.extensions ?? [];
 
@@ -102,10 +99,7 @@ function driftExtensions(
 
 // ─── Enums ──────────────────────────────────────────────────────
 
-function driftEnums(
-  desired: EnumSchema[],
-  actual: Map<string, EnumSchema>,
-): DriftItem[] {
+function driftEnums(desired: EnumSchema[], actual: Map<string, EnumSchema>): DriftItem[] {
   const items: DriftItem[] = [];
 
   for (const de of desired) {
@@ -137,10 +131,7 @@ function driftEnums(
 
 // ─── Roles ──────────────────────────────────────────────────────
 
-function driftRoles(
-  desired: RoleSchema[],
-  actual: Map<string, RoleSchema>,
-): DriftItem[] {
+function driftRoles(desired: RoleSchema[], actual: Map<string, RoleSchema>): DriftItem[] {
   const items: DriftItem[] = [];
 
   for (const dr of desired) {
@@ -156,7 +147,8 @@ function driftRoles(
       if (dr.inherit !== undefined && dr.inherit !== ar.inherit) diffs.push('inherit');
       if (dr.bypassrls !== undefined && dr.bypassrls !== ar.bypassrls) diffs.push('bypassrls');
       if (dr.replication !== undefined && dr.replication !== ar.replication) diffs.push('replication');
-      if (dr.connection_limit !== undefined && dr.connection_limit !== ar.connection_limit) diffs.push('connection_limit');
+      if (dr.connection_limit !== undefined && dr.connection_limit !== ar.connection_limit)
+        diffs.push('connection_limit');
       // Membership comparison
       const dMemberships = (dr.in || []).sort().join(',');
       const aMemberships = (ar.in || []).sort().join(',');
@@ -181,10 +173,7 @@ function driftRoles(
 
 // ─── Functions ──────────────────────────────────────────────────
 
-function driftFunctions(
-  desired: FunctionSchema[],
-  actual: Map<string, FunctionSchema>,
-): DriftItem[] {
+function driftFunctions(desired: FunctionSchema[], actual: Map<string, FunctionSchema>): DriftItem[] {
   const items: DriftItem[] = [];
 
   for (const df of desired) {
@@ -228,10 +217,7 @@ function driftFunctions(
 
 // ─── Tables ─────────────────────────────────────────────────────
 
-function driftTables(
-  desired: TableSchema[],
-  actual: Map<string, TableSchema>,
-): DriftItem[] {
+function driftTables(desired: TableSchema[], actual: Map<string, TableSchema>): DriftItem[] {
   const items: DriftItem[] = [];
 
   for (const dt of desired) {
@@ -265,31 +251,37 @@ function driftCompositePk(table: string, desired?: string[], actual?: string[]):
   const aPk = (actual || []).join(',');
   if (dPk === aPk) return [];
   if (dPk && !aPk) {
-    return [{
-      type: 'constraint',
-      object: `${table}.primary_key`,
-      status: 'missing_in_db',
-      expected: `(${desired!.join(', ')})`,
-      detail: `Composite PK expected: (${desired!.join(', ')})`,
-    }];
+    return [
+      {
+        type: 'constraint',
+        object: `${table}.primary_key`,
+        status: 'missing_in_db',
+        expected: `(${desired!.join(', ')})`,
+        detail: `Composite PK expected: (${desired!.join(', ')})`,
+      },
+    ];
   }
   if (!dPk && aPk) {
-    return [{
+    return [
+      {
+        type: 'constraint',
+        object: `${table}.primary_key`,
+        status: 'missing_in_yaml',
+        actual: `(${actual!.join(', ')})`,
+        detail: `Composite PK in DB: (${actual!.join(', ')})`,
+      },
+    ];
+  }
+  return [
+    {
       type: 'constraint',
       object: `${table}.primary_key`,
-      status: 'missing_in_yaml',
+      status: 'different',
+      expected: `(${desired!.join(', ')})`,
       actual: `(${actual!.join(', ')})`,
-      detail: `Composite PK in DB: (${actual!.join(', ')})`,
-    }];
-  }
-  return [{
-    type: 'constraint',
-    object: `${table}.primary_key`,
-    status: 'different',
-    expected: `(${desired!.join(', ')})`,
-    actual: `(${actual!.join(', ')})`,
-    detail: `Composite PK differs: expected (${desired!.join(', ')}), actual (${actual!.join(', ')})`,
-  }];
+      detail: `Composite PK differs: expected (${desired!.join(', ')}), actual (${actual!.join(', ')})`,
+    },
+  ];
 }
 
 function driftColumns(table: string, desired: ColumnDef[], actual: ColumnDef[]): DriftItem[] {
@@ -346,9 +338,8 @@ function driftColumns(table: string, desired: ColumnDef[], actual: ColumnDef[]):
         items.push({
           type: 'column',
           object: `${table}.${dc.name}`,
-          status: dGenerated && !aGenerated ? 'missing_in_db'
-            : !dGenerated && aGenerated ? 'missing_in_yaml'
-            : 'different',
+          status:
+            dGenerated && !aGenerated ? 'missing_in_db' : !dGenerated && aGenerated ? 'missing_in_yaml' : 'different',
           expected: dGenerated ?? '(none)',
           actual: aGenerated ?? '(none)',
           detail: `generated: expected ${dGenerated ?? '(none)'}, actual ${aGenerated ?? '(none)'}`,
@@ -394,9 +385,7 @@ function driftIndexes(table: string, desired: IndexDef[], actual: IndexDef[]): D
     }
   }
 
-  const desiredNames = new Set(
-    desired.map((idx) => idx.name || `idx_${table}_${idx.columns.join('_')}`),
-  );
+  const desiredNames = new Set(desired.map((idx) => idx.name || `idx_${table}_${idx.columns.join('_')}`));
   for (const idx of actual) {
     if (idx.name && !desiredNames.has(idx.name)) {
       items.push({ type: 'index', object: idx.name, status: 'missing_in_yaml' });
@@ -507,24 +496,23 @@ function driftPolicies(table: string, desired: PolicyDef[], actual: PolicyDef[])
 
 function driftTableComment(table: string, desired?: string, actual?: string): DriftItem[] {
   if (desired && desired !== actual) {
-    return [{
-      type: 'comment',
-      object: table,
-      status: 'different',
-      expected: desired,
-      actual: actual ?? '(none)',
-      detail: `Table comment: expected "${desired}", actual "${actual ?? '(none)'}"`,
-    }];
+    return [
+      {
+        type: 'comment',
+        object: table,
+        status: 'different',
+        expected: desired,
+        actual: actual ?? '(none)',
+        detail: `Table comment: expected "${desired}", actual "${actual ?? '(none)'}"`,
+      },
+    ];
   }
   return [];
 }
 
 // ─── Views ──────────────────────────────────────────────────────
 
-function driftViews(
-  desired: ViewSchema[],
-  actual: Map<string, ViewSchema>,
-): DriftItem[] {
+function driftViews(desired: ViewSchema[], actual: Map<string, ViewSchema>): DriftItem[] {
   const items: DriftItem[] = [];
 
   for (const dv of desired) {
@@ -675,8 +663,7 @@ function driftUniqueConstraints(
   actual: UniqueConstraintDef[],
 ): DriftItem[] {
   const items: DriftItem[] = [];
-  const getName = (uc: UniqueConstraintDef) =>
-    uc.name || `${table}_${uc.columns.join('_')}_key`;
+  const getName = (uc: UniqueConstraintDef) => uc.name || `${table}_${uc.columns.join('_')}_key`;
   const actualByName = new Map(actual.map((uc) => [getName(uc), uc]));
 
   for (const uc of desired) {
@@ -751,14 +738,16 @@ function driftSeeds(
   const dJson = JSON.stringify(desired || []);
   const aJson = JSON.stringify(actual || []);
   if (dJson !== aJson) {
-    return [{
-      type: 'seed',
-      object: table,
-      status: 'different',
-      expected: `${dLen} seed rows`,
-      actual: `${aLen} seed rows`,
-      detail: `Seed data differs for ${table}`,
-    }];
+    return [
+      {
+        type: 'seed',
+        object: table,
+        status: 'different',
+        expected: `${dLen} seed rows`,
+        actual: `${aLen} seed rows`,
+        detail: `Seed data differs for ${table}`,
+      },
+    ];
   }
   return [];
 }

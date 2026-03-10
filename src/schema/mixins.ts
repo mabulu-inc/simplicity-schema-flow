@@ -1,13 +1,4 @@
-import type {
-  MixinSchema,
-  TableSchema,
-  ColumnDef,
-  IndexDef,
-  CheckDef,
-  TriggerDef,
-  PolicyDef,
-  GrantDef,
-} from './types.js';
+import type { MixinSchema, TableSchema, ColumnDef, IndexDef, CheckDef, TriggerDef, PolicyDef } from './types.js';
 
 export type MixinRegistry = Map<string, MixinSchema>;
 
@@ -35,14 +26,14 @@ export function applyMixins(table: TableSchema, registry: MixinRegistry): TableS
   }
 
   const tableName = table.table;
-  const existingColumnNames = new Set(table.columns.map(c => c.name));
+  const existingColumnNames = new Set(table.columns.map((c) => c.name));
 
-  let columns = [...table.columns];
-  let indexes = table.indexes ? [...table.indexes] : [];
-  let checks = table.checks ? [...table.checks] : [];
-  let triggers = table.triggers ? [...table.triggers] : [];
-  let policies = table.policies ? [...table.policies] : [];
-  let grants = table.grants ? [...table.grants] : [];
+  const columns = [...table.columns];
+  const indexes = table.indexes ? [...table.indexes] : [];
+  const checks = table.checks ? [...table.checks] : [];
+  const triggers = table.triggers ? [...table.triggers] : [];
+  const policies = table.policies ? [...table.policies] : [];
+  const grants = table.grants ? [...table.grants] : [];
 
   let hasIndexes = !!table.indexes;
   let hasChecks = !!table.checks;
@@ -68,27 +59,27 @@ export function applyMixins(table: TableSchema, registry: MixinRegistry): TableS
 
     if (mixin.indexes) {
       hasIndexes = true;
-      indexes.push(...mixin.indexes.map(idx => substituteIndex(idx, tableName)));
+      indexes.push(...mixin.indexes.map((idx) => substituteIndex(idx, tableName)));
     }
 
     if (mixin.checks) {
       hasChecks = true;
-      checks.push(...mixin.checks.map(chk => substituteCheck(chk, tableName)));
+      checks.push(...mixin.checks.map((chk) => substituteCheck(chk, tableName)));
     }
 
     if (mixin.triggers) {
       hasTriggers = true;
-      triggers.push(...mixin.triggers.map(trig => substituteTrigger(trig, tableName)));
+      triggers.push(...mixin.triggers.map((trig) => substituteTrigger(trig, tableName)));
     }
 
     if (mixin.policies) {
       hasPolicies = true;
-      policies.push(...mixin.policies.map(pol => substitutePolicy(pol, tableName)));
+      policies.push(...mixin.policies.map((pol) => substitutePolicy(pol, tableName)));
     }
 
     if (mixin.grants) {
       hasGrants = true;
-      grants.push(...mixin.grants.map(g => ({ ...g })));
+      grants.push(...mixin.grants.map((g) => ({ ...g })));
     }
   }
 

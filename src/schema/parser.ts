@@ -51,11 +51,6 @@ function requireArray<T>(obj: Record<string, unknown>, field: string, context: s
   return val as T[];
 }
 
-function optionalString(obj: Record<string, unknown>, field: string): string | undefined {
-  const val = obj[field];
-  return typeof val === 'string' ? val : undefined;
-}
-
 function validateEnum<T extends string>(value: string, allowed: readonly T[], field: string, context: string): T {
   if (!allowed.includes(value as T)) {
     throw new Error(`${context}: "${field}" must be one of [${allowed.join(', ')}], got "${value}"`);
@@ -86,8 +81,10 @@ function parseColumnDef(raw: Record<string, unknown>, context: string): ColumnDe
       table: requireString(ref, 'table', `${context}.references`),
       column: requireString(ref, 'column', `${context}.references`),
     };
-    if (ref.on_delete !== undefined) fk.on_delete = validateEnum(String(ref.on_delete), FK_ACTIONS, 'on_delete', `${context}.references`);
-    if (ref.on_update !== undefined) fk.on_update = validateEnum(String(ref.on_update), FK_ACTIONS, 'on_update', `${context}.references`);
+    if (ref.on_delete !== undefined)
+      fk.on_delete = validateEnum(String(ref.on_delete), FK_ACTIONS, 'on_delete', `${context}.references`);
+    if (ref.on_update !== undefined)
+      fk.on_update = validateEnum(String(ref.on_update), FK_ACTIONS, 'on_update', `${context}.references`);
     if (ref.deferrable !== undefined) fk.deferrable = Boolean(ref.deferrable);
     if (ref.initially_deferred !== undefined) fk.initially_deferred = Boolean(ref.initially_deferred);
     col.references = fk;
@@ -131,12 +128,13 @@ function parseTriggerDef(raw: Record<string, unknown>, context: string): Trigger
   const trig: TriggerDef = {
     name: requireString(raw, 'name', context),
     timing: validateEnum(String(raw.timing), TRIGGER_TIMINGS, 'timing', context),
-    events: requireArray<string>(raw, 'events', context).map(
-      e => validateEnum(String(e), TRIGGER_EVENTS, 'events', context),
+    events: requireArray<string>(raw, 'events', context).map((e) =>
+      validateEnum(String(e), TRIGGER_EVENTS, 'events', context),
     ),
     function: requireString(raw, 'function', context),
   };
-  if (raw.for_each !== undefined) trig.for_each = validateEnum(String(raw.for_each), TRIGGER_FOR_EACH, 'for_each', context);
+  if (raw.for_each !== undefined)
+    trig.for_each = validateEnum(String(raw.for_each), TRIGGER_FOR_EACH, 'for_each', context);
   if (raw.when !== undefined) trig.when = String(raw.when);
   return trig;
 }
@@ -211,33 +209,36 @@ export function parseTable(yamlStr: string): TableSchema {
 
   const table: TableSchema = {
     table: requireString(raw, 'table', ctx),
-    columns: requireArray<Record<string, unknown>>(raw, 'columns', ctx).map(
-      (c, i) => parseColumnDef(c, `${ctx}.columns[${i}]`),
+    columns: requireArray<Record<string, unknown>>(raw, 'columns', ctx).map((c, i) =>
+      parseColumnDef(c, `${ctx}.columns[${i}]`),
     ),
   };
 
   if (raw.primary_key !== undefined) table.primary_key = raw.primary_key as string[];
-  if (raw.indexes !== undefined) table.indexes = (raw.indexes as Record<string, unknown>[]).map(
-    (idx, i) => parseIndexDef(idx, `${ctx}.indexes[${i}]`),
-  );
-  if (raw.checks !== undefined) table.checks = (raw.checks as Record<string, unknown>[]).map(
-    (c, i) => parseCheckDef(c, `${ctx}.checks[${i}]`),
-  );
-  if (raw.unique_constraints !== undefined) table.unique_constraints = (raw.unique_constraints as Record<string, unknown>[]).map(
-    (uc, i) => parseUniqueConstraintDef(uc, `${ctx}.unique_constraints[${i}]`),
-  );
-  if (raw.triggers !== undefined) table.triggers = (raw.triggers as Record<string, unknown>[]).map(
-    (t, i) => parseTriggerDef(t, `${ctx}.triggers[${i}]`),
-  );
-  if (raw.policies !== undefined) table.policies = (raw.policies as Record<string, unknown>[]).map(
-    (p, i) => parsePolicyDef(p, `${ctx}.policies[${i}]`),
-  );
-  if (raw.grants !== undefined) table.grants = (raw.grants as Record<string, unknown>[]).map(
-    (g, i) => parseGrantDef(g, `${ctx}.grants[${i}]`),
-  );
-  if (raw.prechecks !== undefined) table.prechecks = (raw.prechecks as Record<string, unknown>[]).map(
-    (p, i) => parsePrecheckDef(p, `${ctx}.prechecks[${i}]`),
-  );
+  if (raw.indexes !== undefined)
+    table.indexes = (raw.indexes as Record<string, unknown>[]).map((idx, i) =>
+      parseIndexDef(idx, `${ctx}.indexes[${i}]`),
+    );
+  if (raw.checks !== undefined)
+    table.checks = (raw.checks as Record<string, unknown>[]).map((c, i) => parseCheckDef(c, `${ctx}.checks[${i}]`));
+  if (raw.unique_constraints !== undefined)
+    table.unique_constraints = (raw.unique_constraints as Record<string, unknown>[]).map((uc, i) =>
+      parseUniqueConstraintDef(uc, `${ctx}.unique_constraints[${i}]`),
+    );
+  if (raw.triggers !== undefined)
+    table.triggers = (raw.triggers as Record<string, unknown>[]).map((t, i) =>
+      parseTriggerDef(t, `${ctx}.triggers[${i}]`),
+    );
+  if (raw.policies !== undefined)
+    table.policies = (raw.policies as Record<string, unknown>[]).map((p, i) =>
+      parsePolicyDef(p, `${ctx}.policies[${i}]`),
+    );
+  if (raw.grants !== undefined)
+    table.grants = (raw.grants as Record<string, unknown>[]).map((g, i) => parseGrantDef(g, `${ctx}.grants[${i}]`));
+  if (raw.prechecks !== undefined)
+    table.prechecks = (raw.prechecks as Record<string, unknown>[]).map((p, i) =>
+      parsePrecheckDef(p, `${ctx}.prechecks[${i}]`),
+    );
   if (raw.seeds !== undefined) table.seeds = raw.seeds as Record<string, unknown>[];
   if (raw.mixins !== undefined) table.mixins = raw.mixins as string[];
   if (raw.comment !== undefined) table.comment = String(raw.comment);
@@ -292,9 +293,10 @@ export function parseFunction(yamlStr: string): FunctionSchema {
   if (raw.cost !== undefined) fn.cost = Number(raw.cost);
   if (raw.rows !== undefined) fn.rows = Number(raw.rows);
   if (raw.set !== undefined) fn.set = raw.set as Record<string, string>;
-  if (raw.grants !== undefined) fn.grants = (raw.grants as Record<string, unknown>[]).map(
-    (g, i) => parseFunctionGrantDef(g, `${ctx}.grants[${i}]`),
-  );
+  if (raw.grants !== undefined)
+    fn.grants = (raw.grants as Record<string, unknown>[]).map((g, i) =>
+      parseFunctionGrantDef(g, `${ctx}.grants[${i}]`),
+    );
   if (raw.comment !== undefined) fn.comment = String(raw.comment);
 
   return fn;
@@ -313,20 +315,19 @@ export function parseView(yamlStr: string): ViewSchema | MaterializedViewSchema 
       materialized: true,
       query,
     };
-    if (raw.indexes !== undefined) mv.indexes = (raw.indexes as Record<string, unknown>[]).map(
-      (idx, i) => parseIndexDef(idx, `${ctx}.indexes[${i}]`),
-    );
-    if (raw.grants !== undefined) mv.grants = (raw.grants as Record<string, unknown>[]).map(
-      (g, i) => parseGrantDef(g, `${ctx}.grants[${i}]`),
-    );
+    if (raw.indexes !== undefined)
+      mv.indexes = (raw.indexes as Record<string, unknown>[]).map((idx, i) =>
+        parseIndexDef(idx, `${ctx}.indexes[${i}]`),
+      );
+    if (raw.grants !== undefined)
+      mv.grants = (raw.grants as Record<string, unknown>[]).map((g, i) => parseGrantDef(g, `${ctx}.grants[${i}]`));
     if (raw.comment !== undefined) mv.comment = String(raw.comment);
     return mv;
   }
 
   const view: ViewSchema = { name, query };
-  if (raw.grants !== undefined) view.grants = (raw.grants as Record<string, unknown>[]).map(
-    (g, i) => parseGrantDef(g, `${ctx}.grants[${i}]`),
-  );
+  if (raw.grants !== undefined)
+    view.grants = (raw.grants as Record<string, unknown>[]).map((g, i) => parseGrantDef(g, `${ctx}.grants[${i}]`));
   if (raw.comment !== undefined) view.comment = String(raw.comment);
   return view;
 }
@@ -362,10 +363,13 @@ export function parseExtensions(yamlStr: string): ExtensionsSchema {
   };
 
   if (raw.schema_grants !== undefined) {
-    ext.schema_grants = (raw.schema_grants as Record<string, unknown>[]).map((sg, i) => ({
-      to: requireString(sg, 'to', `${ctx}.schema_grants[${i}]`),
-      schemas: requireArray<string>(sg, 'schemas', `${ctx}.schema_grants[${i}]`),
-    } satisfies SchemaGrant));
+    ext.schema_grants = (raw.schema_grants as Record<string, unknown>[]).map(
+      (sg, i) =>
+        ({
+          to: requireString(sg, 'to', `${ctx}.schema_grants[${i}]`),
+          schemas: requireArray<string>(sg, 'schemas', `${ctx}.schema_grants[${i}]`),
+        }) satisfies SchemaGrant,
+    );
   }
 
   return ext;
@@ -379,24 +383,24 @@ export function parseMixin(yamlStr: string): MixinSchema {
     mixin: requireString(raw, 'mixin', ctx),
   };
 
-  if (raw.columns !== undefined) mixin.columns = (raw.columns as Record<string, unknown>[]).map(
-    (c, i) => parseColumnDef(c, `${ctx}.columns[${i}]`),
-  );
-  if (raw.indexes !== undefined) mixin.indexes = (raw.indexes as Record<string, unknown>[]).map(
-    (idx, i) => parseIndexDef(idx, `${ctx}.indexes[${i}]`),
-  );
-  if (raw.checks !== undefined) mixin.checks = (raw.checks as Record<string, unknown>[]).map(
-    (c, i) => parseCheckDef(c, `${ctx}.checks[${i}]`),
-  );
-  if (raw.triggers !== undefined) mixin.triggers = (raw.triggers as Record<string, unknown>[]).map(
-    (t, i) => parseTriggerDef(t, `${ctx}.triggers[${i}]`),
-  );
-  if (raw.policies !== undefined) mixin.policies = (raw.policies as Record<string, unknown>[]).map(
-    (p, i) => parsePolicyDef(p, `${ctx}.policies[${i}]`),
-  );
-  if (raw.grants !== undefined) mixin.grants = (raw.grants as Record<string, unknown>[]).map(
-    (g, i) => parseGrantDef(g, `${ctx}.grants[${i}]`),
-  );
+  if (raw.columns !== undefined)
+    mixin.columns = (raw.columns as Record<string, unknown>[]).map((c, i) => parseColumnDef(c, `${ctx}.columns[${i}]`));
+  if (raw.indexes !== undefined)
+    mixin.indexes = (raw.indexes as Record<string, unknown>[]).map((idx, i) =>
+      parseIndexDef(idx, `${ctx}.indexes[${i}]`),
+    );
+  if (raw.checks !== undefined)
+    mixin.checks = (raw.checks as Record<string, unknown>[]).map((c, i) => parseCheckDef(c, `${ctx}.checks[${i}]`));
+  if (raw.triggers !== undefined)
+    mixin.triggers = (raw.triggers as Record<string, unknown>[]).map((t, i) =>
+      parseTriggerDef(t, `${ctx}.triggers[${i}]`),
+    );
+  if (raw.policies !== undefined)
+    mixin.policies = (raw.policies as Record<string, unknown>[]).map((p, i) =>
+      parsePolicyDef(p, `${ctx}.policies[${i}]`),
+    );
+  if (raw.grants !== undefined)
+    mixin.grants = (raw.grants as Record<string, unknown>[]).map((g, i) => parseGrantDef(g, `${ctx}.grants[${i}]`));
   if (raw.rls !== undefined) mixin.rls = Boolean(raw.rls);
 
   return mixin;

@@ -1,12 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import {
-  getPool,
-  closePool,
-  withClient,
-  withTransaction,
-  testConnection,
-  TRANSIENT_ERROR_CODES,
-} from '../db.js';
+import { getPool, closePool, withClient, withTransaction, testConnection, TRANSIENT_ERROR_CODES } from '../db.js';
 import pg from 'pg';
 
 const TEST_URL = process.env.DATABASE_URL!;
@@ -98,7 +91,7 @@ describe('db', () => {
         await client.query('INSERT INTO _test_tx (val) VALUES (42)');
       });
 
-      const result = await withClient(TEST_URL, async (client) => {
+      await withClient(TEST_URL, async (client) => {
         const res = await client.query('SELECT val FROM _test_tx');
         return res.rows[0]?.val;
       });

@@ -1,7 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { detectDrift } from '../index.js';
 import type { DesiredState, ActualState } from '../../planner/index.js';
-import type { DriftReport, DriftItem } from '../index.js';
 import { useTestProject, writeSchema } from '../../testing/index.js';
 import { buildPlan } from '../../planner/index.js';
 import { execute } from '../../executor/index.js';
@@ -229,14 +228,20 @@ describe('detectDrift', () => {
     desired.tables = [
       {
         table: 'users',
-        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'email', type: 'text' },
+        ],
         indexes: [{ name: 'idx_users_email', columns: ['email'] }],
       },
     ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'email', type: 'text' },
+      ],
     });
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(
@@ -319,9 +324,7 @@ describe('detectDrift', () => {
 
   it('reports function missing in DB', () => {
     const desired = emptyDesired();
-    desired.functions = [
-      { name: 'my_func', returns: 'trigger', body: 'BEGIN RETURN NEW; END;', language: 'plpgsql' },
-    ];
+    desired.functions = [{ name: 'my_func', returns: 'trigger', body: 'BEGIN RETURN NEW; END;', language: 'plpgsql' }];
     const report = detectDrift(desired, emptyActual());
     expect(report.items).toContainEqual(
       expect.objectContaining({
@@ -377,11 +380,13 @@ describe('detectDrift', () => {
 
   it('reports view grant missing in DB', () => {
     const desired = emptyDesired();
-    desired.views = [{
-      name: 'active_users',
-      query: 'SELECT * FROM users WHERE active = true',
-      grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
-    }];
+    desired.views = [
+      {
+        name: 'active_users',
+        query: 'SELECT * FROM users WHERE active = true',
+        grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
+      },
+    ];
     const actual = emptyActual();
     actual.views.set('active_users', { name: 'active_users', query: 'SELECT * FROM users WHERE active = true' });
     const report = detectDrift(desired, actual);
@@ -396,11 +401,13 @@ describe('detectDrift', () => {
 
   it('reports view grant extra in DB (missing in YAML)', () => {
     const desired = emptyDesired();
-    desired.views = [{
-      name: 'active_users',
-      query: 'SELECT * FROM users WHERE active = true',
-      grants: [],
-    }];
+    desired.views = [
+      {
+        name: 'active_users',
+        query: 'SELECT * FROM users WHERE active = true',
+        grants: [],
+      },
+    ];
     const actual = emptyActual();
     actual.views.set('active_users', {
       name: 'active_users',
@@ -419,11 +426,13 @@ describe('detectDrift', () => {
 
   it('reports no drift when view grants match', () => {
     const desired = emptyDesired();
-    desired.views = [{
-      name: 'active_users',
-      query: 'SELECT * FROM users WHERE active = true',
-      grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
-    }];
+    desired.views = [
+      {
+        name: 'active_users',
+        query: 'SELECT * FROM users WHERE active = true',
+        grants: [{ to: 'app_readonly', privileges: ['SELECT'] }],
+      },
+    ];
     const actual = emptyActual();
     actual.views.set('active_users', {
       name: 'active_users',
@@ -513,15 +522,17 @@ describe('detectDrift', () => {
 
   it('reports multiple role attribute differences', () => {
     const desired = emptyDesired();
-    desired.roles = [{
-      role: 'power_user',
-      createdb: true,
-      createrole: true,
-      inherit: false,
-      bypassrls: true,
-      replication: true,
-      connection_limit: 10,
-    }];
+    desired.roles = [
+      {
+        role: 'power_user',
+        createdb: true,
+        createrole: true,
+        inherit: false,
+        bypassrls: true,
+        replication: true,
+        connection_limit: 10,
+      },
+    ];
     const actual = emptyActual();
     actual.roles.set('power_user', {
       role: 'power_user',
@@ -546,12 +557,14 @@ describe('detectDrift', () => {
 
   it('reports no drift when all role attributes match', () => {
     const desired = emptyDesired();
-    desired.roles = [{
-      role: 'app_user',
-      login: true,
-      createdb: false,
-      inherit: true,
-    }];
+    desired.roles = [
+      {
+        role: 'app_user',
+        login: true,
+        createdb: false,
+        inherit: true,
+      },
+    ];
     const actual = emptyActual();
     actual.roles.set('app_user', {
       role: 'app_user',
@@ -679,14 +692,20 @@ describe('detectDrift', () => {
     desired.tables = [
       {
         table: 'users',
-        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'age', type: 'integer' }],
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'age', type: 'integer' },
+        ],
         checks: [{ name: 'chk_age_positive', expression: 'age > 0' }],
       },
     ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'age', type: 'integer' }],
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'age', type: 'integer' },
+      ],
     });
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(
@@ -782,14 +801,20 @@ describe('detectDrift', () => {
     desired.tables = [
       {
         table: 'users',
-        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'email', type: 'text' },
+        ],
         indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }],
       },
     ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'email', type: 'text' },
+      ],
       indexes: [{ name: 'idx_users_email', columns: ['email'], unique: false }],
     });
     const report = detectDrift(desired, actual);
@@ -808,14 +833,20 @@ describe('detectDrift', () => {
     desired.tables = [
       {
         table: 'users',
-        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'data', type: 'jsonb' }],
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'data', type: 'jsonb' },
+        ],
         indexes: [{ name: 'idx_users_data', columns: ['data'], method: 'gin' }],
       },
     ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'data', type: 'jsonb' }],
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'data', type: 'jsonb' },
+      ],
       indexes: [{ name: 'idx_users_data', columns: ['data'], method: 'btree' }],
     });
     const report = detectDrift(desired, actual);
@@ -834,14 +865,20 @@ describe('detectDrift', () => {
     desired.tables = [
       {
         table: 'users',
-        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'active', type: 'boolean' }],
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'active', type: 'boolean' },
+        ],
         indexes: [{ name: 'idx_users_active', columns: ['id'], where: 'active = true' }],
       },
     ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'active', type: 'boolean' }],
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'active', type: 'boolean' },
+      ],
       indexes: [{ name: 'idx_users_active', columns: ['id'] }],
     });
     const report = detectDrift(desired, actual);
@@ -1018,7 +1055,11 @@ describe('detectDrift', () => {
         table: 'posts',
         columns: [
           { name: 'id', type: 'integer', primary_key: true },
-          { name: 'user_id', type: 'integer', references: { table: 'users', column: 'id', deferrable: true, initially_deferred: true } },
+          {
+            name: 'user_id',
+            type: 'integer',
+            references: { table: 'users', column: 'id', deferrable: true, initially_deferred: true },
+          },
         ],
       },
     ];
@@ -1048,14 +1089,20 @@ describe('detectDrift', () => {
     desired.tables = [
       {
         table: 'users',
-        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'email', type: 'text' },
+        ],
         unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
       },
     ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'email', type: 'text' },
+      ],
     });
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(
@@ -1072,13 +1119,19 @@ describe('detectDrift', () => {
     desired.tables = [
       {
         table: 'users',
-        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'email', type: 'text' },
+        ],
       },
     ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'email', type: 'text' }],
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'email', type: 'text' },
+      ],
       unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
     });
     const report = detectDrift(desired, actual);
@@ -1095,12 +1148,13 @@ describe('detectDrift', () => {
 
   it('reports function body difference', () => {
     const desired = emptyDesired();
-    desired.functions = [
-      { name: 'my_func', returns: 'trigger', body: 'BEGIN RETURN NEW; END;', language: 'plpgsql' },
-    ];
+    desired.functions = [{ name: 'my_func', returns: 'trigger', body: 'BEGIN RETURN NEW; END;', language: 'plpgsql' }];
     const actual = emptyActual();
     actual.functions.set('my_func', {
-      name: 'my_func', returns: 'trigger', body: 'BEGIN RETURN OLD; END;', language: 'plpgsql',
+      name: 'my_func',
+      returns: 'trigger',
+      body: 'BEGIN RETURN OLD; END;',
+      language: 'plpgsql',
     });
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(
@@ -1121,7 +1175,10 @@ describe('detectDrift', () => {
         returns: 'integer',
         body: 'SELECT a + b',
         language: 'sql',
-        args: [{ name: 'a', type: 'integer' }, { name: 'b', type: 'integer' }],
+        args: [
+          { name: 'a', type: 'integer' },
+          { name: 'b', type: 'integer' },
+        ],
       },
     ];
     const actual = emptyActual();
@@ -1145,12 +1202,13 @@ describe('detectDrift', () => {
 
   it('reports function return type difference', () => {
     const desired = emptyDesired();
-    desired.functions = [
-      { name: 'get_count', returns: 'bigint', body: 'SELECT count(*) FROM t', language: 'sql' },
-    ];
+    desired.functions = [{ name: 'get_count', returns: 'bigint', body: 'SELECT count(*) FROM t', language: 'sql' }];
     const actual = emptyActual();
     actual.functions.set('get_count', {
-      name: 'get_count', returns: 'integer', body: 'SELECT count(*) FROM t', language: 'sql',
+      name: 'get_count',
+      returns: 'integer',
+      body: 'SELECT count(*) FROM t',
+      language: 'sql',
     });
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(
@@ -1165,12 +1223,14 @@ describe('detectDrift', () => {
 
   it('reports function security difference', () => {
     const desired = emptyDesired();
-    desired.functions = [
-      { name: 'sec_func', returns: 'void', body: 'SELECT 1', language: 'sql', security: 'definer' },
-    ];
+    desired.functions = [{ name: 'sec_func', returns: 'void', body: 'SELECT 1', language: 'sql', security: 'definer' }];
     const actual = emptyActual();
     actual.functions.set('sec_func', {
-      name: 'sec_func', returns: 'void', body: 'SELECT 1', language: 'sql', security: 'invoker',
+      name: 'sec_func',
+      returns: 'void',
+      body: 'SELECT 1',
+      language: 'sql',
+      security: 'invoker',
     });
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(
@@ -1190,7 +1250,11 @@ describe('detectDrift', () => {
     ];
     const actual = emptyActual();
     actual.functions.set('vol_func', {
-      name: 'vol_func', returns: 'void', body: 'SELECT 1', language: 'sql', volatility: 'volatile',
+      name: 'vol_func',
+      returns: 'void',
+      body: 'SELECT 1',
+      language: 'sql',
+      volatility: 'volatile',
     });
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(
@@ -1278,14 +1342,23 @@ describe('detectDrift', () => {
     desired.tables = [
       {
         table: 'statuses',
-        columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'name', type: 'text' }],
-        seeds: [{ id: 1, name: 'active' }, { id: 2, name: 'inactive' }],
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'name', type: 'text' },
+        ],
+        seeds: [
+          { id: 1, name: 'active' },
+          { id: 2, name: 'inactive' },
+        ],
       },
     ];
     const actual = emptyActual();
     actual.tables.set('statuses', {
       table: 'statuses',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }, { name: 'name', type: 'text' }],
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'name', type: 'text' },
+      ],
     });
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(
@@ -1304,17 +1377,13 @@ describe('detectDrift', () => {
     desired.tables = [
       {
         table: 'users',
-        columns: [
-          { name: 'id', type: 'int', primary_key: true },
-        ],
+        columns: [{ name: 'id', type: 'int', primary_key: true }],
       },
     ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
-      columns: [
-        { name: 'id', type: 'integer', primary_key: true },
-      ],
+      columns: [{ name: 'id', type: 'integer', primary_key: true }],
     });
     const report = detectDrift(desired, actual);
     const colDrifts = report.items.filter((i) => i.type === 'column');
@@ -1325,13 +1394,15 @@ describe('detectDrift', () => {
 
   it('reports generated column missing in DB', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'orders',
-      columns: [
-        { name: 'id', type: 'integer', primary_key: true },
-        { name: 'total', type: 'numeric', generated: 'price * quantity' },
-      ],
-    }];
+    desired.tables = [
+      {
+        table: 'orders',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'total', type: 'numeric', generated: 'price * quantity' },
+        ],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('orders', {
       table: 'orders',
@@ -1351,13 +1422,15 @@ describe('detectDrift', () => {
 
   it('reports generated column expression differs', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'orders',
-      columns: [
-        { name: 'id', type: 'integer', primary_key: true },
-        { name: 'total', type: 'numeric', generated: 'price * quantity' },
-      ],
-    }];
+    desired.tables = [
+      {
+        table: 'orders',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'total', type: 'numeric', generated: 'price * quantity' },
+        ],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('orders', {
       table: 'orders',
@@ -1376,13 +1449,15 @@ describe('detectDrift', () => {
 
   it('reports generated column in DB but not in YAML', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'orders',
-      columns: [
-        { name: 'id', type: 'integer', primary_key: true },
-        { name: 'total', type: 'numeric' },
-      ],
-    }];
+    desired.tables = [
+      {
+        table: 'orders',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'total', type: 'numeric' },
+        ],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('orders', {
       table: 'orders',
@@ -1401,13 +1476,15 @@ describe('detectDrift', () => {
 
   it('no drift when generated expressions match', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'orders',
-      columns: [
-        { name: 'id', type: 'integer', primary_key: true },
-        { name: 'total', type: 'numeric', generated: 'price * quantity' },
-      ],
-    }];
+    desired.tables = [
+      {
+        table: 'orders',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'total', type: 'numeric', generated: 'price * quantity' },
+        ],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('orders', {
       table: 'orders',
@@ -1427,14 +1504,16 @@ describe('detectDrift', () => {
 
   it('reports column-level grant missing in DB', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'users',
-      columns: [
-        { name: 'id', type: 'uuid', primary_key: true },
-        { name: 'email', type: 'text' },
-      ],
-      grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['id', 'email'] }],
-    }];
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [
+          { name: 'id', type: 'uuid', primary_key: true },
+          { name: 'email', type: 'text' },
+        ],
+        grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['id', 'email'] }],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
@@ -1455,13 +1534,15 @@ describe('detectDrift', () => {
 
   it('reports column-level grant missing in YAML', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'users',
-      columns: [
-        { name: 'id', type: 'uuid', primary_key: true },
-        { name: 'email', type: 'text' },
-      ],
-    }];
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [
+          { name: 'id', type: 'uuid', primary_key: true },
+          { name: 'email', type: 'text' },
+        ],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
@@ -1483,14 +1564,16 @@ describe('detectDrift', () => {
 
   it('reports no drift when column-level grants match', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'users',
-      columns: [
-        { name: 'id', type: 'uuid', primary_key: true },
-        { name: 'email', type: 'text' },
-      ],
-      grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['email', 'id'] }],
-    }];
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [
+          { name: 'id', type: 'uuid', primary_key: true },
+          { name: 'email', type: 'text' },
+        ],
+        grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['email', 'id'] }],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
@@ -1507,15 +1590,17 @@ describe('detectDrift', () => {
 
   it('detects drift when column-level grant columns differ', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'users',
-      columns: [
-        { name: 'id', type: 'uuid', primary_key: true },
-        { name: 'email', type: 'text' },
-        { name: 'name', type: 'text' },
-      ],
-      grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['id', 'email', 'name'] }],
-    }];
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [
+          { name: 'id', type: 'uuid', primary_key: true },
+          { name: 'email', type: 'text' },
+          { name: 'name', type: 'text' },
+        ],
+        grants: [{ to: 'reader', privileges: ['SELECT'], columns: ['id', 'email', 'name'] }],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
@@ -1536,14 +1621,16 @@ describe('detectDrift', () => {
 
   it('reports no drift when composite PKs match', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'order_items',
-      columns: [
-        { name: 'order_id', type: 'uuid' },
-        { name: 'product_id', type: 'uuid' },
-      ],
-      primary_key: ['order_id', 'product_id'],
-    }];
+    desired.tables = [
+      {
+        table: 'order_items',
+        columns: [
+          { name: 'order_id', type: 'uuid' },
+          { name: 'product_id', type: 'uuid' },
+        ],
+        primary_key: ['order_id', 'product_id'],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('order_items', {
       table: 'order_items',
@@ -1560,14 +1647,16 @@ describe('detectDrift', () => {
 
   it('reports drift when composite PK is missing in DB', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'order_items',
-      columns: [
-        { name: 'order_id', type: 'uuid' },
-        { name: 'product_id', type: 'uuid' },
-      ],
-      primary_key: ['order_id', 'product_id'],
-    }];
+    desired.tables = [
+      {
+        table: 'order_items',
+        columns: [
+          { name: 'order_id', type: 'uuid' },
+          { name: 'product_id', type: 'uuid' },
+        ],
+        primary_key: ['order_id', 'product_id'],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('order_items', {
       table: 'order_items',
@@ -1584,15 +1673,17 @@ describe('detectDrift', () => {
 
   it('reports drift when composite PK columns differ', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'order_items',
-      columns: [
-        { name: 'order_id', type: 'uuid' },
-        { name: 'product_id', type: 'uuid' },
-        { name: 'variant_id', type: 'uuid' },
-      ],
-      primary_key: ['order_id', 'product_id', 'variant_id'],
-    }];
+    desired.tables = [
+      {
+        table: 'order_items',
+        columns: [
+          { name: 'order_id', type: 'uuid' },
+          { name: 'product_id', type: 'uuid' },
+          { name: 'variant_id', type: 'uuid' },
+        ],
+        primary_key: ['order_id', 'product_id', 'variant_id'],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('order_items', {
       table: 'order_items',
@@ -1611,13 +1702,15 @@ describe('detectDrift', () => {
 
   it('reports drift when composite PK exists in DB but not in YAML', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'order_items',
-      columns: [
-        { name: 'order_id', type: 'uuid' },
-        { name: 'product_id', type: 'uuid' },
-      ],
-    }];
+    desired.tables = [
+      {
+        table: 'order_items',
+        columns: [
+          { name: 'order_id', type: 'uuid' },
+          { name: 'product_id', type: 'uuid' },
+        ],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('order_items', {
       table: 'order_items',
@@ -1641,14 +1734,18 @@ describe('detectDrift', () => {
       {
         table: 'events',
         columns: [{ name: 'id', type: 'integer', primary_key: true }],
-        triggers: [{ name: 'trg_notify', timing: 'AFTER', events: ['INSERT'], function: 'notify_event', for_each: 'STATEMENT' }],
+        triggers: [
+          { name: 'trg_notify', timing: 'AFTER', events: ['INSERT'], function: 'notify_event', for_each: 'STATEMENT' },
+        ],
       },
     ];
     const actual = emptyActual();
     actual.tables.set('events', {
       table: 'events',
       columns: [{ name: 'id', type: 'integer', primary_key: true }],
-      triggers: [{ name: 'trg_notify', timing: 'AFTER', events: ['INSERT'], function: 'notify_event', for_each: 'ROW' }],
+      triggers: [
+        { name: 'trg_notify', timing: 'AFTER', events: ['INSERT'], function: 'notify_event', for_each: 'ROW' },
+      ],
     });
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(
@@ -1666,7 +1763,16 @@ describe('detectDrift', () => {
       {
         table: 'users',
         columns: [{ name: 'id', type: 'integer', primary_key: true }],
-        triggers: [{ name: 'trg_audit', timing: 'AFTER', events: ['UPDATE'], function: 'audit_change', for_each: 'ROW', when: 'OLD.email IS DISTINCT FROM NEW.email' }],
+        triggers: [
+          {
+            name: 'trg_audit',
+            timing: 'AFTER',
+            events: ['UPDATE'],
+            function: 'audit_change',
+            for_each: 'ROW',
+            when: 'OLD.email IS DISTINCT FROM NEW.email',
+          },
+        ],
       },
     ];
     const actual = emptyActual();
@@ -1691,14 +1797,18 @@ describe('detectDrift', () => {
       {
         table: 'orders',
         columns: [{ name: 'id', type: 'integer', primary_key: true }],
-        triggers: [{ name: 'trg_validate', timing: 'BEFORE', events: ['INSERT'], function: 'validate_order', for_each: 'ROW' }],
+        triggers: [
+          { name: 'trg_validate', timing: 'BEFORE', events: ['INSERT'], function: 'validate_order', for_each: 'ROW' },
+        ],
       },
     ];
     const actual = emptyActual();
     actual.tables.set('orders', {
       table: 'orders',
       columns: [{ name: 'id', type: 'integer', primary_key: true }],
-      triggers: [{ name: 'trg_validate', timing: 'AFTER', events: ['INSERT'], function: 'validate_order', for_each: 'ROW' }],
+      triggers: [
+        { name: 'trg_validate', timing: 'AFTER', events: ['INSERT'], function: 'validate_order', for_each: 'ROW' },
+      ],
     });
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(
@@ -1716,14 +1826,32 @@ describe('detectDrift', () => {
       {
         table: 'users',
         columns: [{ name: 'id', type: 'integer', primary_key: true }],
-        triggers: [{ name: 'trg_audit', timing: 'AFTER', events: ['UPDATE'], function: 'audit_change', for_each: 'ROW', when: 'OLD.* IS DISTINCT FROM NEW.*' }],
+        triggers: [
+          {
+            name: 'trg_audit',
+            timing: 'AFTER',
+            events: ['UPDATE'],
+            function: 'audit_change',
+            for_each: 'ROW',
+            when: 'OLD.* IS DISTINCT FROM NEW.*',
+          },
+        ],
       },
     ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
       columns: [{ name: 'id', type: 'integer', primary_key: true }],
-      triggers: [{ name: 'trg_audit', timing: 'AFTER', events: ['UPDATE'], function: 'audit_change', for_each: 'ROW', when: 'OLD.* IS DISTINCT FROM NEW.*' }],
+      triggers: [
+        {
+          name: 'trg_audit',
+          timing: 'AFTER',
+          events: ['UPDATE'],
+          function: 'audit_change',
+          for_each: 'ROW',
+          when: 'OLD.* IS DISTINCT FROM NEW.*',
+        },
+      ],
     });
     const report = detectDrift(desired, actual);
     const triggerDrift = report.items.filter((i) => i.type === 'trigger');
@@ -1734,11 +1862,13 @@ describe('detectDrift', () => {
 
   it('detects drift when with_grant_option differs between desired and actual', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }],
-      grants: [{ to: 'reader', privileges: ['SELECT'], with_grant_option: true }],
-    }];
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+        grants: [{ to: 'reader', privileges: ['SELECT'], with_grant_option: true }],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
@@ -1749,19 +1879,19 @@ describe('detectDrift', () => {
     const grantDrift = report.items.filter((i) => i.type === 'grant');
     expect(grantDrift.length).toBeGreaterThan(0);
     expect(grantDrift).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: 'grant', status: 'different' }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ type: 'grant', status: 'different' })]),
     );
   });
 
   it('reports no drift when with_grant_option matches', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }],
-      grants: [{ to: 'reader', privileges: ['SELECT'], with_grant_option: true }],
-    }];
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+        grants: [{ to: 'reader', privileges: ['SELECT'], with_grant_option: true }],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
@@ -1775,26 +1905,32 @@ describe('detectDrift', () => {
 
   it('reports different when policy permissive flag differs', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }],
-      policies: [{
-        name: 'user_select',
-        for: 'SELECT',
-        to: 'public',
-        permissive: false,
-      }],
-    }];
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+        policies: [
+          {
+            name: 'user_select',
+            for: 'SELECT',
+            to: 'public',
+            permissive: false,
+          },
+        ],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
       columns: [{ name: 'id', type: 'integer', primary_key: true }],
-      policies: [{
-        name: 'user_select',
-        for: 'SELECT',
-        to: 'public',
-        permissive: true,
-      }],
+      policies: [
+        {
+          name: 'user_select',
+          for: 'SELECT',
+          to: 'public',
+          permissive: true,
+        },
+      ],
     });
     const report = detectDrift(desired, actual);
     const policyDrift = report.items.filter((i) => i.type === 'policy');
@@ -1805,26 +1941,32 @@ describe('detectDrift', () => {
 
   it('reports no drift when policy permissive flags match', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }],
-      policies: [{
-        name: 'user_select',
-        for: 'SELECT',
-        to: 'public',
-        permissive: true,
-      }],
-    }];
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+        policies: [
+          {
+            name: 'user_select',
+            for: 'SELECT',
+            to: 'public',
+            permissive: true,
+          },
+        ],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
       columns: [{ name: 'id', type: 'integer', primary_key: true }],
-      policies: [{
-        name: 'user_select',
-        for: 'SELECT',
-        to: 'public',
-        permissive: true,
-      }],
+      policies: [
+        {
+          name: 'user_select',
+          for: 'SELECT',
+          to: 'public',
+          permissive: true,
+        },
+      ],
     });
     const report = detectDrift(desired, actual);
     const policyDrift = report.items.filter((i) => i.type === 'policy');
@@ -1833,28 +1975,34 @@ describe('detectDrift', () => {
 
   it('reports different when policy using clause differs', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }],
-      policies: [{
-        name: 'user_select',
-        for: 'SELECT',
-        to: 'public',
-        using: 'id = 1',
-        permissive: true,
-      }],
-    }];
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+        policies: [
+          {
+            name: 'user_select',
+            for: 'SELECT',
+            to: 'public',
+            using: 'id = 1',
+            permissive: true,
+          },
+        ],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
       columns: [{ name: 'id', type: 'integer', primary_key: true }],
-      policies: [{
-        name: 'user_select',
-        for: 'SELECT',
-        to: 'public',
-        using: 'id = 2',
-        permissive: true,
-      }],
+      policies: [
+        {
+          name: 'user_select',
+          for: 'SELECT',
+          to: 'public',
+          using: 'id = 2',
+          permissive: true,
+        },
+      ],
     });
     const report = detectDrift(desired, actual);
     const policyDrift = report.items.filter((i) => i.type === 'policy');
@@ -1865,11 +2013,13 @@ describe('detectDrift', () => {
 
   it('reports no drift when both omit with_grant_option', () => {
     const desired = emptyDesired();
-    desired.tables = [{
-      table: 'users',
-      columns: [{ name: 'id', type: 'integer', primary_key: true }],
-      grants: [{ to: 'reader', privileges: ['SELECT'] }],
-    }];
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+        grants: [{ to: 'reader', privileges: ['SELECT'] }],
+      },
+    ];
     const actual = emptyActual();
     actual.tables.set('users', {
       table: 'users',
@@ -1949,9 +2099,7 @@ columns:
 
       // Step 4: Verify table/column drift is resolved
       const report2 = await project.drift();
-      const tableDrift = report2.items.filter(
-        (i) => i.type === 'table' || i.type === 'column',
-      );
+      const tableDrift = report2.items.filter((i) => i.type === 'table' || i.type === 'column');
       expect(tableDrift).toHaveLength(0);
     } finally {
       await project.cleanup();
@@ -2004,9 +2152,7 @@ columns:
       });
 
       expect(plan.blocked.length).toBeGreaterThan(0);
-      expect(plan.blocked).toContainEqual(
-        expect.objectContaining({ type: 'drop_column' }),
-      );
+      expect(plan.blocked).toContainEqual(expect.objectContaining({ type: 'drop_column' }));
 
       // Step 4: Plan with allowDestructive — drop_column should be in operations
       const planDestructive = buildPlan(desired, actual, {
@@ -2014,9 +2160,7 @@ columns:
         pgSchema: project.config.pgSchema,
       });
       expect(planDestructive.blocked).toHaveLength(0);
-      expect(planDestructive.operations).toContainEqual(
-        expect.objectContaining({ type: 'drop_column' }),
-      );
+      expect(planDestructive.operations).toContainEqual(expect.objectContaining({ type: 'drop_column' }));
 
       // Step 5: Execute only the drop_column operation
       const dropOps = planDestructive.operations.filter((op) => op.type === 'drop_column');
@@ -2158,9 +2302,7 @@ columns:
 
       // 6. Re-detect drift — should be clean
       const report2 = await project.drift();
-      const remaining = report2.items.filter(
-        (i) => i.type === 'column' && i.object === 'items.price',
-      );
+      const remaining = report2.items.filter((i) => i.type === 'column' && i.object === 'items.price');
       expect(remaining).toHaveLength(0);
     } finally {
       await project.cleanup();
@@ -2239,9 +2381,7 @@ columns:
       });
 
       const report2 = await project.drift();
-      const remainingDrift = report2.items.filter(
-        (i) => i.object.includes('legacy_field'),
-      );
+      const remainingDrift = report2.items.filter((i) => i.object.includes('legacy_field'));
       expect(remainingDrift).toHaveLength(0);
     } finally {
       await project.cleanup();
@@ -2311,9 +2451,7 @@ indexes:
 
       // 5. Re-detect drift — index should exist now
       const report2 = await project.drift();
-      const idxRemaining = report2.items.filter(
-        (i) => i.type === 'index' && i.object === 'idx_products_sku',
-      );
+      const idxRemaining = report2.items.filter((i) => i.type === 'index' && i.object === 'idx_products_sku');
       expect(idxRemaining).toHaveLength(0);
     } finally {
       await project.cleanup();

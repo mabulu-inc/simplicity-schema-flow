@@ -65,10 +65,7 @@ export interface InvalidIndex {
  * Detect invalid indexes left by failed CONCURRENTLY operations.
  * Returns a list of invalid indexes in the given schema.
  */
-export async function detectInvalidIndexes(
-  client: pg.PoolClient,
-  schema = 'public',
-): Promise<InvalidIndex[]> {
+export async function detectInvalidIndexes(client: pg.PoolClient, schema = 'public'): Promise<InvalidIndex[]> {
   const res = await client.query(
     `SELECT n.nspname AS schema,
             t.relname AS table,
@@ -93,11 +90,7 @@ export async function detectInvalidIndexes(
  * Clean up invalid indexes by dropping and recreating them.
  * Uses REINDEX which rebuilds the index in-place.
  */
-export async function reindexInvalid(
-  client: pg.PoolClient,
-  schema = 'public',
-  logger?: Logger,
-): Promise<number> {
+export async function reindexInvalid(client: pg.PoolClient, schema = 'public', logger?: Logger): Promise<number> {
   const invalid = await detectInvalidIndexes(client, schema);
   for (const idx of invalid) {
     logger?.info(`Dropping invalid index: "${idx.schema}"."${idx.index}"`);

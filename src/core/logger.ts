@@ -64,9 +64,7 @@ export function createLogger(options: LoggerOptions): Logger {
     // Debug only in verbose mode
     if (isDebug && !verbose) return;
 
-    const formatted = json
-      ? formatJson(level, message)
-      : formatMessage(level, message, useColor);
+    const formatted = json ? formatJson(level, message) : formatMessage(level, message, useColor);
 
     if (isError || isWarn) {
       writeErr(formatted);

@@ -90,7 +90,9 @@ describe('--env flag E2E', () => {
 
   it('--env staging selects staging environment block from config file', () => {
     const configPath = join(tmpDir, 'simplicity-schema.config.yaml');
-    writeFileSync(configPath, `
+    writeFileSync(
+      configPath,
+      `
 default:
   connectionString: postgres://localhost/default_db
   lockTimeout: 5000
@@ -105,7 +107,8 @@ environments:
   production:
     connectionString: postgres://prod-host/prod_db
     lockTimeout: 15000
-`);
+`,
+    );
 
     const parsed = parseArgs(['node', 'simplicity-schema', 'run', '--env', 'staging']);
     expect(parsed.overrides.env).toBe('staging');
@@ -120,7 +123,9 @@ environments:
 
   it('--env production selects production environment block', () => {
     const configPath = join(tmpDir, 'simplicity-schema.config.yaml');
-    writeFileSync(configPath, `
+    writeFileSync(
+      configPath,
+      `
 default:
   connectionString: postgres://localhost/default_db
   lockTimeout: 5000
@@ -131,7 +136,8 @@ environments:
     connectionString: postgres://prod-host/prod_db
     lockTimeout: 15000
     statementTimeout: 120000
-`);
+`,
+    );
 
     const parsed = parseArgs(['node', 'simplicity-schema', 'plan', '--env', 'production']);
     const config = resolveConfig({ ...parsed.overrides, configPath });
@@ -142,7 +148,9 @@ environments:
 
   it('CLI overrides take priority over environment-specific config', () => {
     const configPath = join(tmpDir, 'simplicity-schema.config.yaml');
-    writeFileSync(configPath, `
+    writeFileSync(
+      configPath,
+      `
 default:
   lockTimeout: 5000
 
@@ -150,13 +158,19 @@ environments:
   staging:
     connectionString: postgres://staging/db
     lockTimeout: 10000
-`);
+`,
+    );
 
     const parsed = parseArgs([
-      'node', 'simplicity-schema', 'run',
-      '--env', 'staging',
-      '--lock-timeout', '2000',
-      '--connection-string', 'postgres://cli-override/db',
+      'node',
+      'simplicity-schema',
+      'run',
+      '--env',
+      'staging',
+      '--lock-timeout',
+      '2000',
+      '--connection-string',
+      'postgres://cli-override/db',
     ]);
     const config = resolveConfig({ ...parsed.overrides, configPath });
     // CLI flags override environment config
@@ -166,7 +180,9 @@ environments:
 
   it('without --env, only default section is used', () => {
     const configPath = join(tmpDir, 'simplicity-schema.config.yaml');
-    writeFileSync(configPath, `
+    writeFileSync(
+      configPath,
+      `
 default:
   connectionString: postgres://localhost/default_db
   lockTimeout: 7000
@@ -175,7 +191,8 @@ environments:
   staging:
     connectionString: postgres://staging/db
     lockTimeout: 10000
-`);
+`,
+    );
 
     const parsed = parseArgs(['node', 'simplicity-schema', 'run']);
     expect(parsed.overrides.env).toBeUndefined();
@@ -188,14 +205,17 @@ environments:
   it('--env with ${VAR} interpolation in environment block', () => {
     process.env.STAGING_DB_HOST = 'staging-rds.example.com';
     const configPath = join(tmpDir, 'simplicity-schema.config.yaml');
-    writeFileSync(configPath, `
+    writeFileSync(
+      configPath,
+      `
 default:
   connectionString: postgres://localhost/default_db
 
 environments:
   staging:
     connectionString: postgres://\${STAGING_DB_HOST}/staging_db
-`);
+`,
+    );
 
     const parsed = parseArgs(['node', 'simplicity-schema', 'run', '--env', 'staging']);
     const config = resolveConfig({ ...parsed.overrides, configPath });

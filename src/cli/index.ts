@@ -119,10 +119,7 @@ async function main(): Promise<void> {
           return;
         }
 
-        const result = await runPipeline(
-          { ...config, dryRun: true },
-          logger,
-        );
+        const result = await runPipeline({ ...config, dryRun: true }, logger);
 
         if (config.json) {
           console.log(JSON.stringify(result, null, 2));
@@ -257,7 +254,15 @@ async function main(): Promise<void> {
         const pool = getPool(config.connectionString);
         const client = await pool.connect();
         try {
-          const { getExistingTables, getExistingEnums, getExistingFunctions, getExistingViews, getExistingMaterializedViews, getExistingRoles, introspectTable } = await import('../introspect/index.js');
+          const {
+            getExistingTables,
+            getExistingEnums,
+            getExistingFunctions,
+            getExistingViews,
+            getExistingMaterializedViews,
+            getExistingRoles,
+            introspectTable,
+          } = await import('../introspect/index.js');
           const [tableNames, enumList, fnList, viewList, matViewList, roleList] = await Promise.all([
             getExistingTables(client, config.pgSchema),
             getExistingEnums(client, config.pgSchema),
@@ -271,7 +276,14 @@ async function main(): Promise<void> {
             tables.push(await introspectTable(client, name, config.pgSchema));
           }
           const files = generateFromDb(
-            { tables, enums: enumList, functions: fnList, views: viewList, materializedViews: matViewList, roles: roleList },
+            {
+              tables,
+              enums: enumList,
+              functions: fnList,
+              views: viewList,
+              materializedViews: matViewList,
+              roles: roleList,
+            },
             parsed.output,
           );
           if (config.json) {

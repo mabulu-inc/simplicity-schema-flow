@@ -15,16 +15,12 @@ const DATABASE_URL = process.env.DATABASE_URL!;
 describe('tracker', () => {
   let pool: pg.Pool;
   let client: pg.PoolClient;
-  let testSchema: string;
-
   beforeAll(async () => {
     pool = getPool(DATABASE_URL);
   });
 
   beforeEach(async () => {
     client = await pool.connect();
-    // Use a unique schema name per test to isolate
-    testSchema = `test_tracker_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     // Create a fresh _simplicity schema for this test by using search_path
     // We'll drop and recreate _simplicity to ensure clean state
     await client.query('DROP SCHEMA IF EXISTS _simplicity CASCADE');

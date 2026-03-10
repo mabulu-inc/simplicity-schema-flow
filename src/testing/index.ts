@@ -12,7 +12,6 @@ import { getPool } from '../core/db.js';
 import { resolveConfig } from '../core/config.js';
 import type { SimplicitySchemaConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
-import { LogLevel } from '../core/logger.js';
 import { runPipeline } from '../cli/pipeline.js';
 import type { ExecuteResult } from '../executor/index.js';
 import { discoverSchemaFiles } from '../core/files.js';
@@ -81,7 +80,7 @@ export async function useTestProject(connectionString: string): Promise<TestProj
     allowDestructive: false,
   });
 
-  const logger = createLogger({ level: LogLevel.ERROR });
+  const logger = createLogger({ verbose: false, quiet: true, json: false });
 
   async function migrate(opts?: { allowDestructive?: boolean }): Promise<ExecuteResult> {
     const migrationConfig = {
@@ -124,10 +123,7 @@ export function writeSchema(dir: string, files: Record<string, string>): void {
 
 // ─── Internal helpers ──────────────────────────────────────────
 
-async function parseDesiredState(
-  baseDir: string,
-  logger: ReturnType<typeof createLogger>,
-): Promise<DesiredState> {
+async function parseDesiredState(baseDir: string, _logger: ReturnType<typeof createLogger>): Promise<DesiredState> {
   const discovered = await discoverSchemaFiles(baseDir);
   const tables: TableSchema[] = [];
   const enums: EnumSchema[] = [];
@@ -142,14 +138,30 @@ async function parseDesiredState(
     const content = await readFile(file.absolutePath, 'utf-8');
     const parsed = parseSchemaFile(content);
     switch (parsed.kind) {
-      case 'table': tables.push(parsed.schema); break;
-      case 'enum': enums.push(parsed.schema); break;
-      case 'function': functions.push(parsed.schema); break;
-      case 'view': views.push(parsed.schema); break;
-      case 'materialized_view': materializedViews.push(parsed.schema); break;
-      case 'role': roles.push(parsed.schema); break;
-      case 'extensions': extensions = parsed.schema; break;
-      case 'mixin': mixinSchemas.push(parsed.schema); break;
+      case 'table':
+        tables.push(parsed.schema);
+        break;
+      case 'enum':
+        enums.push(parsed.schema);
+        break;
+      case 'function':
+        functions.push(parsed.schema);
+        break;
+      case 'view':
+        views.push(parsed.schema);
+        break;
+      case 'materialized_view':
+        materializedViews.push(parsed.schema);
+        break;
+      case 'role':
+        roles.push(parsed.schema);
+        break;
+      case 'extensions':
+        extensions = parsed.schema;
+        break;
+      case 'mixin':
+        mixinSchemas.push(parsed.schema);
+        break;
     }
   }
 
@@ -163,10 +175,7 @@ async function parseDesiredState(
   return { tables, enums, functions, views, materializedViews, roles, extensions };
 }
 
-async function introspectActual(
-  connectionString: string,
-  pgSchema: string,
-): Promise<ActualState> {
+async function introspectActual(connectionString: string, pgSchema: string): Promise<ActualState> {
   const pool = getPool(connectionString);
   const client = await pool.connect();
 
@@ -201,9 +210,7 @@ async function introspectActual(
     const rolesMap = new Map<string, RoleSchema>();
     for (const r of roleList) rolesMap.set(r.role, r);
 
-    const extResult = await client.query(
-      "SELECT extname FROM pg_extension WHERE extname != 'plpgsql'",
-    );
+    const extResult = await client.query("SELECT extname FROM pg_extension WHERE extname != 'plpgsql'");
     const extensions = extResult.rows.map((r: { extname: string }) => r.extname);
 
     return {

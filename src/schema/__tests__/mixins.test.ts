@@ -1,12 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { applyMixins, loadMixins, type MixinRegistry } from '../mixins.js';
 import { parseMixin, parseTable } from '../parser.js';
-import type { TableSchema, MixinSchema } from '../types.js';
 
 // ─── Helper: build a registry from mixin YAML strings ─────────
 
 function registryFrom(...yamls: string[]): MixinRegistry {
-  const mixins = yamls.map(y => parseMixin(y));
+  const mixins = yamls.map((y) => parseMixin(y));
   return loadMixins(mixins);
 }
 
@@ -58,7 +57,7 @@ columns:
 `);
     const result = applyMixins(table, reg);
     expect(result.columns).toHaveLength(3);
-    expect(result.columns.map(c => c.name)).toEqual(['id', 'created_at', 'updated_at']);
+    expect(result.columns.map((c) => c.name)).toEqual(['id', 'created_at', 'updated_at']);
   });
 
   it('does not duplicate columns already defined on the table', () => {
@@ -83,7 +82,7 @@ columns:
     const result = applyMixins(table, reg);
     // Table's own column wins — not overwritten
     expect(result.columns).toHaveLength(2);
-    expect(result.columns.find(c => c.name === 'created_at')!.default).toBe('clock_timestamp()');
+    expect(result.columns.find((c) => c.name === 'created_at')!.default).toBe('clock_timestamp()');
   });
 });
 
@@ -346,12 +345,7 @@ columns:
     type: uuid
 `);
     const result = applyMixins(table, reg);
-    expect(result.columns.map(c => c.name)).toEqual([
-      'id',
-      'created_at',
-      'updated_at',
-      'deleted_at',
-    ]);
+    expect(result.columns.map((c) => c.name)).toEqual(['id', 'created_at', 'updated_at', 'deleted_at']);
   });
 });
 
