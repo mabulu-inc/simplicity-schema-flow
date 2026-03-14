@@ -28,8 +28,8 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY user_stats;
 ## Creating templates
 
 ```bash
-npx simplicity-schema new pre --name cleanup
-npx simplicity-schema new post --name refresh-views
+npx @mabulu-inc/simplicity-schema new pre --name cleanup
+npx @mabulu-inc/simplicity-schema new post --name refresh-views
 ```
 
 Creates timestamped template files like `schema/pre/20240115120000_cleanup.sql`.

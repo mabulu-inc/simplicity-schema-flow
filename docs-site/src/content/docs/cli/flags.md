@@ -28,17 +28,17 @@ All commands accept these flags:
 
 ```bash
 # Use a specific database
-npx simplicity-schema run --db postgresql://user:pass@localhost:5432/mydb
+npx @mabulu-inc/simplicity-schema run --db postgresql://user:pass@localhost:5432/mydb
 
 # Production with longer timeouts
-npx simplicity-schema run --env production --lock-timeout 3000 --statement-timeout 60000
+npx @mabulu-inc/simplicity-schema run --env production --lock-timeout 3000 --statement-timeout 60000
 
 # Allow dropping columns/tables
-npx simplicity-schema run --allow-destructive
+npx @mabulu-inc/simplicity-schema run --allow-destructive
 
 # Preview changes in JSON format
-npx simplicity-schema plan --json
+npx @mabulu-inc/simplicity-schema plan --json
 
 # Quiet mode for CI
-npx simplicity-schema run --quiet
+npx @mabulu-inc/simplicity-schema run --quiet
 ```

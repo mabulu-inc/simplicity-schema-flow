@@ -8,7 +8,7 @@ The linter analyzes migration plans before execution and warns about dangerous p
 ## Usage
 
 ```bash
-npx simplicity-schema lint --db postgresql://user:pass@localhost:5432/mydb
+npx @mabulu-inc/simplicity-schema lint --db postgresql://user:pass@localhost:5432/mydb
 ```
 
 ## Rules

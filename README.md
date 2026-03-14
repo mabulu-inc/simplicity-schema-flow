@@ -2,27 +2,31 @@
 
 Declarative PostgreSQL schema management. Define your database in YAML, diff against live state, generate and execute minimal SQL to converge.
 
-### Registry setup
+## Setup
 
-This package is on the GitHub Packages registry. Add to your `.npmrc`:
+### 1. Configure `.npmrc`
+
+This package is on the GitHub Packages registry. Add to your project `.npmrc` (or `~/.npmrc` for global config):
 
 ```ini
 @mabulu-inc:registry=https://npm.pkg.github.com
 //npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
 ```
 
-Then install:
+Set `GITHUB_TOKEN` in your environment with a [personal access token](https://github.com/settings/tokens) that has `read:packages` scope.
+
+### 2. Run directly with `npx`
+
+No install step needed. `npx` downloads and runs the package:
 
 ```bash
-npm install @mabulu-inc/simplicity-schema
+npx @mabulu-inc/simplicity-schema run --db postgresql://user:pass@localhost:5432/mydb
 ```
 
-Run commands via `npx` or `pnpm exec`:
+Or with pnpm:
 
 ```bash
-npx simplicity-schema run
-# or
-pnpm exec simplicity-schema run
+pnpm dlx @mabulu-inc/simplicity-schema run --db postgresql://user:pass@localhost:5432/mydb
 ```
 
 ## How it works
@@ -38,7 +42,7 @@ No migration files to manage. No up/down scripts. Just declare the end state.
 
 ```bash
 # Initialize project structure
-npx simplicity-schema init --dir ./schema
+npx @mabulu-inc/simplicity-schema init --dir ./schema
 
 # Define a table
 cat > schema/tables/users.yaml << 'EOF'
@@ -65,10 +69,10 @@ indexes:
 EOF
 
 # Preview what will happen
-npx simplicity-schema plan --db postgresql://user:pass@localhost:5432/mydb
+npx @mabulu-inc/simplicity-schema plan --db postgresql://user:pass@localhost:5432/mydb
 
 # Run the migration
-npx simplicity-schema run --db postgresql://user:pass@localhost:5432/mydb
+npx @mabulu-inc/simplicity-schema run --db postgresql://user:pass@localhost:5432/mydb
 ```
 
 ## Directory layout
@@ -100,44 +104,44 @@ schema/
 
 ### Migration
 
-| Command                             | Description                             |
-| ----------------------------------- | --------------------------------------- |
-| `npx simplicity-schema run`         | Full migration (pre -> migrate -> post) |
-| `npx simplicity-schema run pre`     | Pre-scripts only                        |
-| `npx simplicity-schema run migrate` | Schema migration only                   |
-| `npx simplicity-schema run post`    | Post-scripts only                       |
-| `npx simplicity-schema plan`        | Dry-run: show plan without executing    |
-| `npx simplicity-schema validate`    | Execute in rolled-back transaction      |
-| `npx simplicity-schema baseline`    | Mark current DB as baseline             |
+| Command                                         | Description                             |
+| ----------------------------------------------- | --------------------------------------- |
+| `npx @mabulu-inc/simplicity-schema run`         | Full migration (pre -> migrate -> post) |
+| `npx @mabulu-inc/simplicity-schema run pre`     | Pre-scripts only                        |
+| `npx @mabulu-inc/simplicity-schema run migrate` | Schema migration only                   |
+| `npx @mabulu-inc/simplicity-schema run post`    | Post-scripts only                       |
+| `npx @mabulu-inc/simplicity-schema plan`        | Dry-run: show plan without executing    |
+| `npx @mabulu-inc/simplicity-schema validate`    | Execute in rolled-back transaction      |
+| `npx @mabulu-inc/simplicity-schema baseline`    | Mark current DB as baseline             |
 
 ### Analysis
 
-| Command                               | Description                       |
-| ------------------------------------- | --------------------------------- |
-| `npx simplicity-schema drift`         | Compare YAML to live DB           |
-| `npx simplicity-schema drift --apply` | Fix detected drift                |
-| `npx simplicity-schema lint`          | Static analysis of migration plan |
-| `npx simplicity-schema status`        | Applied files and pending changes |
+| Command                                           | Description                       |
+| ------------------------------------------------- | --------------------------------- |
+| `npx @mabulu-inc/simplicity-schema drift`         | Compare YAML to live DB           |
+| `npx @mabulu-inc/simplicity-schema drift --apply` | Fix detected drift                |
+| `npx @mabulu-inc/simplicity-schema lint`          | Static analysis of migration plan |
+| `npx @mabulu-inc/simplicity-schema status`        | Applied files and pending changes |
 
 ### Generation
 
-| Command                                             | Description                        |
-| --------------------------------------------------- | ---------------------------------- |
-| `npx simplicity-schema generate`                    | Generate YAML from existing DB     |
-| `npx simplicity-schema sql --output migration.sql`  | Export plan as SQL file            |
-| `npx simplicity-schema erd --output schema.mmd`     | Generate Mermaid ER diagram        |
-| `npx simplicity-schema init`                        | Create project directory structure |
-| `npx simplicity-schema new pre --name cleanup`      | Create pre-script template         |
-| `npx simplicity-schema new post --name refresh`     | Create post-script template        |
-| `npx simplicity-schema new mixin --name timestamps` | Create mixin template              |
+| Command                                                         | Description                        |
+| --------------------------------------------------------------- | ---------------------------------- |
+| `npx @mabulu-inc/simplicity-schema generate`                    | Generate YAML from existing DB     |
+| `npx @mabulu-inc/simplicity-schema sql --output migration.sql`  | Export plan as SQL file            |
+| `npx @mabulu-inc/simplicity-schema erd --output schema.mmd`     | Generate Mermaid ER diagram        |
+| `npx @mabulu-inc/simplicity-schema init`                        | Create project directory structure |
+| `npx @mabulu-inc/simplicity-schema new pre --name cleanup`      | Create pre-script template         |
+| `npx @mabulu-inc/simplicity-schema new post --name refresh`     | Create post-script template        |
+| `npx @mabulu-inc/simplicity-schema new mixin --name timestamps` | Create mixin template              |
 
 ### Rollback & expand/contract
 
-| Command                               | Description                        |
-| ------------------------------------- | ---------------------------------- |
-| `npx simplicity-schema down`          | Rollback to previous snapshot      |
-| `npx simplicity-schema contract`      | Complete expand/contract migration |
-| `npx simplicity-schema expand-status` | Show in-progress expand migrations |
+| Command                                           | Description                        |
+| ------------------------------------------------- | ---------------------------------- |
+| `npx @mabulu-inc/simplicity-schema down`          | Rollback to previous snapshot      |
+| `npx @mabulu-inc/simplicity-schema contract`      | Complete expand/contract migration |
+| `npx @mabulu-inc/simplicity-schema expand-status` | Show in-progress expand migrations |
 
 ### Global flags
 

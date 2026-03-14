@@ -28,9 +28,9 @@ No migration files to manage. No up/down scripts. Just declare the end state.
 - Node.js 20+
 - PostgreSQL 14+
 
-## Install
+## Setup
 
-This package is published to the GitHub Packages registry. You need to configure npm/pnpm to use it for the `@mabulu-inc` scope.
+This package is published to the GitHub Packages registry. You need to configure npm/pnpm to resolve the `@mabulu-inc` scope from GitHub Packages before you can run it.
 
 ### 1. Create a personal access token
 
@@ -51,10 +51,16 @@ Set the token in your environment:
 export GITHUB_TOKEN=ghp_your_token_here
 ```
 
-### 3. Install
+### 3. Run it
+
+No install step needed. Use `npx` or `pnpm dlx` to run directly:
 
 ```bash
-npm install @mabulu-inc/simplicity-schema
-# or
-pnpm add @mabulu-inc/simplicity-schema
+npx @mabulu-inc/simplicity-schema run --db postgresql://user:pass@localhost:5432/mydb
+```
+
+Or with pnpm:
+
+```bash
+pnpm dlx @mabulu-inc/simplicity-schema run --db postgresql://user:pass@localhost:5432/mydb
 ```
