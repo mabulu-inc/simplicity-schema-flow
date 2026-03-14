@@ -1,0 +1,36 @@
+---
+title: simplicity-schema
+description: Declarative PostgreSQL schema management. Define your database in YAML, get minimal SQL migrations automatically.
+template: splash
+hero:
+  tagline: Define your PostgreSQL database in YAML. Diff against live state. Generate and execute minimal SQL to converge. No migration files. No up/down scripts. Just declare the end state.
+  actions:
+    - text: Get started
+      link: /simplicity-schema/getting-started/introduction/
+      icon: right-arrow
+    - text: Schema reference
+      link: /simplicity-schema/schema/tables/
+      icon: open-book
+      variant: minimal
+    - text: GitHub
+      link: https://github.com/mabulu-inc/simplicity-schema
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid>
+	<Card title="Declarative" icon="pencil">
+		Describe what your database should look like in YAML. The tool figures out how to get there.
+	</Card>
+	<Card title="Safe by default" icon="approve-check">
+		Destructive operations blocked unless explicitly allowed. Advisory locking prevents concurrent runs.
+	</Card>
+	<Card title="Zero-downtime capable" icon="rocket">
+		NOT VALID constraints, CONCURRENTLY indexes, expand/contract column migrations.
+	</Card>
+	<Card title="Dual interface" icon="setting">
+		Full CLI for operators. TypeScript API for programmatic use. Testing helpers for integration tests.
+	</Card>
+</CardGrid>
