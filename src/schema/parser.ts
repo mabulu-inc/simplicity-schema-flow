@@ -474,7 +474,7 @@ export type ParsedSchema =
   | { kind: 'mixin'; schema: MixinSchema };
 
 export function parseSchemaFile(yamlStr: string): ParsedSchema {
-  const raw = parseYaml(yamlStr) as Record<string, unknown>;
+  const raw = parseYaml(yamlStr, { customTags: [sqlTag] }) as Record<string, unknown>;
 
   if (raw.table !== undefined) {
     return { kind: 'table', schema: parseTable(yamlStr) };

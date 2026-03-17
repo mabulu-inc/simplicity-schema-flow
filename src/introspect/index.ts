@@ -260,33 +260,18 @@ export async function getExistingRoles(client: Client): Promise<RoleSchema[]> {
 
 /** Introspect a single table, returning a TableSchema-compatible structure. */
 export async function introspectTable(client: Client, tableName: string, schema: string): Promise<TableSchema> {
-  const [
-    columns,
-    indexes,
-    checks,
-    triggers,
-    policies,
-    tableComment,
-    fkInfo,
-    columnGrants,
-    compositePk,
-    tableGrants,
-    rlsInfo,
-    uniqueConstraints,
-  ] = await Promise.all([
-    getColumns(client, tableName, schema),
-    getIndexes(client, tableName, schema),
-    getChecks(client, tableName, schema),
-    getTriggers(client, tableName, schema),
-    getPolicies(client, tableName, schema),
-    getTableComment(client, tableName, schema),
-    getForeignKeys(client, tableName, schema),
-    getColumnGrants(client, tableName, schema),
-    getCompositePrimaryKey(client, tableName, schema),
-    getTableLevelGrants(client, tableName, schema),
-    getRlsStatus(client, tableName, schema),
-    getUniqueConstraints(client, tableName, schema),
-  ]);
+  const columns = await getColumns(client, tableName, schema);
+  const indexes = await getIndexes(client, tableName, schema);
+  const checks = await getChecks(client, tableName, schema);
+  const triggers = await getTriggers(client, tableName, schema);
+  const policies = await getPolicies(client, tableName, schema);
+  const tableComment = await getTableComment(client, tableName, schema);
+  const fkInfo = await getForeignKeys(client, tableName, schema);
+  const columnGrants = await getColumnGrants(client, tableName, schema);
+  const compositePk = await getCompositePrimaryKey(client, tableName, schema);
+  const tableGrants = await getTableLevelGrants(client, tableName, schema);
+  const rlsInfo = await getRlsStatus(client, tableName, schema);
+  const uniqueConstraints = await getUniqueConstraints(client, tableName, schema);
 
   // Merge FK info into columns
   for (const fk of fkInfo) {
@@ -402,7 +387,6 @@ async function getColumns(client: Client, table: string, schema: string): Promis
     `SELECT
        c.column_name AS name,
        c.udt_name AS udt_type,
-       c.data_type AS data_type,
        c.character_maximum_length AS max_length,
        c.numeric_precision AS num_precision,
        c.numeric_scale AS num_scale,
@@ -433,7 +417,7 @@ async function getColumns(client: Client, table: string, schema: string): Promis
   return result.rows.map((r: Record<string, unknown>) => {
     const col: ColumnDef = {
       name: r.name as string,
-      type: normalizeType(r.udt_type as string, r.data_type as string, r.max_length as number | null),
+      type: normalizeType(r.udt_type as string, r.max_length as number | null),
       nullable: r.nullable as boolean,
     };
 
@@ -446,7 +430,7 @@ async function getColumns(client: Client, table: string, schema: string): Promis
   });
 }
 
-function normalizeType(udtType: string, dataType: string, maxLength: number | null): string {
+function normalizeType(udtType: string, maxLength: number | null): string {
   // Map common udt_name values to user-friendly types
   const typeMap: Record<string, string> = {
     int4: 'integer',

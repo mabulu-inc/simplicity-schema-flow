@@ -194,14 +194,12 @@ async function introspectDatabase(config: SimplicitySchemaConfig, logger: Logger
   const client = await pool.connect();
 
   try {
-    const [tableNames, enumList, fnList, viewList, matViewList, roleList] = await Promise.all([
-      getExistingTables(client, config.pgSchema),
-      getExistingEnums(client, config.pgSchema),
-      getExistingFunctions(client, config.pgSchema),
-      getExistingViews(client, config.pgSchema),
-      getExistingMaterializedViews(client, config.pgSchema),
-      getExistingRoles(client),
-    ]);
+    const tableNames = await getExistingTables(client, config.pgSchema);
+    const enumList = await getExistingEnums(client, config.pgSchema);
+    const fnList = await getExistingFunctions(client, config.pgSchema);
+    const viewList = await getExistingViews(client, config.pgSchema);
+    const matViewList = await getExistingMaterializedViews(client, config.pgSchema);
+    const roleList = await getExistingRoles(client);
 
     // Introspect each table
     const tablesMap = new Map<string, TableSchema>();

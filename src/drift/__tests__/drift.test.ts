@@ -1,5 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { detectDrift } from '../index.js';
+import type { DriftItemType } from '../index.js';
 import type { DesiredState, ActualState } from '../../planner/index.js';
 import { useTestProject, writeSchema } from '../../testing/index.js';
 import { buildPlan } from '../../planner/index.js';
@@ -690,7 +691,7 @@ describe('detectDrift', () => {
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(
       expect.objectContaining({
-        type: 'extension' as any,
+        type: 'extension' as DriftItemType,
         object: 'pgcrypto',
         status: 'missing_in_db',
       }),
@@ -705,7 +706,7 @@ describe('detectDrift', () => {
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(
       expect.objectContaining({
-        type: 'extension' as any,
+        type: 'extension' as DriftItemType,
         object: 'pgcrypto',
         status: 'missing_in_yaml',
       }),

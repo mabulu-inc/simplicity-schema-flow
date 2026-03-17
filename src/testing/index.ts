@@ -217,14 +217,12 @@ async function introspectActual(connectionString: string, pgSchema: string): Pro
   const client = await pool.connect();
 
   try {
-    const [tableNames, enumList, fnList, viewList, matViewList, roleList] = await Promise.all([
-      getExistingTables(client, pgSchema),
-      getExistingEnums(client, pgSchema),
-      getExistingFunctions(client, pgSchema),
-      getExistingViews(client, pgSchema),
-      getExistingMaterializedViews(client, pgSchema),
-      getExistingRoles(client),
-    ]);
+    const tableNames = await getExistingTables(client, pgSchema);
+    const enumList = await getExistingEnums(client, pgSchema);
+    const fnList = await getExistingFunctions(client, pgSchema);
+    const viewList = await getExistingViews(client, pgSchema);
+    const matViewList = await getExistingMaterializedViews(client, pgSchema);
+    const roleList = await getExistingRoles(client);
 
     const tablesMap = new Map<string, TableSchema>();
     for (const name of tableNames) {
