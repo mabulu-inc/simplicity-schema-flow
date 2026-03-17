@@ -1288,10 +1288,12 @@ function createTriggerOp(table: string, trigger: TriggerDef, pgSchema: string): 
   const events = trigger.events.join(' OR ');
   const forEach = trigger.for_each || 'ROW';
   const fnRef = trigger.function.includes('.') ? trigger.function : `"${pgSchema}"."${trigger.function}"`;
-  let sql = `CREATE TRIGGER "${trigger.name}" ${trigger.timing} ${events} ON "${pgSchema}"."${table}" FOR EACH ${forEach} EXECUTE FUNCTION ${fnRef}()`;
+  const drop = `DROP TRIGGER IF EXISTS "${trigger.name}" ON "${pgSchema}"."${table}"`;
+  let create = `CREATE TRIGGER "${trigger.name}" ${trigger.timing} ${events} ON "${pgSchema}"."${table}" FOR EACH ${forEach} EXECUTE FUNCTION ${fnRef}()`;
   if (trigger.when) {
-    sql = `CREATE TRIGGER "${trigger.name}" ${trigger.timing} ${events} ON "${pgSchema}"."${table}" FOR EACH ${forEach} WHEN (${trigger.when}) EXECUTE FUNCTION ${fnRef}()`;
+    create = `CREATE TRIGGER "${trigger.name}" ${trigger.timing} ${events} ON "${pgSchema}"."${table}" FOR EACH ${forEach} WHEN (${trigger.when}) EXECUTE FUNCTION ${fnRef}()`;
   }
+  const sql = `${drop};\n${create}`;
   return {
     type: 'create_trigger',
     phase: 11,
