@@ -511,6 +511,15 @@ function diffTables(desired: TableSchema[], actual: Map<string, TableSchema>, pg
   return ops;
 }
 
+/**
+ * Wraps an ADD CONSTRAINT statement in a DO block that checks pg_constraint
+ * first, making the operation idempotent. PostgreSQL does not support
+ * ADD CONSTRAINT IF NOT EXISTS, so we use a PL/pgSQL guard.
+ */
+function wrapConstraintIdempotent(constraintName: string, alterSql: string): string {
+  return `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${constraintName}') THEN ${alterSql}; END IF; END $$`;
+}
+
 function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
   const ops: Operation[] = [];
 
@@ -644,7 +653,7 @@ function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
       type: 'add_foreign_key_not_valid',
       phase: 8,
       objectName: `${table.table}.${col.name}`,
-      sql: fkSql,
+      sql: wrapConstraintIdempotent(constraintName, fkSql),
       destructive: false,
     });
     ops.push({
@@ -844,7 +853,7 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
           type: 'add_foreign_key_not_valid',
           phase: 8,
           objectName: `${desired.table}.${col.name}`,
-          sql: fkSql,
+          sql: wrapConstraintIdempotent(constraintName, fkSql),
           destructive: false,
         });
         ops.push({
@@ -977,7 +986,10 @@ function diffColumn(table: string, desired: ColumnDef, existing: ColumnDef, pgSc
         type: 'add_check_not_valid',
         phase: 6,
         objectName: `${table}.${desired.name}`,
-        sql: `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${checkName}" CHECK ("${desired.name}" IS NOT NULL) NOT VALID`,
+        sql: wrapConstraintIdempotent(
+          checkName,
+          `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${checkName}" CHECK ("${desired.name}" IS NOT NULL) NOT VALID`,
+        ),
         destructive: false,
       });
       ops.push({
@@ -1120,7 +1132,10 @@ function diffChecks(table: string, desired: CheckDef[], existing: CheckDef[], pg
         type: 'add_check',
         phase: 6,
         objectName: `${table}.${check.name}`,
-        sql: `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${check.name}" CHECK (${check.expression})`,
+        sql: wrapConstraintIdempotent(
+          check.name,
+          `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${check.name}" CHECK (${check.expression})`,
+        ),
         destructive: false,
       });
     }
