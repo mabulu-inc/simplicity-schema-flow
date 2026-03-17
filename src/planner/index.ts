@@ -1090,7 +1090,7 @@ function createIndexOp(table: string, idx: IndexDef, pgSchema: string): Operatio
   const method = idx.method || 'btree';
   const unique = idx.unique ? 'UNIQUE ' : '';
   const cols = idx.columns.map((c) => (idx.opclass ? `"${c}" ${idx.opclass}` : `"${c}"`)).join(', ');
-  let sql = `CREATE ${unique}INDEX CONCURRENTLY "${name}" ON "${pgSchema}"."${table}" USING ${method} (${cols})`;
+  let sql = `CREATE ${unique}INDEX CONCURRENTLY IF NOT EXISTS "${name}" ON "${pgSchema}"."${table}" USING ${method} (${cols})`;
   if (idx.include && idx.include.length > 0) {
     sql += ` INCLUDE (${idx.include.map((c) => `"${c}"`).join(', ')})`;
   }
@@ -1175,7 +1175,7 @@ function diffUniqueConstraints(
         type: 'add_index',
         phase: 7,
         objectName: ucName,
-        sql: `CREATE UNIQUE INDEX CONCURRENTLY "${ucName}" ON "${pgSchema}"."${table}" (${cols})`,
+        sql: `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "${ucName}" ON "${pgSchema}"."${table}" (${cols})`,
         destructive: false,
         concurrent: true,
       });
@@ -1183,7 +1183,7 @@ function diffUniqueConstraints(
         type: 'add_unique_constraint',
         phase: 8,
         objectName: `${table}.${ucName}`,
-        sql: `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${ucName}" UNIQUE USING INDEX "${ucName}"`,
+        sql: `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${ucName}') THEN ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${ucName}" UNIQUE USING INDEX "${ucName}"; END IF; END $$`,
         destructive: false,
         concurrent: true,
       });
