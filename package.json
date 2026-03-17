@@ -28,13 +28,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "check": "pnpm lint && pnpm format && pnpm typecheck && pnpm build && pnpm test:coverage",
-    "milestones": "bash scripts/update-milestones.sh",
     "ralph": "npx @mabulu-inc/ralph loop",
-    "ralph:kill": "bash scripts/ralph-kill.sh",
-    "shas": "bash scripts/update-shas.sh",
-    "cost": "bash scripts/calc-cost.sh",
-    "monitor": "bash scripts/ralph-monitor.sh -w",
-    "monitor:once": "bash scripts/ralph-monitor.sh",
     "prepare": "husky"
   },
   "lint-staged": {
