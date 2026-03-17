@@ -11,6 +11,7 @@
 - **Zero-downtime capable** — NOT VALID constraints, CONCURRENTLY indexes, expand/contract column migrations
 - **Convention over configuration** — Works out of the box with a standard `schema/` directory layout
 - **Clean internals** — Tool state lives in a dedicated `_simplicity` PostgreSQL schema, separate from user objects
+- **Idempotent** — Every DDL statement uses `IF NOT EXISTS` / `IF EXISTS` guards and is safe to re-run; running the pipeline twice with no schema changes produces no errors and no side-effects
 - **Dual interface** — Full CLI for operators + TypeScript API for programmatic use
 
 ### Package Details

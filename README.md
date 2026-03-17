@@ -38,6 +38,8 @@ pnpm dlx @mabulu-inc/simplicity-schema run --db postgresql://user:pass@localhost
 
 No migration files to manage. No up/down scripts. Just declare the end state.
 
+**Idempotent pipeline** — Every generated DDL statement is safe to re-run. Running the pipeline twice with no schema changes produces no errors and no side-effects.
+
 ## Quick start
 
 ```bash
