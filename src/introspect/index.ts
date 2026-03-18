@@ -33,16 +33,27 @@ import type {
 
 type Client = pg.PoolClient | pg.Client;
 
-/** Get all table names in a schema. */
+/** Get all table names in a schema, excluding extension-owned tables. */
 export async function getExistingTables(client: Client, schema: string): Promise<string[]> {
   const result = await client.query(
-    `SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = $1 ORDER BY tablename`,
+    `SELECT t.tablename
+     FROM pg_catalog.pg_tables t
+     JOIN pg_catalog.pg_class c ON c.relname = t.tablename
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.schemaname
+     WHERE t.schemaname = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_catalog.pg_depend d
+         JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid
+         WHERE d.objid = c.oid
+           AND d.deptype = 'e'
+       )
+     ORDER BY t.tablename`,
     [schema],
   );
   return result.rows.map((r: { tablename: string }) => r.tablename);
 }
 
-/** Get all enum types and their values in a schema. */
+/** Get all enum types and their values in a schema, excluding extension-owned enums. */
 export async function getExistingEnums(client: Client, schema: string): Promise<EnumSchema[]> {
   const result = await client.query(
     `SELECT t.typname AS name,
@@ -51,6 +62,12 @@ export async function getExistingEnums(client: Client, schema: string): Promise<
      JOIN pg_catalog.pg_enum e ON e.enumtypid = t.oid
      JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
      WHERE n.nspname = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_catalog.pg_depend d
+         JOIN pg_catalog.pg_extension ext ON ext.oid = d.refobjid
+         WHERE d.objid = t.oid
+           AND d.deptype = 'e'
+       )
      GROUP BY t.typname
      ORDER BY t.typname`,
     [schema],
@@ -61,7 +78,7 @@ export async function getExistingEnums(client: Client, schema: string): Promise<
   }));
 }
 
-/** Get all functions in a schema. */
+/** Get all functions in a schema, excluding extension-owned functions. */
 export async function getExistingFunctions(client: Client, schema: string): Promise<FunctionSchema[]> {
   const result = await client.query(
     `SELECT p.proname AS name,
@@ -83,6 +100,12 @@ export async function getExistingFunctions(client: Client, schema: string): Prom
      JOIN pg_catalog.pg_language l ON l.oid = p.prolang
      WHERE n.nspname = $1
        AND p.prokind = 'f'
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_catalog.pg_depend d
+         JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid
+         WHERE d.objid = p.oid
+           AND d.deptype = 'e'
+       )
      ORDER BY p.proname`,
     [schema],
   );
@@ -175,13 +198,21 @@ function parseArgList(arglist: string): FunctionArg[] {
   return args;
 }
 
-/** Get all regular views in a schema. */
+/** Get all regular views in a schema, excluding extension-owned views. */
 export async function getExistingViews(client: Client, schema: string): Promise<ViewSchema[]> {
   const result = await client.query(
-    `SELECT viewname AS name, definition AS query
-     FROM pg_catalog.pg_views
-     WHERE schemaname = $1
-     ORDER BY viewname`,
+    `SELECT v.viewname AS name, v.definition AS query
+     FROM pg_catalog.pg_views v
+     JOIN pg_catalog.pg_class c ON c.relname = v.viewname
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace AND n.nspname = v.schemaname
+     WHERE v.schemaname = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_catalog.pg_depend d
+         JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid
+         WHERE d.objid = c.oid
+           AND d.deptype = 'e'
+       )
+     ORDER BY v.viewname`,
     [schema],
   );
   const views: ViewSchema[] = [];
@@ -199,13 +230,21 @@ export async function getExistingViews(client: Client, schema: string): Promise<
   return views;
 }
 
-/** Get all materialized views in a schema. */
+/** Get all materialized views in a schema, excluding extension-owned ones. */
 export async function getExistingMaterializedViews(client: Client, schema: string): Promise<MaterializedViewSchema[]> {
   const result = await client.query(
-    `SELECT matviewname AS name, definition AS query
-     FROM pg_catalog.pg_matviews
-     WHERE schemaname = $1
-     ORDER BY matviewname`,
+    `SELECT mv.matviewname AS name, mv.definition AS query
+     FROM pg_catalog.pg_matviews mv
+     JOIN pg_catalog.pg_class c ON c.relname = mv.matviewname
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace AND n.nspname = mv.schemaname
+     WHERE mv.schemaname = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_catalog.pg_depend d
+         JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid
+         WHERE d.objid = c.oid
+           AND d.deptype = 'e'
+       )
+     ORDER BY mv.matviewname`,
     [schema],
   );
   return result.rows.map((r: { name: string; query: string }) => ({
@@ -215,7 +254,31 @@ export async function getExistingMaterializedViews(client: Client, schema: strin
   }));
 }
 
-/** Get all roles (not schema-scoped). */
+/**
+ * Known system role patterns created by cloud providers.
+ * These are excluded from introspection alongside superusers.
+ */
+const SYSTEM_ROLE_PATTERNS = [
+  'rds_superuser',
+  'rds_password',
+  'rds_replication',
+  'rds_ad',
+  'rdsadmin',
+  'rdsrepladmin',
+  'cloudsqlsuperuser',
+  'cloudsqladmin',
+  'cloudsqlreplica',
+  'alloydbsuperuser',
+  'alloydbadmin',
+  'azure_pg_admin',
+  'azure_superuser',
+  'azuresu',
+  'supabase_admin',
+  'supabase_auth_admin',
+  'supabase_storage_admin',
+];
+
+/** Get all roles (not schema-scoped), excluding superusers and known system roles. */
 export async function getExistingRoles(client: Client): Promise<RoleSchema[]> {
   const result = await client.query(
     `SELECT rolname AS role,
@@ -230,7 +293,10 @@ export async function getExistingRoles(client: Client): Promise<RoleSchema[]> {
             shobj_description(oid, 'pg_authid') AS comment
      FROM pg_catalog.pg_roles
      WHERE rolname NOT LIKE 'pg_%'
+       AND rolsuper = false
+       AND rolname <> ALL($1::text[])
      ORDER BY rolname`,
+    [SYSTEM_ROLE_PATTERNS],
   );
   // Query role memberships
   const memberships = await client.query(
@@ -238,7 +304,10 @@ export async function getExistingRoles(client: Client): Promise<RoleSchema[]> {
      FROM pg_auth_members m
      JOIN pg_roles r ON r.oid = m.member
      JOIN pg_roles g ON g.oid = m.roleid
-     WHERE r.rolname NOT LIKE 'pg_%'`,
+     WHERE r.rolname NOT LIKE 'pg_%'
+       AND r.rolsuper = false
+       AND r.rolname <> ALL($1::text[])`,
+    [SYSTEM_ROLE_PATTERNS],
   );
   const membershipMap = new Map<string, string[]>();
   for (const row of memberships.rows) {
