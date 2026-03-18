@@ -1,5 +1,7 @@
 # Milestones
 
+> **Auto-generated** by `ralph milestones` — do not edit manually.
+
 ## 0 — Infrastructure ($0.18)
 
 - [x] T-000: Docker-based test database setup — $0.18
@@ -183,9 +185,10 @@
 - [x] T-094: Idempotent foreign key and check constraint creation — $1.16
 - [x] T-095: Document idempotent pipeline guarantee — $0.44
 
-## 29 — View Enhancements ($1.70)
+## 29 — View Enhancements ($1.94)
 
 - [x] T-096: View options (WITH clause) — $0.70
 - [x] T-097: View triggers (INSTEAD OF) — $1.00
+- [x] T-098: Document view options and view triggers — $0.24
 
-**Grand Total: $84.22**
+**Grand Total: $84.46**
