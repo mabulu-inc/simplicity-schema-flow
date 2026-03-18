@@ -2,6 +2,10 @@
   "name": "@smplcty/schema-flow",
   "version": "0.2.3",
   "description": "Declarative PostgreSQL schema management tool",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mabulu-inc/simplicity-schema-flow.git"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -33,7 +37,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "check": "pnpm lint && pnpm format && pnpm typecheck && pnpm build && pnpm test:coverage",
-    "ralph": "npx @mabulu-inc/ralph loop",
+    "ralph": "npx @smplcty/ralph loop",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -45,6 +49,7 @@
       "prettier --write"
     ]
   },
+  "packageManager": "pnpm@10.32.1",
   "engines": {
     "node": ">=20"
   },
