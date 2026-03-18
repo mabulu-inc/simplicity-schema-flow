@@ -28,10 +28,11 @@
 - [x] T-009: Planner / diff engine — $0.75
 - [x] T-010: Executor — $0.97
 
-## 5 — CLI ($1.17)
+## 5 — CLI ($1.62)
 
 - [x] T-011: CLI entry point — $0.68
 - [x] T-099: Fix generate command not writing files to disk — $0.49
+- [x] T-100: Add per-command --help for all CLI commands — $0.45
 
 ## 6 — Secondary Features ($3.27)
 
@@ -192,4 +193,4 @@
 - [x] T-097: View triggers (INSTEAD OF) — $1.00
 - [x] T-098: Document view options and view triggers — $0.24
 
-**Grand Total: $84.95**
+**Grand Total: $85.40**
