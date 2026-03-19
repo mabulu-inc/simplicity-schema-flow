@@ -25,16 +25,16 @@ describe('Rollback', () => {
   });
 
   describe('ensureSnapshotsTable', () => {
-    it('should create _simplicity.snapshots table', async () => {
+    it('should create _smplcty_schema_flow.snapshots table', async () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+        await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
         await ensureSnapshotsTable(client);
 
         const res = await client.query(
           `SELECT table_name FROM information_schema.tables
-           WHERE table_schema = '_simplicity' AND table_name = 'snapshots'`,
+           WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'snapshots'`,
         );
         expect(res.rows.length).toBe(1);
       } finally {
@@ -46,7 +46,7 @@ describe('Rollback', () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+        await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
         await ensureSnapshotsTable(client);
         await ensureSnapshotsTable(client);
         // No error means idempotent
@@ -61,9 +61,9 @@ describe('Rollback', () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+        await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
         await ensureSnapshotsTable(client);
-        await client.query('DELETE FROM _simplicity.snapshots');
+        await client.query('DELETE FROM _smplcty_schema_flow.snapshots');
       } finally {
         client.release();
       }
@@ -136,9 +136,9 @@ describe('Rollback', () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+        await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
         await ensureSnapshotsTable(client);
-        await client.query('DELETE FROM _simplicity.snapshots');
+        await client.query('DELETE FROM _smplcty_schema_flow.snapshots');
       } finally {
         client.release();
       }
@@ -537,9 +537,9 @@ describe('Rollback', () => {
       const client = await pool.connect();
       try {
         await client.query(`CREATE SCHEMA "${testSchema}"`);
-        await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+        await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
         await ensureSnapshotsTable(client);
-        await client.query('DELETE FROM _simplicity.snapshots');
+        await client.query('DELETE FROM _smplcty_schema_flow.snapshots');
       } finally {
         client.release();
       }

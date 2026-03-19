@@ -17,7 +17,7 @@ function uniqueRole(base: string): string {
 }
 
 async function snapshotCount(ctx: TestProject): Promise<number> {
-  const res = await queryDb(ctx, 'SELECT count(*)::int AS cnt FROM _simplicity.snapshots');
+  const res = await queryDb(ctx, 'SELECT count(*)::int AS cnt FROM _smplcty_schema_flow.snapshots');
   return res.rows[0].cnt;
 }
 

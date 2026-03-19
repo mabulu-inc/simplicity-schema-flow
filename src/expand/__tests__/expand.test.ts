@@ -17,16 +17,16 @@ describe('Expand/Contract', () => {
   });
 
   describe('ensureExpandStateTable', () => {
-    it('should create _simplicity.expand_state table', async () => {
+    it('should create _smplcty_schema_flow.expand_state table', async () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+        await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
         await ensureExpandStateTable(client);
 
         const res = await client.query(
           `SELECT table_name FROM information_schema.tables
-           WHERE table_schema = '_simplicity' AND table_name = 'expand_state'`,
+           WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'expand_state'`,
         );
         expect(res.rows.length).toBe(1);
       } finally {
@@ -38,7 +38,7 @@ describe('Expand/Contract', () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+        await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
         await ensureExpandStateTable(client);
         await ensureExpandStateTable(client);
         // No error means idempotent
@@ -151,7 +151,7 @@ describe('Expand/Contract', () => {
         `);
         // Insert test data
         await client.query(`INSERT INTO ${testSchema}.users (email) VALUES ('FOO@BAR.COM'), ('hello@world.com')`);
-        await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+        await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
         await ensureExpandStateTable(client);
       } finally {
         client.release();
@@ -182,14 +182,14 @@ describe('Expand/Contract', () => {
 
         // Record expand state
         await client.query(
-          `INSERT INTO _simplicity.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
+          `INSERT INTO _smplcty_schema_flow.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
            VALUES ($1, $2, $3, $4, $5, 'expanded')`,
           [
             `${testSchema}.users`,
             'email_lower',
             'email',
             'lower(email)',
-            `_simplicity_dw_${testSchema}_users_email_lower`,
+            `_smplcty_sf_dw_${testSchema}_users_email_lower`,
           ],
         );
         await client.query('COMMIT');
@@ -262,14 +262,14 @@ describe('Expand/Contract', () => {
 
         // Insert a state record
         await client.query(
-          `INSERT INTO _simplicity.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
+          `INSERT INTO _smplcty_schema_flow.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
            VALUES ($1, $2, $3, $4, $5, 'expanded')`,
           [
             `${testSchema}.users`,
             'email_lower',
             'email',
             'lower(email)',
-            `_simplicity_dw_${testSchema}_users_email_lower`,
+            `_smplcty_sf_dw_${testSchema}_users_email_lower`,
           ],
         );
 
@@ -305,14 +305,14 @@ describe('Expand/Contract', () => {
           await client.query(op.sql);
         }
         await client.query(
-          `INSERT INTO _simplicity.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
+          `INSERT INTO _smplcty_schema_flow.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
            VALUES ($1, $2, $3, $4, $5, 'expanded')`,
           [
             `${testSchema}.users`,
             'email_lower',
             'email',
             'lower(email)',
-            `_simplicity_dw_${testSchema}_users_email_lower`,
+            `_smplcty_sf_dw_${testSchema}_users_email_lower`,
           ],
         );
         await client.query('COMMIT');
@@ -356,7 +356,7 @@ describe('Expand/Contract', () => {
 
         // Expand state should be 'contracted'
         const stateRes = await client.query(
-          `SELECT status FROM _simplicity.expand_state
+          `SELECT status FROM _smplcty_schema_flow.expand_state
            WHERE table_name = $1 AND new_column = 'email_lower'`,
           [`${testSchema}.users`],
         );
@@ -383,14 +383,14 @@ describe('Expand/Contract', () => {
       const client = await pool.connect();
       try {
         await client.query(
-          `INSERT INTO _simplicity.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
+          `INSERT INTO _smplcty_schema_flow.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
            VALUES ($1, $2, $3, $4, $5, 'contracted')`,
           [
             `${testSchema}.users`,
             'email_lower',
             'email',
             'lower(email)',
-            `_simplicity_dw_${testSchema}_users_email_lower`,
+            `_smplcty_sf_dw_${testSchema}_users_email_lower`,
           ],
         );
       } finally {

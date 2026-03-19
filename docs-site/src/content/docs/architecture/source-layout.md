@@ -56,4 +56,4 @@ src/
 
 **Safe by default**: Destructive operations require explicit opt-in. FK uses NOT VALID + VALIDATE. Indexes use CONCURRENTLY. NOT NULL uses the safe CHECK pattern.
 
-**Internal schema separation**: Tool state in `_simplicity` never collides with user objects.
+**Internal schema separation**: Tool state in `_smplcty_schema_flow` never collides with user objects.

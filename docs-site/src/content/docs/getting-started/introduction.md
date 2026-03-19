@@ -20,7 +20,7 @@ No migration files to manage. No up/down scripts. Just declare the end state.
 - **Safe by default** -- Destructive operations blocked unless explicitly allowed; advisory locking prevents concurrent runs
 - **Zero-downtime capable** -- `NOT VALID` constraints, `CONCURRENTLY` indexes, expand/contract column migrations
 - **Convention over configuration** -- Works out of the box with a standard `schema/` directory layout
-- **Clean internals** -- Tool state lives in a dedicated `_simplicity` PostgreSQL schema, separate from user objects
+- **Clean internals** -- Tool state lives in a dedicated `_smplcty_schema_flow` PostgreSQL schema, separate from user objects
 - **Dual interface** -- Full CLI for operators + TypeScript API for programmatic use
 
 ## Requirements

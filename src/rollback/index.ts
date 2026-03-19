@@ -34,12 +34,12 @@ export interface RunDownResult {
 // ─── Snapshot Table ──────────────────────────────────────────────
 
 /**
- * Ensure the _simplicity.snapshots table exists.
+ * Ensure the _smplcty_schema_flow.snapshots table exists.
  */
 export async function ensureSnapshotsTable(client: pg.PoolClient): Promise<void> {
-  await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+  await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
   await client.query(`
-    CREATE TABLE IF NOT EXISTS _simplicity.snapshots (
+    CREATE TABLE IF NOT EXISTS _smplcty_schema_flow.snapshots (
       id          serial PRIMARY KEY,
       operations  jsonb NOT NULL,
       pg_schema   text NOT NULL DEFAULT 'public',
@@ -53,7 +53,7 @@ export async function ensureSnapshotsTable(client: pg.PoolClient): Promise<void>
  */
 export async function saveSnapshot(client: pg.PoolClient, operations: Operation[], pgSchema: string): Promise<number> {
   const res = await client.query(
-    `INSERT INTO _simplicity.snapshots (operations, pg_schema)
+    `INSERT INTO _smplcty_schema_flow.snapshots (operations, pg_schema)
      VALUES ($1, $2) RETURNING id`,
     [JSON.stringify(operations), pgSchema],
   );
@@ -66,7 +66,7 @@ export async function saveSnapshot(client: pg.PoolClient, operations: Operation[
 export async function getLatestSnapshot(client: pg.PoolClient): Promise<MigrationSnapshot | null> {
   const res = await client.query(
     `SELECT id, operations, pg_schema, created_at
-     FROM _simplicity.snapshots
+     FROM _smplcty_schema_flow.snapshots
      ORDER BY id DESC LIMIT 1`,
   );
   if (res.rows.length === 0) return null;
@@ -79,7 +79,7 @@ export async function getLatestSnapshot(client: pg.PoolClient): Promise<Migratio
 export async function listSnapshots(client: pg.PoolClient): Promise<MigrationSnapshot[]> {
   const res = await client.query(
     `SELECT id, operations, pg_schema, created_at
-     FROM _simplicity.snapshots
+     FROM _smplcty_schema_flow.snapshots
      ORDER BY id DESC`,
   );
   return res.rows.map(rowToSnapshot);
@@ -89,7 +89,7 @@ export async function listSnapshots(client: pg.PoolClient): Promise<MigrationSna
  * Delete a snapshot by ID.
  */
 export async function deleteSnapshot(client: pg.PoolClient, snapshotId: number): Promise<void> {
-  await client.query('DELETE FROM _simplicity.snapshots WHERE id = $1', [snapshotId]);
+  await client.query('DELETE FROM _smplcty_schema_flow.snapshots WHERE id = $1', [snapshotId]);
 }
 
 function rowToSnapshot(row: Record<string, unknown>): MigrationSnapshot {

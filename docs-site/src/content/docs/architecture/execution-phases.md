@@ -7,7 +7,7 @@ Operations execute in strict dependency order. This ensures PostgreSQL dependenc
 
 | Phase | Object type        | Notes                                                                      |
 | ----- | ------------------ | -------------------------------------------------------------------------- |
-| 0     | Internal schema    | `CREATE SCHEMA IF NOT EXISTS _simplicity`                                  |
+| 0     | Internal schema    | `CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow`                         |
 | 0+    | Prechecks          | Pre-migration assertions (abort if falsy)                                  |
 | 1     | Pre-scripts        | SQL in `pre/`, alphabetical order                                          |
 | 2     | Extensions         | `CREATE EXTENSION IF NOT EXISTS`                                           |

@@ -6,7 +6,7 @@
  * 2. Application switches to reading new column
  * 3. Contract: drop old column and trigger
  *
- * State tracked in `_simplicity.expand_state`.
+ * State tracked in `_smplcty_schema_flow.expand_state`.
  */
 
 import type pg from 'pg';
@@ -46,11 +46,11 @@ export interface ExpandState {
 }
 
 /**
- * Create the _simplicity.expand_state table if it doesn't exist.
+ * Create the _smplcty_schema_flow.expand_state table if it doesn't exist.
  */
 export async function ensureExpandStateTable(client: pg.PoolClient): Promise<void> {
   await client.query(`
-    CREATE TABLE IF NOT EXISTS _simplicity.expand_state (
+    CREATE TABLE IF NOT EXISTS _smplcty_schema_flow.expand_state (
       id SERIAL PRIMARY KEY,
       table_name TEXT NOT NULL,
       new_column TEXT NOT NULL,
@@ -70,14 +70,14 @@ export async function ensureExpandStateTable(client: pg.PoolClient): Promise<voi
  */
 function triggerName(pgSchema: string | undefined, tableName: string, newColumn: string): string {
   const prefix = pgSchema ? `${pgSchema}_` : '';
-  return `_simplicity_dw_${prefix}${tableName}_${newColumn}`;
+  return `_smplcty_sf_dw_${prefix}${tableName}_${newColumn}`;
 }
 
 /**
  * Generate the trigger function name used in the schema for the function.
  */
 function triggerFnName(pgSchema: string | undefined, tableName: string, newColumn: string): string {
-  return `_simplicity_dw_fn_${pgSchema ? `${pgSchema}_` : ''}${tableName}_${newColumn}`;
+  return `_smplcty_sf_dw_fn_${pgSchema ? `${pgSchema}_` : ''}${tableName}_${newColumn}`;
 }
 
 /**
@@ -233,12 +233,12 @@ export async function runContract(options: ContractOptions): Promise<ContractRes
 
   try {
     // Ensure expand_state table exists
-    await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+    await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
     await ensureExpandStateTable(client);
 
     // Look up expand state
     const stateRes = await client.query(
-      `SELECT * FROM _simplicity.expand_state
+      `SELECT * FROM _smplcty_schema_flow.expand_state
        WHERE table_name = $1 AND new_column = $2
        ORDER BY created_at DESC LIMIT 1`,
       [qualifiedTableName, newColumn],
@@ -280,7 +280,9 @@ export async function runContract(options: ContractOptions): Promise<ContractRes
       logger?.info(`Dropped column ${qualifiedTable}.${state.old_column}`);
 
       // Update expand state
-      await client.query(`UPDATE _simplicity.expand_state SET status = 'contracted' WHERE id = $1`, [state.id]);
+      await client.query(`UPDATE _smplcty_schema_flow.expand_state SET status = 'contracted' WHERE id = $1`, [
+        state.id,
+      ]);
 
       await client.query('COMMIT');
     } catch (err) {
@@ -307,6 +309,6 @@ export async function runContract(options: ContractOptions): Promise<ContractRes
  */
 export async function getExpandStatus(client: pg.PoolClient): Promise<ExpandState[]> {
   await ensureExpandStateTable(client);
-  const res = await client.query(`SELECT * FROM _simplicity.expand_state ORDER BY created_at DESC`);
+  const res = await client.query(`SELECT * FROM _smplcty_schema_flow.expand_state ORDER BY created_at DESC`);
   return res.rows as ExpandState[];
 }

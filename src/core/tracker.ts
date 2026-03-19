@@ -1,7 +1,7 @@
 /**
  * File tracker for schema-flow.
  *
- * Manages the _simplicity.history table that tracks which files have been
+ * Manages the _smplcty_schema_flow.history table that tracks which files have been
  * applied and their SHA-256 hashes. Files are re-run only when content changes.
  */
 
@@ -16,12 +16,12 @@ export interface HistoryEntry {
 }
 
 /**
- * Ensure the _simplicity schema and history table exist.
+ * Ensure the _smplcty_schema_flow schema and history table exist.
  */
 export async function ensureHistoryTable(client: pg.PoolClient): Promise<void> {
-  await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+  await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
   await client.query(`
-    CREATE TABLE IF NOT EXISTS _simplicity.history (
+    CREATE TABLE IF NOT EXISTS _smplcty_schema_flow.history (
       file_path  text PRIMARY KEY,
       file_hash  text NOT NULL,
       phase      text NOT NULL,
@@ -35,7 +35,7 @@ export async function ensureHistoryTable(client: pg.PoolClient): Promise<void> {
  */
 export async function getHistory(client: pg.PoolClient): Promise<HistoryEntry[]> {
   const result = await client.query(
-    'SELECT file_path, file_hash, phase, applied_at FROM _simplicity.history ORDER BY file_path',
+    'SELECT file_path, file_hash, phase, applied_at FROM _smplcty_schema_flow.history ORDER BY file_path',
   );
   return result.rows.map((row) => ({
     filePath: row.file_path,
@@ -49,7 +49,9 @@ export async function getHistory(client: pg.PoolClient): Promise<HistoryEntry[]>
  * Get the stored hash for a specific file, or null if not tracked.
  */
 export async function getFileHash(client: pg.PoolClient, filePath: string): Promise<string | null> {
-  const result = await client.query('SELECT file_hash FROM _simplicity.history WHERE file_path = $1', [filePath]);
+  const result = await client.query('SELECT file_hash FROM _smplcty_schema_flow.history WHERE file_path = $1', [
+    filePath,
+  ]);
   return result.rows.length > 0 ? result.rows[0].file_hash : null;
 }
 
@@ -63,7 +65,7 @@ export async function recordFile(
   phase: Phase,
 ): Promise<void> {
   await client.query(
-    `INSERT INTO _simplicity.history (file_path, file_hash, phase, applied_at)
+    `INSERT INTO _smplcty_schema_flow.history (file_path, file_hash, phase, applied_at)
      VALUES ($1, $2, $3, now())
      ON CONFLICT (file_path) DO UPDATE
        SET file_hash = EXCLUDED.file_hash,
@@ -85,6 +87,6 @@ export async function fileNeedsApply(client: pg.PoolClient, filePath: string, cu
  * Remove a file's history entry (e.g., when file is deleted).
  */
 export async function removeFileHistory(client: pg.PoolClient, filePath: string): Promise<boolean> {
-  const result = await client.query('DELETE FROM _simplicity.history WHERE file_path = $1', [filePath]);
+  const result = await client.query('DELETE FROM _smplcty_schema_flow.history WHERE file_path = $1', [filePath]);
   return (result.rowCount ?? 0) > 0;
 }

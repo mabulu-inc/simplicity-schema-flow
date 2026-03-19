@@ -250,12 +250,12 @@ describe('Executor', () => {
       }
     });
 
-    it('should ensure _simplicity schema and history table are created', async () => {
-      // Drop _simplicity if it exists to test creation
+    it('should ensure _smplcty_schema_flow schema and history table are created', async () => {
+      // Drop _smplcty_schema_flow if it exists to test creation
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        await client.query('DROP SCHEMA IF EXISTS _simplicity CASCADE');
+        await client.query('DROP SCHEMA IF EXISTS _smplcty_schema_flow CASCADE');
       } finally {
         client.release();
       }
@@ -266,7 +266,7 @@ describe('Executor', () => {
       try {
         const res = await client2.query(
           `SELECT table_name FROM information_schema.tables
-           WHERE table_schema = '_simplicity' AND table_name = 'history'`,
+           WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'history'`,
         );
         expect(res.rows.length).toBe(1);
       } finally {
@@ -1414,11 +1414,11 @@ describe('Executor', () => {
       const client = await pool.connect();
       try {
         await client.query(`CREATE SCHEMA "${testSchema}"`);
-        await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+        await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
         // Ensure snapshots table exists and is clean
         const { ensureSnapshotsTable } = await import('../../rollback/index.js');
         await ensureSnapshotsTable(client);
-        await client.query('DELETE FROM _simplicity.snapshots');
+        await client.query('DELETE FROM _smplcty_schema_flow.snapshots');
       } finally {
         client.release();
       }
@@ -1429,7 +1429,7 @@ describe('Executor', () => {
       const client = await pool.connect();
       try {
         await client.query(`DROP SCHEMA IF EXISTS "${testSchema}" CASCADE`);
-        await client.query('DELETE FROM _simplicity.snapshots');
+        await client.query('DELETE FROM _smplcty_schema_flow.snapshots');
       } finally {
         client.release();
       }
@@ -2706,7 +2706,7 @@ describe('Executor', () => {
 
         // Now let's verify the file tracker: manually insert a history entry and confirm it's skipped
         await client.query(`
-          INSERT INTO _simplicity.history (file_path, file_hash, phase, applied_at)
+          INSERT INTO _smplcty_schema_flow.history (file_path, file_hash, phase, applied_at)
           VALUES ('pre/001_setup.sql', 'abc123hash', 'pre', now())
           ON CONFLICT (file_path) DO NOTHING
         `);

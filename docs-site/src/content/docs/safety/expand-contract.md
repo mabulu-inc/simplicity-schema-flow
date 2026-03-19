@@ -82,7 +82,7 @@ This drops the old column and the dual-write trigger.
 
 ## State tracking
 
-Expand/contract state is tracked in `_simplicity.expand_state`. This table records:
+Expand/contract state is tracked in `_smplcty_schema_flow.expand_state`. This table records:
 
 - Which columns are in expand state
 - Backfill progress
@@ -94,10 +94,10 @@ The trigger is created automatically:
 
 ```sql
 -- Forward: old column writes -> new column
-CREATE TRIGGER _simplicity_expand_email_lower
+CREATE TRIGGER _smplcty_schema_flow_expand_email_lower
   BEFORE INSERT OR UPDATE ON users
   FOR EACH ROW
-  EXECUTE FUNCTION _simplicity_expand_fn('email_lower', 'lower(email)');
+  EXECUTE FUNCTION _smplcty_schema_flow_expand_fn('email_lower', 'lower(email)');
 
 -- Reverse (if defined): new column writes -> old column
 -- Also handled by the same trigger with reverse expression

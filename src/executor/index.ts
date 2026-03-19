@@ -102,7 +102,7 @@ export async function reindexInvalid(client: pg.PoolClient, schema = 'public', l
 /**
  * Execute a migration plan.
  *
- * Pipeline: acquire lock → ensure _simplicity → pre-scripts → operations → post-scripts → release lock
+ * Pipeline: acquire lock → ensure _smplcty_schema_flow → pre-scripts → operations → post-scripts → release lock
  */
 export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
   const {
@@ -152,7 +152,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     }
 
     try {
-      // Ensure _simplicity schema and history table
+      // Ensure _smplcty_schema_flow schema and history table
       await ensureHistoryTable(lockClient);
 
       // Auto-save a migration snapshot before executing (for rollback support)

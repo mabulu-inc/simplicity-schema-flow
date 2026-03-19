@@ -119,17 +119,17 @@ columns:
     const pool = getPool(ctx.config.connectionString);
     const client = await pool.connect();
     try {
-      await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+      await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
       await ensureExpandStateTable(client);
       await client.query(
-        `INSERT INTO _simplicity.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
+        `INSERT INTO _smplcty_schema_flow.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
          VALUES ($1, $2, $3, $4, $5, 'expanded')`,
         [
           `${ctx.schema}.users`,
           'email_lower',
           'email',
           'lower(email)',
-          `_simplicity_dw_${ctx.schema}_users_email_lower`,
+          `_smplcty_sf_dw_${ctx.schema}_users_email_lower`,
         ],
       );
     } finally {
@@ -197,17 +197,17 @@ columns:
     const pool = getPool(ctx.config.connectionString);
     const client = await pool.connect();
     try {
-      await client.query('CREATE SCHEMA IF NOT EXISTS _simplicity');
+      await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
       await ensureExpandStateTable(client);
       await client.query(
-        `INSERT INTO _simplicity.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
+        `INSERT INTO _smplcty_schema_flow.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
          VALUES ($1, $2, $3, $4, $5, 'expanded')`,
         [
           `${ctx.schema}.users`,
           'email_lower',
           'email',
           'lower(email)',
-          `_simplicity_dw_${ctx.schema}_users_email_lower`,
+          `_smplcty_sf_dw_${ctx.schema}_users_email_lower`,
         ],
       );
 
@@ -296,7 +296,7 @@ columns:
 
     // Verify: reverse transform is present in the trigger function body
     const fnBody = await queryDb(ctx, `SELECT prosrc FROM pg_proc WHERE proname = $1`, [
-      `_simplicity_dw_fn_${ctx.schema}_items_price_dollars`,
+      `_smplcty_sf_dw_fn_${ctx.schema}_items_price_dollars`,
     ]);
     expect(fnBody.rows.length).toBe(1);
     expect(fnBody.rows[0].prosrc).toContain('NEW.price_cents');

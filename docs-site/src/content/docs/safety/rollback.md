@@ -5,7 +5,7 @@ description: Snapshot-based rollback for migrations.
 
 ## How it works
 
-Before each migration run, schema-flow captures a `MigrationSnapshot` in `_simplicity.snapshots`. This records the operations that were applied.
+Before each migration run, schema-flow captures a `MigrationSnapshot` in `_smplcty_schema_flow.snapshots`. This records the operations that were applied.
 
 `schema-flow down` computes reverse operations from the latest snapshot and executes them.
 

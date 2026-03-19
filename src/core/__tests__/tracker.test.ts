@@ -21,14 +21,14 @@ describe('tracker', () => {
 
   beforeEach(async () => {
     client = await pool.connect();
-    // Create a fresh _simplicity schema for this test by using search_path
-    // We'll drop and recreate _simplicity to ensure clean state
-    await client.query('DROP SCHEMA IF EXISTS _simplicity CASCADE');
+    // Create a fresh _smplcty_schema_flow schema for this test by using search_path
+    // We'll drop and recreate _smplcty_schema_flow to ensure clean state
+    await client.query('DROP SCHEMA IF EXISTS _smplcty_schema_flow CASCADE');
   });
 
   afterEach(async () => {
     if (client) {
-      await client.query('DROP SCHEMA IF EXISTS _simplicity CASCADE');
+      await client.query('DROP SCHEMA IF EXISTS _smplcty_schema_flow CASCADE');
       client.release();
     }
   });
@@ -38,12 +38,12 @@ describe('tracker', () => {
   });
 
   describe('ensureHistoryTable', () => {
-    it('creates _simplicity schema and history table', async () => {
+    it('creates _smplcty_schema_flow schema and history table', async () => {
       await ensureHistoryTable(client);
 
       const result = await client.query(`
         SELECT table_name FROM information_schema.tables
-        WHERE table_schema = '_simplicity' AND table_name = 'history'
+        WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'history'
       `);
       expect(result.rows).toHaveLength(1);
     });
@@ -54,7 +54,7 @@ describe('tracker', () => {
 
       const result = await client.query(`
         SELECT table_name FROM information_schema.tables
-        WHERE table_schema = '_simplicity' AND table_name = 'history'
+        WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'history'
       `);
       expect(result.rows).toHaveLength(1);
     });
@@ -64,7 +64,7 @@ describe('tracker', () => {
 
       const result = await client.query(`
         SELECT column_name, data_type FROM information_schema.columns
-        WHERE table_schema = '_simplicity' AND table_name = 'history'
+        WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'history'
         ORDER BY ordinal_position
       `);
       const columns = result.rows.map((r) => r.column_name);
