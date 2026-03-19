@@ -194,4 +194,8 @@
 - [x] T-097: View triggers (INSTEAD OF) — $1.00
 - [x] T-098: Document view options and view triggers — $0.24
 
-**Grand Total: $86.32**
+## 30 — Internal Schema Rename ($0.82)
+
+- [x] T-102: Rename internal schema from \_simplicity to \_smplcty_schema_flow — $0.82
+
+**Grand Total: $87.14**
