@@ -206,8 +206,8 @@
 - [x] T-106: Fix index comments and functions always re-planned — $1.26
 - [x] T-107: Fix unique constraints always re-planned and DROP INDEX on constraint-backed indexes — $0.90
 
-## 32 — Supply Chain Security
+## 32 — Supply Chain Security ($0.22)
 
-- [ ] T-108: Fix audit vulnerability and upgrade dependencies
+- [x] T-108: Fix audit vulnerability and upgrade dependencies — $0.22
 
-**Grand Total: $91.47**
+**Grand Total: $91.69**
