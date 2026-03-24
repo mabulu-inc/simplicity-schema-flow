@@ -553,7 +553,8 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
        ix.indisunique AS is_unique,
        am.amname AS method,
        pg_get_expr(ix.indpred, ix.indrelid) AS where_clause,
-       array_agg(a.attname::text ORDER BY array_position(ix.indkey, a.attnum)) AS columns
+       array_agg(a.attname::text ORDER BY array_position(ix.indkey, a.attnum)) AS columns,
+       obj_description(i.oid, 'pg_class') AS comment
      FROM pg_catalog.pg_index ix
      JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
      JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
@@ -563,7 +564,7 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
      WHERE t.relname = $1
        AND n.nspname = $2
        AND NOT ix.indisprimary
-     GROUP BY i.relname, ix.indisunique, am.amname, ix.indpred, ix.indrelid
+     GROUP BY i.relname, ix.indisunique, am.amname, ix.indpred, ix.indrelid, i.oid
      ORDER BY i.relname`,
     [table, schema],
   );
@@ -579,6 +580,7 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
       idx.method = method as IndexDef['method'];
     }
     if (r.where_clause) idx.where = r.where_clause as string;
+    if (r.comment) idx.comment = r.comment as string;
     return idx;
   });
 }

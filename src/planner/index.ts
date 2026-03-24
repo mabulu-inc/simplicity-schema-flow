@@ -405,11 +405,30 @@ function diffRoleAttributes(desired: RoleSchema, actual: RoleSchema): string | n
 
 // ─── Functions ─────────────────────────────────────────────────
 
+function functionNeedsUpdate(desired: FunctionSchema, existing: FunctionSchema): boolean {
+  if (normalizeWhitespace(desired.body) !== normalizeWhitespace(existing.body)) return true;
+  if ((desired.language || 'plpgsql') !== (existing.language || 'plpgsql')) return true;
+  if (desired.returns !== existing.returns) return true;
+  if ((desired.security || 'invoker') !== (existing.security || 'invoker')) return true;
+  if ((desired.volatility || 'volatile') !== (existing.volatility || 'volatile')) return true;
+  if ((desired.parallel || 'unsafe') !== (existing.parallel || 'unsafe')) return true;
+  if (!!desired.strict !== !!existing.strict) return true;
+  if (!!desired.leakproof !== !!existing.leakproof) return true;
+  if ((desired.cost ?? null) !== (existing.cost ?? null)) return true;
+  if ((desired.rows ?? null) !== (existing.rows ?? null)) return true;
+  const desiredSet = JSON.stringify(desired.set || {});
+  const existingSet = JSON.stringify(existing.set || {});
+  if (desiredSet !== existingSet) return true;
+  const desiredArgs = JSON.stringify(desired.args || []);
+  const existingArgs = JSON.stringify(existing.args || []);
+  if (desiredArgs !== existingArgs) return true;
+  return false;
+}
+
 function diffFunctions(desired: FunctionSchema[], actual: Map<string, FunctionSchema>, pgSchema: string): Operation[] {
   const ops: Operation[] = [];
 
   for (const fn of desired) {
-    // CREATE OR REPLACE — always emit for desired functions
     const args = fn.args
       ? fn.args
           .map((a) => {
@@ -422,36 +441,42 @@ function diffFunctions(desired: FunctionSchema[], actual: Map<string, FunctionSc
           })
           .join(', ')
       : '';
-    const security = fn.security === 'definer' ? 'SECURITY DEFINER' : 'SECURITY INVOKER';
-    const volatility = (fn.volatility || 'volatile').toUpperCase();
-    const language = fn.language || 'plpgsql';
-    const body = fn.body;
 
-    const parts = [
-      `CREATE OR REPLACE FUNCTION "${pgSchema}"."${fn.name}"(${args}) RETURNS ${fn.returns} AS $$ ${body} $$ LANGUAGE ${language}`,
-      volatility,
-      security,
-    ];
-    if (fn.parallel && fn.parallel !== 'unsafe') parts.push(`PARALLEL ${fn.parallel.toUpperCase()}`);
-    if (fn.strict) parts.push('STRICT');
-    if (fn.leakproof) parts.push('LEAKPROOF');
-    if (fn.cost != null) parts.push(`COST ${fn.cost}`);
-    if (fn.rows != null) parts.push(`ROWS ${fn.rows}`);
-    if (fn.set) {
-      for (const [key, value] of Object.entries(fn.set)) {
-        parts.push(`SET ${key} = ${value}`);
+    const existing = actual.get(fn.name);
+    const needsUpdate = !existing || functionNeedsUpdate(fn, existing);
+
+    if (needsUpdate) {
+      const security = fn.security === 'definer' ? 'SECURITY DEFINER' : 'SECURITY INVOKER';
+      const volatility = (fn.volatility || 'volatile').toUpperCase();
+      const language = fn.language || 'plpgsql';
+      const body = fn.body;
+
+      const parts = [
+        `CREATE OR REPLACE FUNCTION "${pgSchema}"."${fn.name}"(${args}) RETURNS ${fn.returns} AS $$ ${body} $$ LANGUAGE ${language}`,
+        volatility,
+        security,
+      ];
+      if (fn.parallel && fn.parallel !== 'unsafe') parts.push(`PARALLEL ${fn.parallel.toUpperCase()}`);
+      if (fn.strict) parts.push('STRICT');
+      if (fn.leakproof) parts.push('LEAKPROOF');
+      if (fn.cost != null) parts.push(`COST ${fn.cost}`);
+      if (fn.rows != null) parts.push(`ROWS ${fn.rows}`);
+      if (fn.set) {
+        for (const [key, value] of Object.entries(fn.set)) {
+          parts.push(`SET ${key} = ${value}`);
+        }
       }
+
+      ops.push({
+        type: 'create_function',
+        phase: 5,
+        objectName: fn.name,
+        sql: parts.join(' '),
+        destructive: false,
+      });
     }
 
-    ops.push({
-      type: 'create_function',
-      phase: 5,
-      objectName: fn.name,
-      sql: parts.join(' '),
-      destructive: false,
-    });
-
-    if (fn.comment) {
+    if (fn.comment && fn.comment !== existing?.comment) {
       ops.push({
         type: 'set_comment',
         phase: 14,
@@ -461,8 +486,8 @@ function diffFunctions(desired: FunctionSchema[], actual: Map<string, FunctionSc
       });
     }
 
-    // Function grants (phase 13)
-    if (fn.grants) {
+    // Function grants (phase 13) — only emit when function was updated or is new
+    if (fn.grants && needsUpdate) {
       const argTypes = fn.args ? fn.args.map((a) => a.type).join(', ') : '';
       for (const grant of fn.grants) {
         const privileges = grant.privileges.join(', ');
@@ -1065,10 +1090,11 @@ function diffIndexes(table: string, desired: IndexDef[], existing: IndexDef[], p
 
   for (const idx of desired) {
     const name = idx.name || `idx_${table}_${idx.columns.join('_')}`;
-    if (!existingByName.has(name)) {
+    const existingIdx = existingByName.get(name);
+    if (!existingIdx) {
       ops.push(createIndexOp(table, { ...idx, name }, pgSchema));
     }
-    if (idx.comment) {
+    if (idx.comment && idx.comment !== existingIdx?.comment) {
       ops.push({
         type: 'set_comment',
         phase: 7,
