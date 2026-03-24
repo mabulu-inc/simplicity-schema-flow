@@ -737,24 +737,28 @@ async function getPolicies(client: Client, table: string, schema: string): Promi
        CASE pol.polpermissive WHEN true THEN true ELSE false END AS permissive,
        pg_get_expr(pol.polqual, pol.polrelid) AS using_expr,
        pg_get_expr(pol.polwithcheck, pol.polrelid) AS check_expr,
-       array_agg(r.rolname) AS roles
+       (SELECT string_agg(
+         CASE WHEN u.oid = 0 THEN 'public'
+              ELSE COALESCE(r.rolname, 'public')
+         END, ', '
+       ) FROM unnest(pol.polroles) AS u(oid)
+         LEFT JOIN pg_catalog.pg_roles r ON r.oid = u.oid
+       ) AS role_names
      FROM pg_catalog.pg_policy pol
      JOIN pg_catalog.pg_class cls ON cls.oid = pol.polrelid
      JOIN pg_catalog.pg_namespace ns ON ns.oid = cls.relnamespace
-     LEFT JOIN pg_catalog.pg_roles r ON r.oid = ANY(pol.polroles)
      WHERE cls.relname = $1
        AND ns.nspname = $2
-     GROUP BY pol.polname, pol.polcmd, pol.polpermissive, pol.polqual, pol.polwithcheck, pol.polrelid
      ORDER BY pol.polname`,
     [table, schema],
   );
 
   return result.rows.map((r: Record<string, unknown>) => {
-    const roles = (r.roles as string[]) || [];
+    const roleNames = (r.role_names as string) || 'public';
     const policy: PolicyDef = {
       name: r.name as string,
       for: r.command as PolicyCommand,
-      to: roles[0] || 'public',
+      to: roleNames,
       permissive: r.permissive as boolean,
     };
     if (r.using_expr) policy.using = r.using_expr as string;

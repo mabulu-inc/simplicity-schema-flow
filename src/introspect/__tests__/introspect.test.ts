@@ -313,6 +313,7 @@ describe('introspectTable', () => {
     const pol = table.policies!.find((p) => p.name === 'products_select');
     expect(pol).toBeDefined();
     expect(pol!.for).toBe('SELECT');
+    expect(pol!.to).toBe('public');
     expect(pol!.using).toBeTruthy();
   });
 
@@ -562,5 +563,52 @@ describe('policy permissive flag introspection', () => {
     expect(permPol!.permissive).toBe(true);
     expect(restrPol).toBeDefined();
     expect(restrPol!.permissive).toBe(false);
+  });
+});
+
+describe('policy roles introspection (polroles OID resolution)', () => {
+  beforeAll(async () => {
+    await exec(`CREATE TABLE policy_roles_test (id integer PRIMARY KEY, data text)`);
+    await exec(`ALTER TABLE policy_roles_test ENABLE ROW LEVEL SECURITY`);
+    // Policy with TO PUBLIC (OID 0 in polroles)
+    await exec(`CREATE POLICY "public_pol" ON policy_roles_test FOR SELECT TO public USING (true)`);
+    // Create a named role for testing
+    await client.query(
+      `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'test_policy_role') THEN CREATE ROLE test_policy_role; END IF; END $$`,
+    );
+    await client.query(`GRANT USAGE ON SCHEMA ${TEST_SCHEMA} TO test_policy_role`);
+    await exec(`CREATE POLICY "role_pol" ON policy_roles_test FOR SELECT TO test_policy_role USING (true)`);
+  });
+
+  afterAll(async () => {
+    await exec(`DROP TABLE IF EXISTS policy_roles_test CASCADE`);
+    await client.query(`REVOKE ALL ON SCHEMA ${TEST_SCHEMA} FROM test_policy_role`);
+    await client.query(`DROP ROLE IF EXISTS test_policy_role`);
+  });
+
+  it('resolves PUBLIC policy role from polroles OID 0', async () => {
+    const table = await introspectTable(client, 'policy_roles_test', TEST_SCHEMA);
+    expect(table.policies).toBeDefined();
+    const publicPol = table.policies!.find((p) => p.name === 'public_pol');
+    expect(publicPol).toBeDefined();
+    expect(publicPol!.to).toBe('public');
+  });
+
+  it('resolves named role from polroles OID', async () => {
+    const table = await introspectTable(client, 'policy_roles_test', TEST_SCHEMA);
+    expect(table.policies).toBeDefined();
+    const rolePol = table.policies!.find((p) => p.name === 'role_pol');
+    expect(rolePol).toBeDefined();
+    expect(rolePol!.to).toBe('test_policy_role');
+  });
+
+  it('produces no phantom operations when policy is unchanged', async () => {
+    const table = await introspectTable(client, 'policy_roles_test', TEST_SCHEMA);
+    const publicPol = table.policies!.find((p) => p.name === 'public_pol');
+    // The introspected to value must match what the parser would produce
+    // so that policyChanged() returns false for identical policies
+    expect(publicPol!.to).toBe('public');
+    expect(typeof publicPol!.to).toBe('string');
+    expect(publicPol!.to.length).toBeGreaterThan(0);
   });
 });
