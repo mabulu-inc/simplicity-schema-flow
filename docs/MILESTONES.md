@@ -199,10 +199,10 @@
 - [x] T-102: Rename internal schema from \_simplicity to \_smplcty_schema_flow — $0.82
 - [x] T-103: Auto-migrate \_simplicity schema to \_smplcty_schema_flow — $0.79
 
-## 31 — Bug Fixes: Introspection Accuracy ($0.50)
+## 31 — Bug Fixes: Introspection Accuracy ($1.38)
 
 - [x] T-104: Fix numeric precision not read from pg catalog — $0.50
-- [ ] T-105: Fix RLS policy roles misparse from polroles array
+- [x] T-105: Fix RLS policy roles misparse from polroles array — $0.88
 - [ ] T-106: Fix index comments and functions always re-planned
 - [ ] T-107: Fix unique constraints always re-planned and DROP INDEX on constraint-backed indexes
 
@@ -210,4 +210,4 @@
 
 - [ ] T-108: Fix audit vulnerability and upgrade dependencies
 
-**Grand Total: $88.43**
+**Grand Total: $89.31**
