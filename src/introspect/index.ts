@@ -401,6 +401,16 @@ export async function introspectTable(client: Client, tableName: string, schema:
   if (compositePk.constraintName) result.primary_key_name = compositePk.constraintName;
   if (indexes.length > 0) result.indexes = indexes;
   if (checks.length > 0) result.checks = checks;
+
+  // Populate multi-column unique constraints
+  const multiColUniqueConstraints = uniqueConstraints.filter((uc) => uc.columns.length > 1);
+  if (multiColUniqueConstraints.length > 0) {
+    result.unique_constraints = multiColUniqueConstraints.map((uc) => ({
+      columns: uc.columns,
+      name: uc.constraint_name,
+    }));
+  }
+
   if (triggers.length > 0) result.triggers = triggers;
   if (policies.length > 0) result.policies = policies;
   if (rlsInfo.rls) result.rls = true;
@@ -564,6 +574,11 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
      WHERE t.relname = $1
        AND n.nspname = $2
        AND NOT ix.indisprimary
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_catalog.pg_constraint con
+         WHERE con.conindid = ix.indexrelid
+           AND con.contype = 'u'
+       )
      GROUP BY i.relname, ix.indisunique, am.amname, ix.indpred, ix.indrelid, i.oid
      ORDER BY i.relname`,
     [table, schema],
