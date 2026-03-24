@@ -495,7 +495,12 @@ async function getColumns(client: Client, table: string, schema: string): Promis
   return result.rows.map((r: Record<string, unknown>) => {
     const col: ColumnDef = {
       name: r.name as string,
-      type: normalizeType(r.udt_type as string, r.max_length as number | null),
+      type: normalizeType(
+        r.udt_type as string,
+        r.max_length as number | null,
+        r.num_precision as number | null,
+        r.num_scale as number | null,
+      ),
       nullable: r.nullable as boolean,
     };
 
@@ -508,7 +513,12 @@ async function getColumns(client: Client, table: string, schema: string): Promis
   });
 }
 
-function normalizeType(udtType: string, maxLength: number | null): string {
+function normalizeType(
+  udtType: string,
+  maxLength: number | null,
+  numPrecision: number | null,
+  numScale: number | null,
+): string {
   // Map common udt_name values to user-friendly types
   const typeMap: Record<string, string> = {
     int4: 'integer',
@@ -521,6 +531,7 @@ function normalizeType(udtType: string, maxLength: number | null): string {
     timestamp: 'timestamp',
     varchar: maxLength ? `varchar(${maxLength})` : 'varchar',
     bpchar: maxLength ? `char(${maxLength})` : 'char',
+    numeric: numPrecision != null ? `numeric(${numPrecision},${numScale ?? 0})` : 'numeric',
   };
 
   if (typeMap[udtType]) return typeMap[udtType];
