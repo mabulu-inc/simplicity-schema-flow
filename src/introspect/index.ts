@@ -402,10 +402,9 @@ export async function introspectTable(client: Client, tableName: string, schema:
   if (indexes.length > 0) result.indexes = indexes;
   if (checks.length > 0) result.checks = checks;
 
-  // Populate multi-column unique constraints
-  const multiColUniqueConstraints = uniqueConstraints.filter((uc) => uc.columns.length > 1);
-  if (multiColUniqueConstraints.length > 0) {
-    result.unique_constraints = multiColUniqueConstraints.map((uc) => ({
+  // Populate all unique constraints (single-column and multi-column)
+  if (uniqueConstraints.length > 0) {
+    result.unique_constraints = uniqueConstraints.map((uc) => ({
       columns: uc.columns,
       name: uc.constraint_name,
     }));

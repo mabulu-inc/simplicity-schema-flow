@@ -196,7 +196,128 @@ columns:
   });
 });
 
-// ─── Bug 3: Drop unique constraint emits ALTER TABLE DROP CONSTRAINT ─────
+// ─── Bug 3: Single-column unique constraint defined in unique_constraints array (GH #7) ─────
+
+describe('planner: single-column unique_constraints array idempotence (GH #7)', () => {
+  it('introspection includes single-column unique constraints in unique_constraints array', async () => {
+    await client.query(`
+      CREATE TABLE "${TEST_SCHEMA}".tenant_auth_config (
+        id uuid PRIMARY KEY,
+        tenant_id uuid NOT NULL,
+        CONSTRAINT tenant_auth_config_tenant_id_key UNIQUE (tenant_id)
+      )
+    `);
+
+    const table = await introspectTable(client, 'tenant_auth_config', TEST_SCHEMA);
+
+    // Single-column unique constraint defined via CONSTRAINT clause should appear
+    // in unique_constraints array (not only as col.unique = true)
+    expect(table.unique_constraints).toBeDefined();
+    expect(table.unique_constraints).toContainEqual({
+      columns: ['tenant_id'],
+      name: 'tenant_auth_config_tenant_id_key',
+    });
+  });
+
+  it('produces 0 operations when single-column unique constraint is in unique_constraints array', async () => {
+    // Table tenant_auth_config created above with single-column unique constraint
+    const table = await introspectTable(client, 'tenant_auth_config', TEST_SCHEMA);
+
+    const desired = parseTable(`
+table: tenant_auth_config
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+  - name: tenant_id
+    type: uuid
+    nullable: false
+unique_constraints:
+  - name: tenant_auth_config_tenant_id_key
+    columns:
+      - tenant_id
+`);
+
+    const desiredState: DesiredState = {
+      tables: [desired],
+      enums: [],
+      functions: [],
+      views: [],
+      materializedViews: [],
+      roles: [],
+      extensions: null,
+    };
+
+    const actualState: ActualState = {
+      ...emptyActual(),
+      tables: new Map([['tenant_auth_config', table]]),
+    };
+
+    const plan = buildPlan(desiredState, actualState, { pgSchema: TEST_SCHEMA });
+    const relevantOps = plan.operations.filter(
+      (op) =>
+        op.type === 'add_unique_constraint' ||
+        op.type === 'drop_unique_constraint' ||
+        op.type === 'add_index' ||
+        op.type === 'drop_index',
+    );
+    expect(relevantOps).toHaveLength(0);
+  });
+
+  it('does not spuriously drop constraints when column-level unique: true is used', async () => {
+    // This tests that changing introspection doesn't break the column-level unique path
+    await client.query(`
+      CREATE TABLE "${TEST_SCHEMA}".col_unique_test (
+        id uuid PRIMARY KEY,
+        email text NOT NULL,
+        CONSTRAINT col_unique_test_email_key UNIQUE (email)
+      )
+    `);
+
+    const table = await introspectTable(client, 'col_unique_test', TEST_SCHEMA);
+
+    // User defines unique at the column level (not in unique_constraints)
+    const desired = parseTable(`
+table: col_unique_test
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+  - name: email
+    type: text
+    nullable: false
+    unique: true
+`);
+
+    const desiredState: DesiredState = {
+      tables: [desired],
+      enums: [],
+      functions: [],
+      views: [],
+      materializedViews: [],
+      roles: [],
+      extensions: null,
+    };
+
+    const actualState: ActualState = {
+      ...emptyActual(),
+      tables: new Map([['col_unique_test', table]]),
+    };
+
+    const plan = buildPlan(desiredState, actualState, { pgSchema: TEST_SCHEMA });
+    const relevantOps = plan.operations.filter(
+      (op) =>
+        op.type === 'add_unique_constraint' ||
+        op.type === 'drop_unique_constraint' ||
+        op.type === 'add_index' ||
+        op.type === 'drop_index',
+    );
+    // Should NOT drop the constraint just because it's not in desired.unique_constraints
+    expect(relevantOps).toHaveLength(0);
+  });
+});
+
+// ─── Bug 4: Drop unique constraint emits ALTER TABLE DROP CONSTRAINT ─────
 
 describe('planner: dropping unique constraints emits correct DDL', () => {
   it('emits ALTER TABLE DROP CONSTRAINT for removed unique constraints', () => {

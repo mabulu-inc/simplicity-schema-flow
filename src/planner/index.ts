@@ -924,6 +924,7 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
       desired.table,
       desired.unique_constraints || [],
       existing.unique_constraints || [],
+      desired.columns,
       pgSchema,
     ),
   );
@@ -1199,6 +1200,7 @@ function diffUniqueConstraints(
   table: string,
   desired: UniqueConstraintDef[],
   existing: UniqueConstraintDef[],
+  desiredColumns: ColumnDef[],
   pgSchema: string,
 ): Operation[] {
   const ops: Operation[] = [];
@@ -1240,10 +1242,20 @@ function diffUniqueConstraints(
     }
   }
 
-  // Drop unique constraints not in desired
+  // Build set of column-level unique constraint names from desired columns.
+  // These are managed at the column level, not via unique_constraints array,
+  // so we must not drop them even if they appear in existing.unique_constraints.
+  const columnLevelUniqueNames = new Set<string>();
+  for (const col of desiredColumns) {
+    if (col.unique) {
+      columnLevelUniqueNames.add(col.unique_name || `${table}_${col.name}_key`);
+    }
+  }
+
+  // Drop unique constraints not in desired (and not managed at column level)
   const desiredNames = new Set(desired.map((uc) => uc.name || `uq_${table}_${uc.columns.join('_')}`));
   for (const [name] of existingByName) {
-    if (!desiredNames.has(name)) {
+    if (!desiredNames.has(name) && !columnLevelUniqueNames.has(name)) {
       ops.push({
         type: 'drop_unique_constraint',
         phase: 6,
