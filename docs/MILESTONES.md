@@ -210,9 +210,9 @@
 
 - [x] T-108: Fix audit vulnerability and upgrade dependencies — $0.22
 
-## 33 — Bug Fixes: Planner Convergence ($0.92)
+## 33 — Bug Fixes: Planner Convergence ($2.48)
 
 - [x] T-109: Fix unique constraints still re-planned when constraint and backing index both exist — $0.92
-- [ ] T-110: Normalize RLS policy USING/CHECK expressions to eliminate phantom drop+create
+- [x] T-110: Normalize RLS policy USING/CHECK expressions to eliminate phantom drop+create — $1.56
 
-**Grand Total: $92.61**
+**Grand Total: $94.17**
