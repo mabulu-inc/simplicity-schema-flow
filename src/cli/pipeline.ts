@@ -21,6 +21,7 @@ import {
 } from '../introspect/index.js';
 import { buildPlan } from '../planner/index.js';
 import type { DesiredState, ActualState } from '../planner/index.js';
+import { normalizePolicyExpressions } from '../planner/normalize-expression.js';
 import { execute } from '../executor/index.js';
 import type { ExecuteResult } from '../executor/index.js';
 import { getPool } from '../core/db.js';
@@ -71,10 +72,19 @@ export async function runPipeline(
     // 2. Parse YAML files
     const desired = await parseDesiredState(discovered.schema, config.baseDir, logger);
 
-    // 3. Introspect database
+    // 3. Normalize policy expressions via PG round-trip
+    const pool = getPool(config.connectionString);
+    const normClient = await pool.connect();
+    try {
+      await normalizePolicyExpressions(normClient, desired.tables);
+    } finally {
+      normClient.release();
+    }
+
+    // 4. Introspect database
     const actual = await introspectDatabase(config, logger);
 
-    // 4. Build plan
+    // 5. Build plan
     const plan = buildPlan(desired, actual, {
       allowDestructive: config.allowDestructive,
       pgSchema: config.pgSchema,
@@ -91,7 +101,7 @@ export async function runPipeline(
     logger.info(`Plan: ${operations.length} operations (${blocked.length} blocked)`);
   }
 
-  // 5. Execute
+  // 6. Execute
   const result = await execute({
     connectionString: config.connectionString,
     operations,
@@ -105,7 +115,7 @@ export async function runPipeline(
     logger,
   });
 
-  // 6. Record schema files in history after successful migration
+  // 7. Record schema files in history after successful migration
   if (!config.dryRun && !validateOnly && shouldMigrate && discovered.schema.length > 0) {
     const pool = getPool(config.connectionString);
     const client = await pool.connect();
@@ -252,6 +262,16 @@ export async function buildDesiredAndActual(
 ): Promise<{ desired: DesiredState; actual: ActualState }> {
   const discovered = await discoverSchemaFiles(config.baseDir);
   const desired = await parseDesiredState(discovered.schema, config.baseDir, logger);
+
+  // Normalize policy expressions via PG round-trip
+  const pool = getPool(config.connectionString);
+  const normClient = await pool.connect();
+  try {
+    await normalizePolicyExpressions(normClient, desired.tables);
+  } finally {
+    normClient.release();
+  }
+
   const actual = await introspectDatabase(config, logger);
   return { desired, actual };
 }
