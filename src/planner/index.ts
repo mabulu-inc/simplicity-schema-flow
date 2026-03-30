@@ -618,7 +618,8 @@ function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
     for (const uc of table.unique_constraints) {
       const ucCols = uc.columns.map((c) => `"${c}"`).join(', ');
       const ucName = uc.name || `uq_${table.table}_${uc.columns.join('_')}`;
-      colDefs.push(`CONSTRAINT "${ucName}" UNIQUE (${ucCols})`);
+      const nnd = uc.nulls_not_distinct ? ' NULLS NOT DISTINCT' : '';
+      colDefs.push(`CONSTRAINT "${ucName}" UNIQUE${nnd} (${ucCols})`);
     }
   }
 
@@ -1209,16 +1210,28 @@ function diffUniqueConstraints(
   for (const uc of desired) {
     const ucName = uc.name || `uq_${table}_${uc.columns.join('_')}`;
     const existingUc = existingByName.get(ucName);
-    if (!existingUc) {
+    const needsRecreate = existingUc && Boolean(uc.nulls_not_distinct) !== Boolean(existingUc.nulls_not_distinct);
+    if (needsRecreate) {
+      // Drop existing constraint so it can be recreated with updated nulls_not_distinct
+      ops.push({
+        type: 'drop_unique_constraint',
+        phase: 6,
+        objectName: `${table}.${ucName}`,
+        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT "${ucName}"`,
+        destructive: true,
+      });
+    }
+    if (!existingUc || needsRecreate) {
       // Safe unique constraint pattern (PRD §8.3):
       // 1. CREATE UNIQUE INDEX CONCURRENTLY (non-blocking)
       // 2. ALTER TABLE ADD CONSTRAINT ... USING INDEX (instant)
       const cols = uc.columns.map((c) => `"${c}"`).join(', ');
+      const nnd = uc.nulls_not_distinct ? ' NULLS NOT DISTINCT' : '';
       ops.push({
         type: 'add_index',
         phase: 7,
         objectName: ucName,
-        sql: `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "${ucName}" ON "${pgSchema}"."${table}" (${cols})`,
+        sql: `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "${ucName}" ON "${pgSchema}"."${table}" (${cols})${nnd}`,
         destructive: false,
         concurrent: true,
       });

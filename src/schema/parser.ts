@@ -219,6 +219,7 @@ function parseUniqueConstraintDef(raw: Record<string, unknown>, context: string)
     columns: requireArray<string>(raw, 'columns', context),
   };
   if (raw.name !== undefined) uc.name = String(raw.name);
+  if (raw.nulls_not_distinct !== undefined) uc.nulls_not_distinct = Boolean(raw.nulls_not_distinct);
   const ucComment = resolveComment(raw);
   if (ucComment !== undefined) uc.comment = ucComment;
   return uc;

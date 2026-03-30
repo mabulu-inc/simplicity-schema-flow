@@ -404,10 +404,16 @@ export async function introspectTable(client: Client, tableName: string, schema:
 
   // Populate all unique constraints (single-column and multi-column)
   if (uniqueConstraints.length > 0) {
-    result.unique_constraints = uniqueConstraints.map((uc) => ({
-      columns: uc.columns,
-      name: uc.constraint_name,
-    }));
+    result.unique_constraints = uniqueConstraints.map((uc) => {
+      const def: { columns: string[]; name: string; nulls_not_distinct?: boolean } = {
+        columns: uc.columns,
+        name: uc.constraint_name,
+      };
+      if (uc.nulls_not_distinct) {
+        def.nulls_not_distinct = true;
+      }
+      return def;
+    });
   }
 
   if (triggers.length > 0) result.triggers = triggers;
@@ -892,25 +898,36 @@ async function getTableComment(client: Client, table: string, schema: string): P
 interface UniqueConstraintInfo {
   constraint_name: string;
   columns: string[];
+  nulls_not_distinct: boolean;
 }
 
 async function getUniqueConstraints(client: Client, table: string, schema: string): Promise<UniqueConstraintInfo[]> {
+  // Check if indnullsnotdistinct column exists (PostgreSQL 15+)
+  const pgVersionResult = await client.query('SHOW server_version_num');
+  const pgVersion = parseInt(pgVersionResult.rows[0].server_version_num as string, 10);
+  const hasNullsNotDistinct = pgVersion >= 150000;
+
+  const nullsNotDistinctExpr = hasNullsNotDistinct ? 'COALESCE(idx.indnullsnotdistinct, false)' : 'false';
+
   const result = await client.query(
     `SELECT con.conname AS constraint_name,
-            array_agg(a.attname::text ORDER BY array_position(con.conkey, a.attnum)) AS columns
+            array_agg(a.attname::text ORDER BY array_position(con.conkey, a.attnum)) AS columns,
+            ${nullsNotDistinctExpr} AS nulls_not_distinct
      FROM pg_catalog.pg_constraint con
      JOIN pg_catalog.pg_class cls ON cls.oid = con.conrelid
      JOIN pg_catalog.pg_namespace ns ON ns.oid = cls.relnamespace
      JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ANY(con.conkey)
+     LEFT JOIN pg_catalog.pg_index idx ON idx.indexrelid = con.conindid
      WHERE con.contype = 'u'
        AND cls.relname = $1
        AND ns.nspname = $2
-     GROUP BY con.conname
+     GROUP BY con.conname, ${nullsNotDistinctExpr}
      ORDER BY con.conname`,
     [table, schema],
   );
   return result.rows.map((r: Record<string, unknown>) => ({
     constraint_name: r.constraint_name as string,
     columns: r.columns as string[],
+    nulls_not_distinct: r.nulls_not_distinct as boolean,
   }));
 }

@@ -69,6 +69,7 @@ export interface CheckDef {
 export interface UniqueConstraintDef {
   columns: string[];
   name?: string;
+  nulls_not_distinct?: boolean;
   comment?: string;
 }
 

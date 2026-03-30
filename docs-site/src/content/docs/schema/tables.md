@@ -69,6 +69,7 @@ checks:
 unique_constraints:
   - columns: [email, tenant_id]
     name: uq_users_email_tenant
+    nulls_not_distinct: true
 
 triggers:
   - name: set_updated_at
@@ -256,10 +257,13 @@ checks:
 unique_constraints:
   - columns: [email, tenant_id] # required
     name: uq_users_email_tenant # optional
+    nulls_not_distinct: true # optional — treat NULLs as equal (PostgreSQL 15+)
     comment: 'description'
 ```
 
 Created safely: `CREATE UNIQUE INDEX CONCURRENTLY` then `ADD CONSTRAINT ... USING INDEX`.
+
+Set `nulls_not_distinct: true` to treat NULL values as equal within the unique constraint. By default, PostgreSQL considers each NULL distinct, allowing multiple rows with NULL in unique columns. With this option, only one NULL per unique group is permitted. Requires PostgreSQL 15 or later.
 
 ## Triggers
 
