@@ -215,4 +215,8 @@
 - [x] T-109: Fix unique constraints still re-planned when constraint and backing index both exist — $0.92
 - [x] T-110: Normalize RLS policy USING/CHECK expressions to eliminate phantom drop+create — $1.56
 
-**Grand Total: $94.17**
+## 34 — Feature: NULLS NOT DISTINCT ($1.18)
+
+- [x] T-111: Support NULLS NOT DISTINCT on unique constraints (PostgreSQL 15+) — $1.18
+
+**Grand Total: $95.35**
