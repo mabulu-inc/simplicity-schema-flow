@@ -2,6 +2,7 @@
   "name": "@smplcty/schema-flow",
   "version": "0.3.2",
   "description": "Declarative PostgreSQL schema management tool",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/mabulu-inc/simplicity-schema-flow.git"
