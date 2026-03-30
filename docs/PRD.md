@@ -154,6 +154,7 @@ checks:
 unique_constraints:
   - columns: [email, tenant_id]
     name: uq_users_email_tenant
+    nulls_not_distinct: true # PostgreSQL 15+: treat NULLs as equal
     comment: 'One email per tenant'
 
 triggers:
