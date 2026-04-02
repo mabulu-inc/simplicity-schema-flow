@@ -230,7 +230,9 @@ function driftTables(desired: TableSchema[], actual: Map<string, TableSchema>): 
       items.push(...driftForeignKeys(dt.table, dt.columns, at.columns));
       items.push(...driftIndexes(dt.table, dt.indexes || [], at.indexes || []));
       items.push(...driftChecks(dt.table, dt.checks || [], at.checks || []));
-      items.push(...driftUniqueConstraints(dt.table, dt.unique_constraints || [], at.unique_constraints || []));
+      items.push(
+        ...driftUniqueConstraints(dt.table, dt.unique_constraints || [], at.unique_constraints || [], dt.columns),
+      );
       items.push(...driftTriggers(dt.table, dt.triggers || [], at.triggers || []));
       items.push(...driftRls(dt, at));
       items.push(...driftPolicies(dt.table, dt.policies || [], at.policies || []));
@@ -384,6 +386,19 @@ function driftColumns(table: string, desired: ColumnDef[], actual: ColumnDef[]):
           expected: dc.unique_name,
           actual: ac.unique_name ?? '(default)',
           detail: `unique_name differs: expected ${dc.unique_name}, actual ${ac.unique_name ?? '(default)'}`,
+        });
+      }
+      // Unique
+      const dUnique = !!dc.unique;
+      const aUnique = !!ac.unique;
+      if (dUnique !== aUnique) {
+        items.push({
+          type: 'constraint',
+          object: `${table}.${dc.name}`,
+          status: dUnique ? 'missing_in_db' : 'missing_in_yaml',
+          expected: dUnique ? 'unique' : 'not unique',
+          actual: aUnique ? 'unique' : 'not unique',
+          detail: `unique: expected ${dUnique}, actual ${aUnique}`,
         });
       }
       // Generated column expression
@@ -736,10 +751,20 @@ function driftUniqueConstraints(
   table: string,
   desired: UniqueConstraintDef[],
   actual: UniqueConstraintDef[],
+  desiredColumns: ColumnDef[],
 ): DriftItem[] {
   const items: DriftItem[] = [];
   const getName = (uc: UniqueConstraintDef) => uc.name || `${table}_${uc.columns.join('_')}_key`;
   const actualByName = new Map(actual.map((uc) => [getName(uc), uc]));
+
+  // Build set of constraint names managed at the column level (unique: true).
+  // These are NOT in the unique_constraints array but exist in the DB as real constraints.
+  const columnLevelUniqueNames = new Set<string>();
+  for (const col of desiredColumns) {
+    if (col.unique) {
+      columnLevelUniqueNames.add(col.unique_name || `${table}_${col.name}_key`);
+    }
+  }
 
   for (const uc of desired) {
     const name = getName(uc);
@@ -751,7 +776,7 @@ function driftUniqueConstraints(
   const desiredNames = new Set(desired.map(getName));
   for (const uc of actual) {
     const name = getName(uc);
-    if (!desiredNames.has(name)) {
+    if (!desiredNames.has(name) && !columnLevelUniqueNames.has(name)) {
       items.push({ type: 'constraint', object: `${table}.${name}`, status: 'missing_in_yaml' });
     }
   }
