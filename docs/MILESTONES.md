@@ -219,9 +219,10 @@
 
 - [x] T-111: Support NULLS NOT DISTINCT on unique constraints (PostgreSQL 15+) — $1.18
 
-## 35 — Bug Fixes: Drift False Positives ($2.25)
+## 35 — Bug Fixes: Drift False Positives ($3.00)
 
 - [x] T-112: Fix drift false positive for single-column unique constraints — $1.10
 - [x] T-113: Fix drift false positive for seed data on freshly seeded database — $1.15
+- [x] T-114: Fix drift false positive when column unique: true overlaps explicit index — $0.75
 
-**Grand Total: $97.60**
+**Grand Total: $98.35**
