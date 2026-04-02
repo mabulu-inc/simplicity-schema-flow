@@ -26,7 +26,7 @@ import {
   getExistingRoles,
   introspectTable,
 } from '../introspect/index.js';
-import { detectDrift } from '../drift/index.js';
+import { detectDrift, hydrateActualSeeds } from '../drift/index.js';
 import type { DriftReport } from '../drift/index.js';
 import type { DesiredState, ActualState } from '../planner/index.js';
 import { readFile } from 'node:fs/promises';
@@ -116,6 +116,16 @@ export async function useTestProject(connectionString: string): Promise<TestProj
   async function drift(): Promise<DriftReport> {
     const desired = await parseDesiredState(dir, logger);
     const actual = await introspectActual(testConnectionString, schema);
+
+    // Hydrate actual seed data from the database for drift comparison
+    const pool = getPool(testConnectionString);
+    const seedClient = await pool.connect();
+    try {
+      await hydrateActualSeeds(seedClient, desired.tables, actual.tables, schema);
+    } finally {
+      seedClient.release();
+    }
+
     return detectDrift(desired, actual);
   }
 

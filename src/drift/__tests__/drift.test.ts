@@ -2196,6 +2196,109 @@ describe('detectDrift', () => {
     const grantDrift = report.items.filter((i) => i.type === 'grant');
     expect(grantDrift).toHaveLength(0);
   });
+  // ─── Seed drift: no false positive when actual seeds match desired ───
+
+  it('reports no seed drift when actual seeds match desired seeds', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'statuses',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'name', type: 'text' },
+        ],
+        seeds: [
+          { id: 1, name: 'active' },
+          { id: 2, name: 'inactive' },
+        ],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('statuses', {
+      table: 'statuses',
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'name', type: 'text' },
+      ],
+      seeds: [
+        { id: 1, name: 'active' },
+        { id: 2, name: 'inactive' },
+      ],
+    });
+    const report = detectDrift(desired, actual);
+    const seedDrift = report.items.filter((i) => i.type === 'seed');
+    expect(seedDrift).toHaveLength(0);
+  });
+
+  it('reports no seed drift when actual seeds have coerced types (number vs string)', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'statuses',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'name', type: 'text' },
+        ],
+        seeds: [
+          { id: 1, name: 'active' },
+          { id: 2, name: 'inactive' },
+        ],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('statuses', {
+      table: 'statuses',
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'name', type: 'text' },
+      ],
+      // PostgreSQL returns numbers as strings for some column types
+      seeds: [
+        { id: '1', name: 'active' },
+        { id: '2', name: 'inactive' },
+      ],
+    });
+    const report = detectDrift(desired, actual);
+    const seedDrift = report.items.filter((i) => i.type === 'seed');
+    expect(seedDrift).toHaveLength(0);
+  });
+
+  it('reports seed drift when actual seed values genuinely differ', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'statuses',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'name', type: 'text' },
+        ],
+        seeds: [
+          { id: 1, name: 'active' },
+          { id: 2, name: 'inactive' },
+        ],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('statuses', {
+      table: 'statuses',
+      columns: [
+        { name: 'id', type: 'integer', primary_key: true },
+        { name: 'name', type: 'text' },
+      ],
+      seeds: [
+        { id: 1, name: 'active' },
+        { id: 2, name: 'WRONG' },
+      ],
+    });
+    const report = detectDrift(desired, actual);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        type: 'seed',
+        object: 'statuses',
+        status: 'different',
+      }),
+    );
+  });
 });
 
 // ─── drift --apply integration tests ──────────────────────────
@@ -2619,6 +2722,83 @@ indexes:
       const report2 = await project.drift();
       const idxRemaining = report2.items.filter((i) => i.type === 'index' && i.object === 'idx_products_sku');
       expect(idxRemaining).toHaveLength(0);
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it('should report zero seed drift after run on fresh database', async () => {
+    const project = await useTestProject(DATABASE_URL);
+    try {
+      writeSchema(project.dir, {
+        'tables/statuses.yaml': `
+table: statuses
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
+  - name: name
+    type: text
+    nullable: false
+seeds:
+  - id: 1
+    name: active
+  - id: 2
+    name: inactive
+  - id: 3
+    name: archived
+`,
+      });
+
+      // Run migration (creates table + inserts seeds)
+      await project.migrate();
+
+      // Drift should report zero seed differences
+      const report = await project.drift();
+      const seedDrift = report.items.filter((i) => i.type === 'seed');
+      expect(seedDrift).toHaveLength(0);
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it('should report zero seed drift with boolean and numeric type coercion', async () => {
+    const project = await useTestProject(DATABASE_URL);
+    try {
+      writeSchema(project.dir, {
+        'tables/settings.yaml': `
+table: settings
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
+  - name: key
+    type: text
+    nullable: false
+  - name: enabled
+    type: boolean
+    default: "true"
+  - name: priority
+    type: bigint
+seeds:
+  - id: 1
+    key: feature_flags
+    enabled: true
+    priority: 100
+  - id: 2
+    key: maintenance
+    enabled: false
+    priority: 50
+`,
+      });
+
+      await project.migrate();
+
+      const report = await project.drift();
+      const seedDrift = report.items.filter((i) => i.type === 'seed');
+      expect(seedDrift).toHaveLength(0);
     } finally {
       await project.cleanup();
     }

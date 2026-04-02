@@ -25,6 +25,7 @@ import { normalizePolicyExpressions } from '../planner/normalize-expression.js';
 import { execute } from '../executor/index.js';
 import type { ExecuteResult } from '../executor/index.js';
 import { getPool } from '../core/db.js';
+import { hydrateActualSeeds } from '../drift/index.js';
 import { ensureHistoryTable, getHistory, recordFile } from '../core/tracker.js';
 import type {
   TableSchema,
@@ -263,7 +264,7 @@ export async function buildDesiredAndActual(
   const discovered = await discoverSchemaFiles(config.baseDir);
   const desired = await parseDesiredState(discovered.schema, config.baseDir, logger);
 
-  // Normalize policy expressions via PG round-trip
+  // Normalize policy expressions via PG round-trip + hydrate actual seeds
   const pool = getPool(config.connectionString);
   const normClient = await pool.connect();
   try {
@@ -273,6 +274,15 @@ export async function buildDesiredAndActual(
   }
 
   const actual = await introspectDatabase(config, logger);
+
+  // Hydrate actual seed data from the database for drift comparison
+  const seedClient = await pool.connect();
+  try {
+    await hydrateActualSeeds(seedClient, desired.tables, actual.tables, config.pgSchema);
+  } finally {
+    seedClient.release();
+  }
+
   return { desired, actual };
 }
 

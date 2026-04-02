@@ -95,7 +95,7 @@ export {
 export type { ExecuteOptions, ExecuteResult, InvalidIndex } from './executor/index.js';
 
 // Drift detection
-export { detectDrift } from './drift/index.js';
+export { detectDrift, hydrateActualSeeds } from './drift/index.js';
 export type { DriftItemType, DriftStatus, DriftItem, DriftReport } from './drift/index.js';
 
 // Lint

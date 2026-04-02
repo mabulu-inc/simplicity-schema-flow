@@ -5,6 +5,7 @@
  * database state, producing a structured DriftReport.
  */
 
+import type { PoolClient } from 'pg';
 import type { DesiredState, ActualState } from '../planner/index.js';
 import type {
   TableSchema,
@@ -55,6 +56,50 @@ export interface DriftItem {
 export interface DriftReport {
   items: DriftItem[];
   summary: { total: number; byType: Record<string, number> };
+}
+
+// ─── Seed Hydration ────────────────────────────────────────────
+
+/**
+ * Query the database for actual seed data and attach it to the actual table state.
+ * For each desired table with seeds, queries the matching rows by PK and sets
+ * them on the actual table so drift detection can compare them.
+ */
+export async function hydrateActualSeeds(
+  client: PoolClient,
+  desiredTables: TableSchema[],
+  actualTables: Map<string, TableSchema>,
+  pgSchema: string,
+): Promise<void> {
+  for (const dt of desiredTables) {
+    if (!dt.seeds || dt.seeds.length === 0) continue;
+    const at = actualTables.get(dt.table);
+    if (!at) continue;
+
+    const pkCols = dt.columns.filter((c) => c.primary_key).map((c) => c.name);
+    if (pkCols.length === 0) continue;
+
+    const seedCols = Object.keys(dt.seeds[0]);
+
+    const rows: Record<string, unknown>[] = [];
+    for (const seed of dt.seeds) {
+      const whereParts: string[] = [];
+      const params: unknown[] = [];
+      for (let i = 0; i < pkCols.length; i++) {
+        params.push(seed[pkCols[i]]);
+        whereParts.push(`"${pkCols[i]}" = $${i + 1}`);
+      }
+
+      const colList = seedCols.map((c) => `"${c}"`).join(', ');
+      const sql = `SELECT ${colList} FROM "${pgSchema}"."${dt.table}" WHERE ${whereParts.join(' AND ')} LIMIT 1`;
+      const result = await client.query(sql, params);
+      if (result.rows.length > 0) {
+        rows.push(result.rows[0] as Record<string, unknown>);
+      }
+    }
+
+    at.seeds = rows;
+  }
 }
 
 // ─── Main ───────────────────────────────────────────────────────
@@ -827,6 +872,20 @@ function driftGrants(table: string, desired: GrantDef[], actual: GrantDef[]): Dr
 
 // ─── Seeds ──────────────────────────────────────────────────────
 
+function normalizeSeedValue(val: unknown): string {
+  if (val === null || val === undefined) return 'NULL';
+  if (typeof val === 'boolean') return val ? 'true' : 'false';
+  return String(val);
+}
+
+function normalizeSeedRow(row: Record<string, unknown>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, val] of Object.entries(row)) {
+    result[key] = normalizeSeedValue(val);
+  }
+  return result;
+}
+
 function driftSeeds(
   table: string,
   desired?: Record<string, unknown>[],
@@ -835,8 +894,10 @@ function driftSeeds(
   const dLen = desired?.length ?? 0;
   const aLen = actual?.length ?? 0;
   if (dLen === 0 && aLen === 0) return [];
-  const dJson = JSON.stringify(desired || []);
-  const aJson = JSON.stringify(actual || []);
+  const normalizedDesired = (desired || []).map(normalizeSeedRow);
+  const normalizedActual = (actual || []).map(normalizeSeedRow);
+  const dJson = JSON.stringify(normalizedDesired);
+  const aJson = JSON.stringify(normalizedActual);
   if (dJson !== aJson) {
     return [
       {
