@@ -273,7 +273,7 @@ function driftTables(desired: TableSchema[], actual: Map<string, TableSchema>): 
       items.push(...driftCompositePk(dt.table, dt, at));
       items.push(...driftColumns(dt.table, dt.columns, at.columns));
       items.push(...driftForeignKeys(dt.table, dt.columns, at.columns));
-      items.push(...driftIndexes(dt.table, dt.indexes || [], at.indexes || []));
+      items.push(...driftIndexes(dt.table, dt.indexes || [], at.indexes || [], dt.columns));
       items.push(...driftChecks(dt.table, dt.checks || [], at.checks || []));
       items.push(
         ...driftUniqueConstraints(dt.table, dt.unique_constraints || [], at.unique_constraints || [], dt.columns),
@@ -471,15 +471,27 @@ function driftColumns(table: string, desired: ColumnDef[], actual: ColumnDef[]):
   return items;
 }
 
-function driftIndexes(table: string, desired: IndexDef[], actual: IndexDef[]): DriftItem[] {
+function driftIndexes(table: string, desired: IndexDef[], actual: IndexDef[], columns: ColumnDef[]): DriftItem[] {
   const items: DriftItem[] = [];
   const actualByName = new Map<string, IndexDef>();
   for (const idx of actual) {
     if (idx.name) actualByName.set(idx.name, idx);
   }
 
+  // Build set of constraint names managed at the column level (unique: true).
+  // Constraint-backed indexes are filtered out by introspection, so an explicit
+  // index entry whose name matches a column-level unique constraint is satisfied
+  // by that constraint and should not be reported as missing.
+  const columnLevelUniqueNames = new Set<string>();
+  for (const col of columns) {
+    if (col.unique) {
+      columnLevelUniqueNames.add(col.unique_name || `${table}_${col.name}_key`);
+    }
+  }
+
   for (const idx of desired) {
     const name = idx.name || `idx_${table}_${idx.columns.join('_')}`;
+    if (columnLevelUniqueNames.has(name)) continue;
     const ai = actualByName.get(name);
     if (!ai) {
       items.push({ type: 'index', object: name, status: 'missing_in_db' });
