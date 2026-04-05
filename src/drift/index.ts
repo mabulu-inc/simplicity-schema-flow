@@ -529,7 +529,7 @@ function driftChecks(table: string, desired: CheckDef[], actual: CheckDef[]): Dr
     const act = actualByName.get(chk.name);
     if (!act) {
       items.push({ type: 'constraint', object: `${table}.${chk.name}`, status: 'missing_in_db' });
-    } else if (chk.expression !== act.expression) {
+    } else if (normalizeCheckExpression(chk.expression) !== normalizeCheckExpression(act.expression)) {
       items.push({
         type: 'constraint',
         object: `${table}.${chk.name}`,
@@ -962,4 +962,8 @@ function normalizeTypeName(t: string): string {
 
 function normalizeWhitespace(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeCheckExpression(s: string): string {
+  return s.replace(/::character varying::text/g, '::character varying').replace(/\]::text\[\]/g, ']');
 }

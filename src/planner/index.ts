@@ -1166,7 +1166,7 @@ function diffChecks(table: string, desired: CheckDef[], existing: CheckDef[], pg
         ),
         destructive: false,
       });
-    } else if (existingCheck.expression !== check.expression) {
+    } else if (normalizeCheckExpression(existingCheck.expression) !== normalizeCheckExpression(check.expression)) {
       // Expression changed — PG doesn't support ALTER CONSTRAINT for checks, so drop + re-add
       ops.push({
         type: 'drop_check',
@@ -1813,4 +1813,8 @@ function normalizeTypeName(t: string): string {
 
 function normalizeWhitespace(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeCheckExpression(s: string): string {
+  return s.replace(/::character varying::text/g, '::character varying').replace(/\]::text\[\]/g, ']');
 }
