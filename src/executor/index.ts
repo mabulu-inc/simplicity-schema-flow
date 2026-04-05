@@ -101,6 +101,121 @@ export async function reindexInvalid(client: pg.PoolClient, schema = 'public', l
   return invalid.length;
 }
 
+interface SeedResult {
+  inserted: number;
+  updated: number;
+  unchanged: number;
+}
+
+function isSqlExpression(val: unknown): val is { __sql: string } {
+  return (
+    typeof val === 'object' && val !== null && '__sql' in val && typeof (val as { __sql: string }).__sql === 'string'
+  );
+}
+
+/**
+ * Execute a seed_table operation using bulk JSONB upsert.
+ * Two round-trips per table: UPDATE changed rows, INSERT new rows.
+ */
+async function executeSeedTable(client: pg.PoolClient, op: Operation, pgSchema: string): Promise<SeedResult> {
+  const { seedRows, seedColumns, seedOnConflict } = op;
+  if (!seedRows || !seedColumns || seedRows.length === 0) {
+    return { inserted: 0, updated: 0, unchanged: 0 };
+  }
+
+  const table = op.objectName;
+  const pkCols = seedColumns.filter((c) => c.isPk);
+  const nonPkCols = seedColumns.filter((c) => !c.isPk);
+
+  // Check if any values contain SQL expressions
+  const sqlExpressions = new Map<string, Map<number, string>>(); // col -> (rowIdx -> sql)
+  for (let i = 0; i < seedRows.length; i++) {
+    for (const col of seedColumns) {
+      const val = seedRows[i][col.name];
+      if (isSqlExpression(val)) {
+        if (!sqlExpressions.has(col.name)) sqlExpressions.set(col.name, new Map());
+        sqlExpressions.get(col.name)!.set(i, val.__sql);
+      }
+    }
+  }
+
+  // Build JSONB data (replace SQL expressions with null in JSONB)
+  const jsonbData = seedRows.map((row, idx) => {
+    const obj: Record<string, unknown> = { _idx: idx };
+    for (const col of seedColumns) {
+      const val = row[col.name];
+      if (isSqlExpression(val)) {
+        obj[col.name] = null; // placeholder — SQL expression injected in query
+      } else {
+        obj[col.name] = val;
+      }
+    }
+    return obj;
+  });
+
+  // Build column extraction expressions for the CTE
+  const colExtractions = seedColumns.map((col) => {
+    const sqlExprs = sqlExpressions.get(col.name);
+    if (sqlExprs) {
+      if (sqlExprs.size === seedRows.length) {
+        // All rows have the same SQL expression — just use it directly
+        const expr = sqlExprs.values().next().value;
+        return `${expr} AS "${col.name}"`;
+      }
+      // Mixed: use CASE with row index
+      const cases = [...sqlExprs.entries()]
+        .map(([idx, expr]) => `WHEN (elem->>'_idx')::integer = ${idx} THEN ${expr}`)
+        .join(' ');
+      return `CASE ${cases} ELSE (elem->>'${col.name}')::${col.type} END AS "${col.name}"`;
+    }
+    return `(elem->>'${col.name}')::${col.type} AS "${col.name}"`;
+  });
+
+  const dataCte = `WITH data AS (
+  SELECT ${colExtractions.join(',\n    ')}
+  FROM jsonb_array_elements($1::jsonb) AS elem
+)`;
+
+  let updated = 0;
+
+  // UPDATE changed rows (skip if DO NOTHING or no non-PK columns)
+  if (seedOnConflict !== 'DO NOTHING' && nonPkCols.length > 0) {
+    const setClauses = nonPkCols.map((c) => `"${c.name}" = d."${c.name}"`).join(', ');
+    const pkJoin = pkCols.map((c) => `t."${c.name}" = d."${c.name}"`).join(' AND ');
+    const distinctChecks = nonPkCols.map((c) => `t."${c.name}" IS DISTINCT FROM d."${c.name}"`).join(' OR ');
+
+    const updateSql = `${dataCte}
+UPDATE "${pgSchema}"."${table}" t
+SET ${setClauses}
+FROM data d
+WHERE ${pkJoin}
+AND (${distinctChecks})`;
+
+    const updateRes = await client.query(updateSql, [JSON.stringify(jsonbData)]);
+    updated = updateRes.rowCount ?? 0;
+  }
+
+  // INSERT new rows
+  const allColNames = seedColumns.map((c) => `"${c.name}"`).join(', ');
+  const selectCols = seedColumns.map((c) => `d."${c.name}"`).join(', ');
+  const existsJoin = pkCols.map((c) => `t."${c.name}" = d."${c.name}"`).join(' AND ');
+
+  const insertSql = `${dataCte}
+INSERT INTO "${pgSchema}"."${table}" (${allColNames})
+SELECT ${selectCols}
+FROM data d
+WHERE NOT EXISTS (
+  SELECT 1 FROM "${pgSchema}"."${table}" t WHERE ${existsJoin}
+)`;
+
+  const insertRes = await client.query(insertSql, [JSON.stringify(jsonbData)]);
+  const inserted = insertRes.rowCount ?? 0;
+
+  const unchanged = seedRows.length - inserted - updated;
+
+  return { inserted, updated, unchanged };
+}
+
 /**
  * Execute a migration plan.
  *
@@ -231,7 +346,12 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
 
           for (const op of transactionalOps) {
             logger?.debug(`Executing: ${op.type} ${op.objectName}`);
-            await opClient.query(op.sql);
+            if (op.type === 'seed_table') {
+              const counts = await executeSeedTable(opClient, op, pgSchema);
+              op.seedResult = counts;
+            } else {
+              await opClient.query(op.sql);
+            }
             result.executed++;
             result.executedOperations.push(op);
           }

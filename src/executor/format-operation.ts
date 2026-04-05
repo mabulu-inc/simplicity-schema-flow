@@ -71,6 +71,7 @@ const DESCRIPTIONS: Record<OperationType, string> = {
   // Other
   set_comment: 'Set comment',
   add_seed: 'Seeded',
+  seed_table: 'Seeded',
 };
 
 const GRANT_REVOKE_TYPES = new Set<OperationType>([
@@ -86,6 +87,16 @@ const GRANT_REVOKE_TYPES = new Set<OperationType>([
 
 export function formatOperationMessage(op: Operation): string {
   const prefix = DESCRIPTIONS[op.type];
+  if (op.type === 'seed_table' && op.seedResult) {
+    const parts: string[] = [];
+    if (op.seedResult.inserted > 0) parts.push(`${op.seedResult.inserted} inserted`);
+    if (op.seedResult.updated > 0) parts.push(`${op.seedResult.updated} updated`);
+    if (op.seedResult.unchanged > 0) parts.push(`${op.seedResult.unchanged} unchanged`);
+    if (parts.length > 0) {
+      return `${prefix}: ${op.objectName} (${parts.join(', ')})`;
+    }
+    return `${prefix}: ${op.objectName}`;
+  }
   if (GRANT_REVOKE_TYPES.has(op.type)) {
     return `${prefix} ${op.objectName}`;
   }

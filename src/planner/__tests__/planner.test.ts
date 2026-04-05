@@ -921,7 +921,7 @@ describe('Planner', () => {
       expect(ops.some((o) => o.sql.includes('Main users table'))).toBe(true);
     });
 
-    it('creates table with seeds', () => {
+    it('creates table with seeds as single seed_table operation', () => {
       const desired = emptyDesired();
       desired.tables = [
         {
@@ -934,13 +934,13 @@ describe('Planner', () => {
         },
       ];
       const result = buildPlan(desired, emptyActual());
-      const ops = findOps(result.operations, 'add_seed');
+      const ops = findOps(result.operations, 'seed_table');
       expect(ops).toHaveLength(1);
-      expect(ops[0].sql).toContain('INSERT INTO');
-      expect(ops[0].sql).toContain('ON CONFLICT');
+      expect(ops[0].seedRows).toHaveLength(1);
+      expect(ops[0].seedColumns).toBeDefined();
     });
 
-    it('seeds with seeds_on_conflict DO NOTHING generates insert-only SQL', () => {
+    it('seeds with seeds_on_conflict DO NOTHING is propagated', () => {
       const desired = emptyDesired();
       desired.tables = [
         {
@@ -954,13 +954,12 @@ describe('Planner', () => {
         },
       ];
       const result = buildPlan(desired, emptyActual());
-      const ops = findOps(result.operations, 'add_seed');
+      const ops = findOps(result.operations, 'seed_table');
       expect(ops).toHaveLength(1);
-      expect(ops[0].sql).toContain('ON CONFLICT ("id") DO NOTHING');
-      expect(ops[0].sql).not.toContain('DO UPDATE');
+      expect(ops[0].seedOnConflict).toBe('DO NOTHING');
     });
 
-    it('seeds with !sql expression renders raw SQL in VALUES', () => {
+    it('seeds with !sql expression are carried in seedRows', () => {
       const desired = emptyDesired();
       desired.tables = [
         {
@@ -973,9 +972,9 @@ describe('Planner', () => {
         },
       ];
       const result = buildPlan(desired, emptyActual());
-      const ops = findOps(result.operations, 'add_seed');
+      const ops = findOps(result.operations, 'seed_table');
       expect(ops).toHaveLength(1);
-      expect(ops[0].sql).toContain("VALUES ('00000000-0000-0000-0000-000000000001', now())");
+      expect(ops[0].seedRows![0].created_at).toEqual({ __sql: 'now()' });
     });
 
     it('creates table with column-level grants', () => {

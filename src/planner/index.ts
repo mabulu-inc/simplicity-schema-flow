@@ -21,7 +21,6 @@ import type {
   RoleSchema,
   ExtensionsSchema,
   SeedOnConflict,
-  SqlExpression,
 } from '../schema/types.js';
 import { planExpandColumn } from '../expand/index.js';
 
@@ -93,7 +92,8 @@ export type OperationType =
   | 'backfill_column'
   // Other
   | 'set_comment'
-  | 'add_seed';
+  | 'add_seed'
+  | 'seed_table';
 
 export interface Operation {
   type: OperationType;
@@ -109,6 +109,14 @@ export interface Operation {
   concurrent?: boolean;
   /** Abort message for precheck failures */
   precheckMessage?: string;
+  /** Seed rows for seed_table operations */
+  seedRows?: Record<string, unknown>[];
+  /** Column metadata for seed_table operations */
+  seedColumns?: { name: string; type: string; isPk: boolean }[];
+  /** Conflict strategy for seed_table operations */
+  seedOnConflict?: SeedOnConflict;
+  /** Result counts filled by executor after seed_table execution */
+  seedResult?: { inserted: number; updated: number; unchanged: number };
 }
 
 // ─── Desired State (parsed from YAML) ──────────────────────────
@@ -803,10 +811,8 @@ function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
   }
 
   // Seeds (phase 15)
-  if (table.seeds) {
-    for (const seed of table.seeds) {
-      ops.push(createSeedOp(table.table, seed, table.columns, pgSchema, table.seeds_on_conflict));
-    }
+  if (table.seeds && table.seeds.length > 0) {
+    ops.push(createSeedTableOp(table.table, table.seeds, table.columns, pgSchema, table.seeds_on_conflict));
   }
 
   return ops;
@@ -966,10 +972,8 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
   }
 
   // Seeds
-  if (desired.seeds) {
-    for (const seed of desired.seeds) {
-      ops.push(createSeedOp(desired.table, seed, desired.columns, pgSchema, desired.seeds_on_conflict));
-    }
+  if (desired.seeds && desired.seeds.length > 0) {
+    ops.push(createSeedTableOp(desired.table, desired.seeds, desired.columns, pgSchema, desired.seeds_on_conflict));
   }
 
   return ops;
@@ -1738,55 +1742,45 @@ function diffMaterializedViews(
 
 // ─── Seeds ─────────────────────────────────────────────────────
 
-function createSeedOp(
+function createSeedTableOp(
   table: string,
-  seed: Record<string, unknown>,
+  seeds: Record<string, unknown>[],
   columns: ColumnDef[],
   pgSchema: string,
   onConflict?: SeedOnConflict,
 ): Operation {
-  const keys = Object.keys(seed);
-  const cols = keys.map((k) => `"${k}"`).join(', ');
-  const vals = keys.map((k) => formatSeedValue(seed[k])).join(', ');
-  // Find primary key columns for ON CONFLICT
-  const pkCols = columns.filter((c) => c.primary_key).map((c) => `"${c.name}"`);
-  const pkClause = pkCols.length > 0 ? `(${pkCols.join(', ')})` : '(id)';
+  // Collect all column names used across seed rows
+  const seedKeySet = new Set<string>();
+  for (const seed of seeds) {
+    for (const key of Object.keys(seed)) seedKeySet.add(key);
+  }
 
-  let sql = `INSERT INTO "${pgSchema}"."${table}" (${cols}) VALUES (${vals})`;
+  const seedColumns = [...seedKeySet].map((name) => {
+    const colDef = columns.find((c) => c.name === name);
+    return {
+      name,
+      type: normalizeTypeName(colDef?.type || 'text'),
+      isPk: colDef?.primary_key === true,
+    };
+  });
 
-  if (onConflict === 'DO NOTHING') {
-    sql += ` ON CONFLICT ${pkClause} DO NOTHING`;
-  } else {
-    const updateCols = keys
-      .filter((k) => !columns.find((c) => c.name === k && c.primary_key))
-      .map((k) => `"${k}" = EXCLUDED."${k}"`)
-      .join(', ');
-    if (updateCols) {
-      sql += ` ON CONFLICT ${pkClause} DO UPDATE SET ${updateCols}`;
-    } else {
-      sql += ` ON CONFLICT ${pkClause} DO NOTHING`;
-    }
+  // If no explicit PK columns found among seed keys, default to 'id'
+  const hasPk = seedColumns.some((c) => c.isPk);
+  if (!hasPk) {
+    const idCol = seedColumns.find((c) => c.name === 'id');
+    if (idCol) idCol.isPk = true;
   }
 
   return {
-    type: 'add_seed',
+    type: 'seed_table',
     phase: 15,
     objectName: table,
-    sql,
+    sql: `-- Seed "${pgSchema}"."${table}" (${seeds.length} rows)`,
     destructive: false,
+    seedRows: seeds,
+    seedColumns,
+    seedOnConflict: onConflict,
   };
-}
-
-function isSqlExpression(val: unknown): val is SqlExpression {
-  return typeof val === 'object' && val !== null && '__sql' in val && typeof (val as SqlExpression).__sql === 'string';
-}
-
-function formatSeedValue(val: unknown): string {
-  if (val === null || val === undefined) return 'NULL';
-  if (isSqlExpression(val)) return val.__sql;
-  if (typeof val === 'number') return String(val);
-  if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
-  return `'${escapeQuote(String(val))}'`;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────
