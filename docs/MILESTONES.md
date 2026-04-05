@@ -230,8 +230,8 @@
 - [x] T-115: Fix drift false positive for table-level grants without columns field — $0.55
 - [x] T-116: Diff and apply check constraint expression changes — $0.54
 
-## 37 — UX: Output Verbosity Modes
+## 37 — UX: Output Verbosity Modes ($0.94)
 
-- [ ] T-117: Default output shows changes only, verbose/quiet modes
+- [x] T-117: Default output shows changes only, verbose/quiet modes — $0.94
 
-**Grand Total: $99.44**
+**Grand Total: $100.38**
