@@ -526,8 +526,18 @@ function driftChecks(table: string, desired: CheckDef[], actual: CheckDef[]): Dr
   const actualByName = new Map(actual.map((c) => [c.name, c]));
 
   for (const chk of desired) {
-    if (!actualByName.has(chk.name)) {
+    const act = actualByName.get(chk.name);
+    if (!act) {
       items.push({ type: 'constraint', object: `${table}.${chk.name}`, status: 'missing_in_db' });
+    } else if (chk.expression !== act.expression) {
+      items.push({
+        type: 'constraint',
+        object: `${table}.${chk.name}`,
+        status: 'different',
+        expected: chk.expression,
+        actual: act.expression,
+        detail: `check expression: expected "${chk.expression}", actual "${act.expression}"`,
+      });
     }
   }
 

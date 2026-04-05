@@ -1166,6 +1166,25 @@ function diffChecks(table: string, desired: CheckDef[], existing: CheckDef[], pg
         ),
         destructive: false,
       });
+    } else if (existingCheck.expression !== check.expression) {
+      // Expression changed — PG doesn't support ALTER CONSTRAINT for checks, so drop + re-add
+      ops.push({
+        type: 'drop_check',
+        phase: 6,
+        objectName: `${table}.${check.name}`,
+        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT "${check.name}"`,
+        destructive: false,
+      });
+      ops.push({
+        type: 'add_check',
+        phase: 6,
+        objectName: `${table}.${check.name}`,
+        sql: wrapConstraintIdempotent(
+          check.name,
+          `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${check.name}" CHECK (${check.expression})`,
+        ),
+        destructive: false,
+      });
     }
     if (check.comment && (!existingCheck || check.comment !== existingCheck.comment)) {
       ops.push({
