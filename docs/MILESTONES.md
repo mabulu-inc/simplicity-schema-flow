@@ -234,4 +234,13 @@
 
 - [x] T-117: Default output shows changes only, verbose/quiet modes — $0.94
 
-**Grand Total: $100.38**
+## 38 — Bug Fixes: Expression Normalization ($0.86)
+
+- [x] T-118: Fix drift false positive for check constraint cast normalization — $0.86
+- [ ] T-119: Fix drift false positive for table-level grants with multiple privileges
+
+## 39 — Seeds: Bulk Execution
+
+- [ ] T-120: Batch seed upserts and show per-table summary
+
+**Grand Total: $101.24**
