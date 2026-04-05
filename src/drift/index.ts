@@ -885,9 +885,15 @@ function driftGrants(table: string, desired: GrantDef[], actual: GrantDef[]): Dr
       // If the actual grant has columns, check if a table-level desired grant
       // (no columns) covers it — PostgreSQL populates column_privileges for
       // table-level grants, so the introspected column-level grant is redundant.
+      // We use a subset check because table-level-only privileges (e.g. DELETE,
+      // TRUNCATE) never appear in column_privileges, so the introspected
+      // column-level grant may list fewer privileges than the desired grant.
       if (g.columns && g.columns.length > 0) {
-        const tableLevelKey = `${g.to}:${[...g.privileges].sort().join(',')}`;
-        if (desiredMap.has(tableLevelKey)) continue;
+        const actualPrivs = g.privileges;
+        const coveredByTableLevel = desired.some(
+          (d) => !d.columns?.length && d.to === g.to && actualPrivs.every((p) => d.privileges.includes(p)),
+        );
+        if (coveredByTableLevel) continue;
       }
       items.push({
         type: 'grant',

@@ -162,4 +162,38 @@ grants:
     const grantDrift = report.items.filter((item) => item.type === 'grant');
     expect(grantDrift).toHaveLength(0);
   });
+
+  it('reports zero drift for table-level grant with DELETE,INSERT,SELECT,UPDATE on multi-column table', async () => {
+    const desired = parseTable(`
+table: drift_grant_disku
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+  - name: title
+    type: text
+  - name: body
+    type: text
+grants:
+  - to: ${TEST_ROLE}
+    privileges: [DELETE, INSERT, SELECT, UPDATE]
+`);
+
+    const desiredState: DesiredState = {
+      ...emptyDesired(),
+      tables: [desired],
+    };
+
+    await applyPlan(desiredState, emptyActual());
+
+    const introspected = await introspectTable(client, 'drift_grant_disku', TEST_SCHEMA);
+    const actualState: ActualState = {
+      ...emptyActual(),
+      tables: new Map([['drift_grant_disku', introspected]]),
+    };
+    const report = detectDrift(desiredState, actualState);
+
+    const grantDrift = report.items.filter((item) => item.type === 'grant');
+    expect(grantDrift).toHaveLength(0);
+  });
 });
