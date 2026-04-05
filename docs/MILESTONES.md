@@ -239,8 +239,8 @@
 - [x] T-118: Fix drift false positive for check constraint cast normalization — $0.86
 - [x] T-119: Fix drift false positive for table-level grants with multiple privileges — $0.42
 
-## 39 — Seeds: Bulk Execution
+## 39 — Seeds: Bulk Execution ($1.72)
 
-- [ ] T-120: Batch seed upserts and show per-table summary
+- [x] T-120: Batch seed upserts and show per-table summary — $1.72
 
-**Grand Total: $101.66**
+**Grand Total: $103.38**
