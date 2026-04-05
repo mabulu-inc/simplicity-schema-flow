@@ -93,6 +93,11 @@ export {
   reindexInvalid,
 } from './executor/index.js';
 export type { ExecuteOptions, ExecuteResult, InvalidIndex } from './executor/index.js';
+export { formatOperationMessage } from './executor/format-operation.js';
+
+// CLI reporting
+export { reportMigrationResult } from './cli/report.js';
+export type { VerbosityMode, ReportOptions } from './cli/report.js';
 
 // Drift detection
 export { detectDrift, hydrateActualSeeds } from './drift/index.js';

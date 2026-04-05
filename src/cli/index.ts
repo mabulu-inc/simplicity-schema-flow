@@ -6,6 +6,7 @@
 
 import { parseArgs } from './args.js';
 import { getHelpText, getVersionText, getCommandHelpText } from './help.js';
+import { reportMigrationResult, type VerbosityMode } from './report.js';
 import { runPipeline, initProject, getStatus, runBaseline, buildDesiredAndActual, getPlan } from './pipeline.js';
 import { resolveConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
@@ -61,6 +62,8 @@ async function main(): Promise<void> {
     quiet: config.quiet,
     json: config.json,
   });
+
+  const verbosity: VerbosityMode = config.verbose ? 'verbose' : config.quiet ? 'quiet' : 'default';
 
   try {
     switch (parsed.command) {
@@ -213,9 +216,15 @@ async function main(): Promise<void> {
               statementTimeout: config.statementTimeout,
               logger,
             });
-            logger.info(`Applied ${result.executed} fix operations`);
             if (config.json) {
               console.log(JSON.stringify(result, null, 2));
+            } else {
+              reportMigrationResult({
+                result,
+                operations: result.executedOperations,
+                mode: verbosity,
+                write: (msg) => logger.info(msg),
+              });
             }
           } else if (plan.blocked.length > 0) {
             logger.warn('No operations applied — all fixes are destructive. Use --allow-destructive to apply.');
@@ -450,10 +459,12 @@ async function main(): Promise<void> {
         if (config.json) {
           console.log(JSON.stringify(result, null, 2));
         } else {
-          logger.info(`Migration complete: ${result.executed} operations executed`);
-          if (result.preScriptsRun > 0) logger.info(`  Pre-scripts: ${result.preScriptsRun}`);
-          if (result.postScriptsRun > 0) logger.info(`  Post-scripts: ${result.postScriptsRun}`);
-          if (result.skippedScripts > 0) logger.info(`  Skipped (unchanged): ${result.skippedScripts}`);
+          reportMigrationResult({
+            result,
+            operations: result.executedOperations,
+            mode: verbosity,
+            write: (msg) => logger.info(msg),
+          });
         }
         break;
       }

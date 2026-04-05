@@ -37,6 +37,8 @@ export interface ExecuteResult {
   postScriptsRun: number;
   dryRun: boolean;
   validated: boolean;
+  /** Operations that were executed (for output reporting) */
+  executedOperations: Operation[];
 }
 
 /**
@@ -125,6 +127,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     postScriptsRun: 0,
     dryRun,
     validated: validateOnly,
+    executedOperations: [],
   };
 
   // Dry-run: just log what would happen
@@ -211,6 +214,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
             throw new Error(`Precheck failed: ${op.precheckMessage || op.objectName}`);
           }
           result.executed++;
+          result.executedOperations.push(op);
           logger?.info(`Precheck passed: ${op.objectName}`);
         } finally {
           precheckClient.release();
@@ -229,6 +233,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
             logger?.debug(`Executing: ${op.type} ${op.objectName}`);
             await opClient.query(op.sql);
             result.executed++;
+            result.executedOperations.push(op);
           }
 
           if (validateOnly) {
@@ -253,6 +258,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
             logger?.debug(`Executing (concurrent): ${op.type} ${op.objectName}`);
             await concClient.query(op.sql);
             result.executed++;
+            result.executedOperations.push(op);
           } finally {
             concClient.release();
           }
