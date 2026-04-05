@@ -225,4 +225,13 @@
 - [x] T-113: Fix drift false positive for seed data on freshly seeded database — $1.15
 - [x] T-114: Fix drift false positive when column unique: true overlaps explicit index — $0.75
 
-**Grand Total: $98.35**
+## 36 — Bug Fixes: Drift & Planner Accuracy ($0.55)
+
+- [x] T-115: Fix drift false positive for table-level grants without columns field — $0.55
+- [ ] T-116: Diff and apply check constraint expression changes
+
+## 37 — UX: Output Verbosity Modes
+
+- [ ] T-117: Default output shows changes only, verbose/quiet modes
+
+**Grand Total: $98.90**
