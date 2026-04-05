@@ -872,6 +872,13 @@ function driftGrants(table: string, desired: GrantDef[], actual: GrantDef[]): Dr
   }
   for (const g of actual) {
     if (!desiredMap.has(grantKey(g))) {
+      // If the actual grant has columns, check if a table-level desired grant
+      // (no columns) covers it — PostgreSQL populates column_privileges for
+      // table-level grants, so the introspected column-level grant is redundant.
+      if (g.columns && g.columns.length > 0) {
+        const tableLevelKey = `${g.to}:${[...g.privileges].sort().join(',')}`;
+        if (desiredMap.has(tableLevelKey)) continue;
+      }
       items.push({
         type: 'grant',
         object: `${table}:${g.to}`,
