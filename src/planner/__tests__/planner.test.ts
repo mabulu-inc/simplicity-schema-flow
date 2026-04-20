@@ -1573,6 +1573,154 @@ describe('Planner', () => {
     });
   });
 
+  // Regression for mabulu-inc/simplicity-schema-flow#18. Expression indexes
+  // used to cause a perpetual destructive drop_index plan because the
+  // introspector couldn't see them. They now round-trip through YAML.
+  describe('expression indexes', () => {
+    it('emits a parenthesized expression in CREATE INDEX for an expression key', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'email', type: 'text' }],
+          indexes: [
+            {
+              name: 'idx_users_lower_email',
+              columns: [{ expression: 'lower(email)' }],
+              unique: true,
+            },
+          ],
+        },
+      ];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'add_index');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain('CREATE UNIQUE INDEX');
+      expect(ops[0].sql).toContain('USING btree ((lower(email)))');
+    });
+
+    it('supports mixed column + expression keys', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'daily_snapshots',
+          columns: [
+            { name: 'tenant_id', type: 'uuid' },
+            { name: 'snapshot_date', type: 'date' },
+            { name: 'grain', type: 'text' },
+            { name: 'grain_id', type: 'uuid' },
+          ],
+          indexes: [
+            {
+              name: 'idx_daily_snapshots_upsert',
+              unique: true,
+              columns: [
+                'tenant_id',
+                'snapshot_date',
+                'grain',
+                { expression: "COALESCE(grain_id, '00000000-0000-0000-0000-000000000000')" },
+              ],
+            },
+          ],
+        },
+      ];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'add_index');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain('"tenant_id", "snapshot_date", "grain"');
+      expect(ops[0].sql).toContain("(COALESCE(grain_id, '00000000-0000-0000-0000-000000000000'))");
+    });
+
+    it('emits no ops when desired expression index matches existing', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'email', type: 'text' }],
+          indexes: [{ name: 'idx_users_lower_email', columns: [{ expression: 'lower(email)' }], unique: true }],
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'email', type: 'text' }],
+        // Introspection returns expression keys in the same shape.
+        indexes: [{ name: 'idx_users_lower_email', columns: [{ expression: 'lower(email)' }], unique: true }],
+      });
+      const result = buildPlan(desired, actual);
+      expect(findOps(result.operations, 'add_index')).toHaveLength(0);
+      expect(findOps(result.operations, 'drop_index')).toHaveLength(0);
+    });
+
+    it('emits no ops when whitespace differs between YAML and introspected form', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'email', type: 'text' }],
+          indexes: [{ name: 'idx', columns: [{ expression: 'lower(email)' }] }],
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'email', type: 'text' }],
+        // Postgres may render with different spacing than the YAML author wrote.
+        indexes: [{ name: 'idx', columns: [{ expression: 'lower( email )' }] }],
+      });
+      const result = buildPlan(desired, actual);
+      expect(findOps(result.operations, 'add_index')).toHaveLength(0);
+      expect(findOps(result.operations, 'drop_index')).toHaveLength(0);
+    });
+
+    it('recreates the index when the expression changes meaningfully', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'email', type: 'text' }],
+          indexes: [{ name: 'idx', columns: [{ expression: 'upper(email)' }] }],
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'email', type: 'text' }],
+        indexes: [{ name: 'idx', columns: [{ expression: 'lower(email)' }] }],
+      });
+      const result = buildPlan(desired, actual, { allowDestructive: true });
+      expect(findOps(result.operations, 'drop_index')).toHaveLength(1);
+      const adds = findOps(result.operations, 'add_index');
+      expect(adds).toHaveLength(1);
+      expect(adds[0].sql).toContain('(upper(email))');
+    });
+
+    it('supports partial expression indexes via the existing where clause', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [
+            { name: 'email', type: 'text' },
+            { name: 'deleted_at', type: 'timestamptz' },
+          ],
+          indexes: [
+            {
+              name: 'idx_active_lower_email',
+              unique: true,
+              columns: [{ expression: 'lower(email)' }],
+              where: 'deleted_at IS NULL',
+            },
+          ],
+        },
+      ];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'add_index');
+      expect(ops[0].sql).toContain('((lower(email)))');
+      expect(ops[0].sql).toContain('WHERE deleted_at IS NULL');
+    });
+  });
+
   describe('trigger diffing on existing table', () => {
     it('blocks drop of trigger not in desired', () => {
       const desired = emptyDesired();

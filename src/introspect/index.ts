@@ -562,20 +562,30 @@ function normalizeType(
 }
 
 async function getIndexes(client: Client, table: string, schema: string): Promise<IndexDef[]> {
+  // Each key is pulled via `pg_get_indexdef(oid, n, true)`, which returns
+  // the N-th key's user-facing SQL form: a bare identifier for a plain
+  // column (`email`), a quoted identifier when the column is case-sensitive
+  // or reserved (`"Order"`), or a full expression (`lower(email)`,
+  // `COALESCE(x, '…'::text)`). The previous query joined `pg_attribute`
+  // on `attnum = ANY(indkey)`, which silently dropped expression keys
+  // (their indkey entry is 0) — so expression indexes introspected as
+  // empty and looked like something to drop on every run. See #18.
   const result = await client.query(
     `SELECT
        i.relname AS name,
        ix.indisunique AS is_unique,
        am.amname AS method,
        pg_get_expr(ix.indpred, ix.indrelid) AS where_clause,
-       array_agg(a.attname::text ORDER BY array_position(ix.indkey, a.attnum)) AS columns,
+       array(
+         SELECT pg_get_indexdef(ix.indexrelid, s::int, true)
+         FROM generate_subscripts(ix.indkey::int[], 1) AS s
+       ) AS keys,
        obj_description(i.oid, 'pg_class') AS comment
      FROM pg_catalog.pg_index ix
      JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
      JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
      JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
      JOIN pg_catalog.pg_am am ON am.oid = i.relam
-     JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
      WHERE t.relname = $1
        AND n.nspname = $2
        AND NOT ix.indisprimary
@@ -584,15 +594,15 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
          WHERE con.conindid = ix.indexrelid
            AND con.contype = 'u'
        )
-     GROUP BY i.relname, ix.indisunique, am.amname, ix.indpred, ix.indrelid, i.oid
      ORDER BY i.relname`,
     [table, schema],
   );
 
   return result.rows.map((r: Record<string, unknown>) => {
+    const keys = (r.keys as string[]).map((k) => parseIndexKey(k));
     const idx: IndexDef = {
       name: r.name as string,
-      columns: r.columns as string[],
+      columns: keys,
       unique: r.is_unique as boolean,
     };
     const method = r.method as string;
@@ -603,6 +613,24 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
     if (r.comment) idx.comment = r.comment as string;
     return idx;
   });
+}
+
+/**
+ * Classify one `pg_get_indexdef` key string as either a plain column
+ * reference or a SQL expression. A bare lowercase identifier or a
+ * double-quoted identifier with no SQL operators is a column; anything
+ * else (function calls, operators, casts, coalescings) is an expression.
+ */
+function parseIndexKey(rendered: string): import('../schema/types.js').IndexKey {
+  const trimmed = rendered.trim();
+  // Bare unquoted identifier: starts with letter/underscore, contains only
+  // identifier chars. Postgres lowercases unquoted identifiers, so we
+  // store as-is.
+  if (/^[a-z_][a-z0-9_$]*$/i.test(trimmed)) return trimmed;
+  // Quoted identifier with no embedded quotes/operators.
+  const quotedMatch = trimmed.match(/^"([^"]+)"$/);
+  if (quotedMatch && quotedMatch[1]) return quotedMatch[1];
+  return { expression: trimmed };
 }
 
 async function getChecks(client: Client, table: string, schema: string): Promise<CheckDef[]> {

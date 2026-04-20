@@ -7,7 +7,12 @@
 
 import type { PoolClient } from 'pg';
 import type { DesiredState, ActualState } from '../planner/index.js';
-import { normalizeGrants } from '../planner/index.js';
+import {
+  defaultIndexName,
+  indexKeysIdentity,
+  normalizeGrants,
+  normalizeIndexClause,
+} from '../planner/index.js';
 import type {
   TableSchema,
   ColumnDef,
@@ -491,17 +496,17 @@ function driftIndexes(table: string, desired: IndexDef[], actual: IndexDef[], co
   }
 
   for (const idx of desired) {
-    const name = idx.name || `idx_${table}_${idx.columns.join('_')}`;
+    const name = idx.name || defaultIndexName(table, idx);
     if (columnLevelUniqueNames.has(name)) continue;
     const ai = actualByName.get(name);
     if (!ai) {
       items.push({ type: 'index', object: name, status: 'missing_in_db' });
     } else {
       const diffs: string[] = [];
-      if (idx.columns.join(',') !== ai.columns.join(',')) diffs.push('columns');
+      if (indexKeysIdentity(idx) !== indexKeysIdentity(ai)) diffs.push('columns');
       if (Boolean(idx.unique) !== Boolean(ai.unique)) diffs.push('unique');
       if ((idx.method || 'btree') !== (ai.method || 'btree')) diffs.push('method');
-      if ((idx.where || '') !== (ai.where || '')) diffs.push('where');
+      if (normalizeIndexClause(idx.where) !== normalizeIndexClause(ai.where)) diffs.push('where');
       if (diffs.length > 0) {
         items.push({
           type: 'index',
@@ -513,7 +518,7 @@ function driftIndexes(table: string, desired: IndexDef[], actual: IndexDef[], co
     }
   }
 
-  const desiredNames = new Set(desired.map((idx) => idx.name || `idx_${table}_${idx.columns.join('_')}`));
+  const desiredNames = new Set(desired.map((idx) => idx.name || defaultIndexName(table, idx)));
   for (const idx of actual) {
     if (idx.name && !desiredNames.has(idx.name)) {
       items.push({ type: 'index', object: idx.name, status: 'missing_in_yaml' });
