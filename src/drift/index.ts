@@ -7,6 +7,7 @@
 
 import type { PoolClient } from 'pg';
 import type { DesiredState, ActualState } from '../planner/index.js';
+import { normalizeGrants } from '../planner/index.js';
 import type {
   TableSchema,
   ColumnDef,
@@ -853,17 +854,26 @@ function driftUniqueConstraints(
 // ─── Grants ─────────────────────────────────────────────────────
 
 function driftGrants(table: string, desired: GrantDef[], actual: GrantDef[]): DriftItem[] {
+  // Normalize both sides first. A single YAML grant block that mixes
+  // column-qualified privileges (SELECT/INSERT/UPDATE/REFERENCES) with
+  // table-only privileges (DELETE/TRUNCATE/TRIGGER) gets stored in two
+  // different Postgres tables (column_privileges + table_privileges); on
+  // read-back we see two grants and mismatched keys unless we split the
+  // YAML side the same way.
+  const nDesired = normalizeGrants(desired);
+  const nActual = normalizeGrants(actual);
+
   const items: DriftItem[] = [];
   const grantKey = (g: GrantDef) => {
     const colsPart = g.columns && g.columns.length > 0 ? `:cols=${[...g.columns].sort().join(',')}` : '';
     return `${g.to}:${[...g.privileges].sort().join(',')}${colsPart}`;
   };
   const actualMap = new Map<string, GrantDef>();
-  for (const g of actual) actualMap.set(grantKey(g), g);
+  for (const g of nActual) actualMap.set(grantKey(g), g);
   const desiredMap = new Map<string, GrantDef>();
-  for (const g of desired) desiredMap.set(grantKey(g), g);
+  for (const g of nDesired) desiredMap.set(grantKey(g), g);
 
-  for (const g of desired) {
+  for (const g of nDesired) {
     const key = grantKey(g);
     const match = actualMap.get(key);
     if (!match) {
@@ -880,7 +890,7 @@ function driftGrants(table: string, desired: GrantDef[], actual: GrantDef[]): Dr
       });
     }
   }
-  for (const g of actual) {
+  for (const g of nActual) {
     if (!desiredMap.has(grantKey(g))) {
       // If the actual grant has columns, check if a table-level desired grant
       // (no columns) covers it — PostgreSQL populates column_privileges for
@@ -890,7 +900,7 @@ function driftGrants(table: string, desired: GrantDef[], actual: GrantDef[]): Dr
       // column-level grant may list fewer privileges than the desired grant.
       if (g.columns && g.columns.length > 0) {
         const actualPrivs = g.privileges;
-        const coveredByTableLevel = desired.some(
+        const coveredByTableLevel = nDesired.some(
           (d) => !d.columns?.length && d.to === g.to && actualPrivs.every((p) => d.privileges.includes(p)),
         );
         if (coveredByTableLevel) continue;

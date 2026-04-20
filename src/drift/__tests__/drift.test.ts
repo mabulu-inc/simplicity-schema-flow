@@ -1754,6 +1754,48 @@ describe('detectDrift', () => {
     expect(grantDrift).toHaveLength(0);
   });
 
+  // Regression for mabulu-inc/simplicity-schema-flow#17 Issue 1.
+  // A single YAML grant block that mixes DELETE (table-only) with
+  // column-qualified INSERT/SELECT/UPDATE used to trip drift after a
+  // successful apply: Postgres stores the grant as two rows (column_privileges
+  // + table_privileges), drift saw one YAML vs two DB entries, and reported
+  // missing-in-db / missing-in-yaml / different for all three.
+  it('reports no drift when YAML mixes DELETE with column-qualified privileges and DB stores them split', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'user_preferences',
+        columns: [
+          { name: 'user_preference_id', type: 'serial', primary_key: true },
+          { name: 'key', type: 'varchar(100)' },
+        ],
+        grants: [
+          {
+            to: 'app_user',
+            privileges: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+            columns: ['key', 'user_preference_id'],
+          },
+        ],
+      },
+    ];
+    const actual = emptyActual();
+    actual.tables.set('user_preferences', {
+      table: 'user_preferences',
+      columns: [
+        { name: 'user_preference_id', type: 'serial', primary_key: true },
+        { name: 'key', type: 'varchar(100)' },
+      ],
+      grants: [
+        // What Postgres actually stores after applying the mixed block:
+        { to: 'app_user', privileges: ['INSERT', 'SELECT', 'UPDATE'], columns: ['key', 'user_preference_id'] },
+        { to: 'app_user', privileges: ['DELETE'] },
+      ],
+    });
+    const report = detectDrift(desired, actual);
+    const grantDrift = report.items.filter((i) => i.type === 'grant');
+    expect(grantDrift).toHaveLength(0);
+  });
+
   it('detects drift when column-level grant columns differ', () => {
     const desired = emptyDesired();
     desired.tables = [

@@ -957,12 +957,19 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
   // Diff policies
   ops.push(...diffPolicies(desired.table, desired.policies || [], existing.policies || [], pgSchema));
 
-  // Diff grants
+  // Diff grants. Previously this blindly re-emitted every declared grant on
+  // every run — the plan's biggest source of noise for no-op migrations.
+  // Now we compare the normalized desired vs existing grant sets and only
+  // emit the delta (GRANT for newly-declared privileges, REVOKE for ones
+  // removed from YAML).
+  ops.push(...diffGrants(desired.table, desired.grants || [], existing.grants || [], pgSchema));
+
+  // Sequence grants are auto-derived from table grants for serial/bigserial
+  // columns and aren't yet introspected back, so we still emit them blindly
+  // here. They use `GRANT USAGE, SELECT` which is idempotent in Postgres
+  // (no error, no re-grant), but they do still count against the plan size.
+  // Follow-up: introspect sequence privileges and diff them here too.
   if (desired.grants) {
-    for (const grant of desired.grants) {
-      ops.push(createGrantOp(desired.table, grant, pgSchema));
-    }
-    // Auto-generate sequence grants for serial/bigserial columns
     ops.push(...createSequenceGrantOps(desired.table, desired.columns, desired.grants, pgSchema));
   }
 
@@ -1531,6 +1538,131 @@ function createPolicyOp(table: string, policy: PolicyDef, pgSchema: string): Ope
 
 // ─── Grants ────────────────────────────────────────────────────
 
+// Postgres splits grant storage by privilege kind: privileges that can be
+// column-qualified (SELECT, INSERT, UPDATE, REFERENCES) land in
+// information_schema.column_privileges when the grant names columns; the
+// rest (DELETE, TRUNCATE, TRIGGER) live only in table_privileges. A single
+// YAML block mixing both kinds is perfectly expressible, but when we diff
+// YAML ↔ DB we have to compare against the split shape Postgres actually
+// stores, or we mistake one mixed block for two mismatched grants.
+const COLUMN_GRANTABLE_PRIVILEGES = new Set(['SELECT', 'INSERT', 'UPDATE', 'REFERENCES']);
+
+/**
+ * Split any grant that mixes column-qualified privileges with table-only
+ * privileges into the two shapes Postgres stores internally. Idempotent for
+ * grants that are already purely one or the other. Used on both sides of
+ * the grant diff (planner + drift) so the two sides always compare apples
+ * to apples.
+ */
+export function normalizeGrants(grants: GrantDef[]): GrantDef[] {
+  const normalized: GrantDef[] = [];
+  for (const g of grants) {
+    if (!g.columns || g.columns.length === 0) {
+      normalized.push(g);
+      continue;
+    }
+    const colPrivs = g.privileges.filter((p) => COLUMN_GRANTABLE_PRIVILEGES.has(p.toUpperCase()));
+    const tablePrivs = g.privileges.filter((p) => !COLUMN_GRANTABLE_PRIVILEGES.has(p.toUpperCase()));
+    if (colPrivs.length > 0) {
+      const part: GrantDef = { to: g.to, privileges: colPrivs, columns: g.columns };
+      if (g.with_grant_option) part.with_grant_option = true;
+      normalized.push(part);
+    }
+    if (tablePrivs.length > 0) {
+      const part: GrantDef = { to: g.to, privileges: tablePrivs };
+      if (g.with_grant_option) part.with_grant_option = true;
+      normalized.push(part);
+    }
+  }
+  return normalized;
+}
+
+/**
+ * Stable key for a grant identity (grantee + optional columns). Privileges
+ * are compared separately so we can emit partial revokes/grants when they
+ * differ.
+ */
+function grantIdentityKey(g: GrantDef): string {
+  const cols = g.columns && g.columns.length > 0 ? [...g.columns].sort().join(',') : '';
+  return `${g.to}::${cols}`;
+}
+
+/**
+ * Compute the minimum set of GRANT / REVOKE ops to reconcile `existing`
+ * (introspected from the DB) with `desired` (from YAML). Normalizes both
+ * sides first so a single YAML block mixing column-qualified and table-only
+ * privileges compares correctly against the split shape Postgres stores.
+ *
+ * Issues a REVOKE for privileges present in the DB but not desired, a GRANT
+ * for privileges desired but absent, and no op when both sides agree.
+ * `with_grant_option` changes force a re-grant (REVOKE … GRANT OPTION FOR
+ * then GRANT … WITH GRANT OPTION) — Postgres has no single ALTER for this.
+ */
+function diffGrants(table: string, desired: GrantDef[], existing: GrantDef[], pgSchema: string): Operation[] {
+  const ops: Operation[] = [];
+  const normDesired = normalizeGrants(desired);
+  const normExisting = normalizeGrants(existing);
+
+  const desiredByKey = new Map<string, GrantDef[]>();
+  for (const g of normDesired) {
+    const k = grantIdentityKey(g);
+    const arr = desiredByKey.get(k);
+    if (arr) arr.push(g);
+    else desiredByKey.set(k, [g]);
+  }
+  const existingByKey = new Map<string, GrantDef[]>();
+  for (const g of normExisting) {
+    const k = grantIdentityKey(g);
+    const arr = existingByKey.get(k);
+    if (arr) arr.push(g);
+    else existingByKey.set(k, [g]);
+  }
+
+  const allKeys = new Set<string>([...desiredByKey.keys(), ...existingByKey.keys()]);
+  for (const key of allKeys) {
+    const desiredAgg = aggregateByGrantOption(desiredByKey.get(key) ?? []);
+    const existingAgg = aggregateByGrantOption(existingByKey.get(key) ?? []);
+
+    for (const [wgo, desiredPrivs] of desiredAgg.entries()) {
+      const existingPrivs = existingAgg.get(wgo) ?? new Set<string>();
+      const toGrant = [...desiredPrivs].filter((p) => !existingPrivs.has(p)).sort();
+      if (toGrant.length === 0) continue;
+      const sample = (desiredByKey.get(key) ?? []).find((g) => !!g.with_grant_option === wgo);
+      if (!sample) continue;
+      ops.push(
+        createGrantOp(
+          table,
+          { to: sample.to, privileges: toGrant, columns: sample.columns, with_grant_option: wgo },
+          pgSchema,
+        ),
+      );
+    }
+    for (const [wgo, existingPrivs] of existingAgg.entries()) {
+      const desiredPrivs = desiredAgg.get(wgo) ?? new Set<string>();
+      const toRevoke = [...existingPrivs].filter((p) => !desiredPrivs.has(p)).sort();
+      if (toRevoke.length === 0) continue;
+      const sample = (existingByKey.get(key) ?? []).find((g) => !!g.with_grant_option === wgo);
+      if (!sample) continue;
+      ops.push(createRevokeOp(table, { ...sample, privileges: toRevoke }, pgSchema));
+    }
+  }
+  return ops;
+}
+
+function aggregateByGrantOption(grants: GrantDef[]): Map<boolean, Set<string>> {
+  const out = new Map<boolean, Set<string>>();
+  for (const g of grants) {
+    const wgo = !!g.with_grant_option;
+    let set = out.get(wgo);
+    if (!set) {
+      set = new Set();
+      out.set(wgo, set);
+    }
+    for (const p of g.privileges) set.add(p.toUpperCase());
+  }
+  return out;
+}
+
 function createGrantOp(table: string, grant: GrantDef, pgSchema: string): Operation {
   const privileges = grant.privileges.join(', ');
   const isColumnGrant = grant.columns && grant.columns.length > 0;
@@ -1549,6 +1681,25 @@ function createGrantOp(table: string, grant: GrantDef, pgSchema: string): Operat
     objectName: `${table}.${grant.to}`,
     sql,
     destructive: false,
+  };
+}
+
+function createRevokeOp(table: string, grant: GrantDef, pgSchema: string): Operation {
+  const privileges = grant.privileges.join(', ');
+  const isColumnGrant = grant.columns && grant.columns.length > 0;
+  let target: string;
+  if (isColumnGrant) {
+    const cols = grant.columns!.map((c) => `"${c}"`).join(', ');
+    target = `${privileges} (${cols}) ON "${pgSchema}"."${table}"`;
+  } else {
+    target = `${privileges} ON "${pgSchema}"."${table}"`;
+  }
+  return {
+    type: isColumnGrant ? 'revoke_column' : 'revoke_table',
+    phase: 13,
+    objectName: `${table}.${grant.to}`,
+    sql: `REVOKE ${target} FROM "${grant.to}"`,
+    destructive: true,
   };
 }
 

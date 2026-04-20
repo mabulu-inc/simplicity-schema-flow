@@ -23,9 +23,12 @@ export function reportMigrationResult(options: ReportOptions): void {
     return;
   }
 
-  // Default and verbose: show per-operation change lines
+  // Default and verbose: show per-operation change lines.
+  // In default mode, skip seed ops that wrote nothing — the line would
+  // read "Seeded: X (N unchanged)" which is noise. Still shown in verbose.
   if (mode === 'default' || mode === 'verbose') {
     for (const op of operations) {
+      if (mode === 'default' && isNoOpSeed(op)) continue;
       write(`  ${formatOperationMessage(op)}`);
     }
   }
@@ -43,4 +46,10 @@ export function reportMigrationResult(options: ReportOptions): void {
   if (result.skippedScripts > 0) {
     write(`  Skipped (unchanged): ${result.skippedScripts}`);
   }
+}
+
+function isNoOpSeed(op: Operation): boolean {
+  if (op.type !== 'seed_table') return false;
+  if (!op.seedResult) return false;
+  return op.seedResult.inserted === 0 && op.seedResult.updated === 0;
 }

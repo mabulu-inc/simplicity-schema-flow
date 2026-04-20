@@ -1040,6 +1040,125 @@ describe('Planner', () => {
       expect(colGrants).toHaveLength(0);
     });
 
+    // Regression for mabulu-inc/simplicity-schema-flow#17 Issue 2.
+    // The planner used to blindly re-emit every declared grant on every run
+    // — the biggest source of noise in no-op migrations. With diff in place
+    // the second run against an unchanged table emits zero grant ops.
+    describe('grant diffing on existing tables', () => {
+      it('emits no grant ops when desired matches existing', () => {
+        const desired = emptyDesired();
+        desired.tables = [
+          {
+            table: 'users',
+            columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+            grants: [{ to: 'app_user', privileges: ['SELECT', 'INSERT'] }],
+          },
+        ];
+        const actual = emptyActual();
+        actual.tables.set('users', {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          grants: [{ to: 'app_user', privileges: ['SELECT', 'INSERT'] }],
+        });
+        const result = buildPlan(desired, actual);
+        expect(findOps(result.operations, 'grant_table')).toHaveLength(0);
+        expect(findOps(result.operations, 'grant_column')).toHaveLength(0);
+        expect(findOps(result.operations, 'revoke_table')).toHaveLength(0);
+      });
+
+      it('emits GRANT only for new privileges, not the whole block', () => {
+        const desired = emptyDesired();
+        desired.tables = [
+          {
+            table: 'users',
+            columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+            grants: [{ to: 'app_user', privileges: ['SELECT', 'INSERT', 'UPDATE'] }],
+          },
+        ];
+        const actual = emptyActual();
+        actual.tables.set('users', {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          grants: [{ to: 'app_user', privileges: ['SELECT'] }],
+        });
+        const result = buildPlan(desired, actual);
+        const grants = findOps(result.operations, 'grant_table');
+        expect(grants).toHaveLength(1);
+        expect(grants[0].sql).toContain('GRANT INSERT, UPDATE ON');
+        expect(grants[0].sql).not.toContain('SELECT');
+      });
+
+      it('emits REVOKE for privileges present in DB but removed from YAML', () => {
+        const desired = emptyDesired();
+        desired.tables = [
+          {
+            table: 'users',
+            columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+            grants: [{ to: 'app_user', privileges: ['SELECT'] }],
+          },
+        ];
+        const actual = emptyActual();
+        actual.tables.set('users', {
+          table: 'users',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+          grants: [{ to: 'app_user', privileges: ['SELECT', 'INSERT', 'UPDATE'] }],
+        });
+        const result = buildPlan(desired, actual, { allowDestructive: true });
+        const revokes = findOps(result.operations, 'revoke_table');
+        expect(revokes).toHaveLength(1);
+        expect(revokes[0].sql).toContain('REVOKE INSERT, UPDATE ON');
+        expect(revokes[0].sql).toContain('FROM "app_user"');
+        expect(findOps(result.operations, 'grant_table')).toHaveLength(0);
+      });
+
+      // Regression for Issue 1: a single YAML grant block that mixes
+      // DELETE (table-only) with column-qualified INSERT/SELECT/UPDATE gets
+      // stored by Postgres as two separate grant rows. The planner and drift
+      // now normalize both sides before comparing.
+      it('emits no ops when YAML mixes DELETE with column-qualified privs and DB stores them split', () => {
+        const desired = emptyDesired();
+        desired.tables = [
+          {
+            table: 'user_preferences',
+            columns: [
+              { name: 'user_preference_id', type: 'serial', primary_key: true },
+              { name: 'key', type: 'varchar(100)' },
+            ],
+            grants: [
+              {
+                to: 'app_user',
+                privileges: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+                columns: ['key', 'user_preference_id'],
+              },
+            ],
+          },
+        ];
+        // Postgres splits the mixed block into a column-level grant (for
+        // SELECT/INSERT/UPDATE) and a table-level grant (for DELETE).
+        const actual = emptyActual();
+        actual.tables.set('user_preferences', {
+          table: 'user_preferences',
+          columns: [
+            { name: 'user_preference_id', type: 'serial', primary_key: true },
+            { name: 'key', type: 'varchar(100)' },
+          ],
+          grants: [
+            {
+              to: 'app_user',
+              privileges: ['INSERT', 'SELECT', 'UPDATE'],
+              columns: ['key', 'user_preference_id'],
+            },
+            { to: 'app_user', privileges: ['DELETE'] },
+          ],
+        });
+        const result = buildPlan(desired, actual);
+        expect(findOps(result.operations, 'grant_table')).toHaveLength(0);
+        expect(findOps(result.operations, 'grant_column')).toHaveLength(0);
+        expect(findOps(result.operations, 'revoke_table')).toHaveLength(0);
+        expect(findOps(result.operations, 'revoke_column')).toHaveLength(0);
+      });
+    });
+
     it('creates table with unique constraints', () => {
       const desired = emptyDesired();
       desired.tables = [
