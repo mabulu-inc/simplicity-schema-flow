@@ -46,5 +46,21 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so we can check if the tag's commit is on main.
+          fetch-depth: 0
+
+      # Refuse to deploy docs unless the tag is reachable from main. Pair
+      # with the identical check in publish.yml — neither npm nor docs
+      # should ship for a tag that wasn't cut from main.
+      - name: Refuse to deploy if tag isn't on main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
+            echo "::error::Tag ${{ github.ref_name }} (commit ${{ github.sha }}) is not reachable from main. Refusing to deploy docs. Re-run the release from main."
+            exit 1
+          fi
+
       - id: deployment
         uses: actions/deploy-pages@v4
