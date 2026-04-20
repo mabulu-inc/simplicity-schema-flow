@@ -45,9 +45,23 @@ export interface ColumnDef {
 
 export type IndexMethod = 'btree' | 'gin' | 'gist' | 'hash' | 'brin';
 
+/**
+ * An index "key" — either a plain column name (`"email"`) or an expression
+ * (`{ expression: "LOWER(email)" }`, `{ expression: "COALESCE(x, '…')" }`).
+ * Expression keys let schema-flow manage the full set of Postgres indexes
+ * declaratively, including functional and coalescing ones that would
+ * otherwise live outside the YAML contract.
+ */
+export type IndexKey = string | { expression: string };
+
 export interface IndexDef {
   name?: string;
-  columns: string[];
+  /**
+   * Ordered list of index keys. Each entry is either a column name (string)
+   * or an object with an `expression` field containing a SQL expression.
+   * Partial indexes use the top-level `where` clause, not per-key.
+   */
+  columns: IndexKey[];
   unique?: boolean;
   method?: IndexMethod;
   where?: string;

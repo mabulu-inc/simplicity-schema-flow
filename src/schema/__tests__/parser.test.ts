@@ -412,6 +412,68 @@ indexes:
     expect(() => parseTable(yaml)).toThrow(/method/i);
   });
 
+  it('parses expression index keys', () => {
+    const yaml = `
+table: users
+columns:
+  - name: email
+    type: text
+indexes:
+  - name: idx_users_lower_email
+    unique: true
+    columns:
+      - expression: "lower(email)"
+`;
+    const result = parseTable(yaml);
+    expect(result.indexes).toBeDefined();
+    expect(result.indexes![0].columns).toEqual([{ expression: 'lower(email)' }]);
+  });
+
+  it('parses mixed column + expression index keys', () => {
+    const yaml = `
+table: daily_snapshots
+columns:
+  - name: tenant_id
+    type: uuid
+  - name: grain_id
+    type: uuid
+indexes:
+  - name: idx_daily_snapshots_upsert
+    unique: true
+    columns:
+      - tenant_id
+      - expression: "COALESCE(grain_id, '0')"
+`;
+    const result = parseTable(yaml);
+    expect(result.indexes![0].columns).toEqual(['tenant_id', { expression: "COALESCE(grain_id, '0')" }]);
+  });
+
+  it('throws on an expression column entry missing the expression field', () => {
+    const yaml = `
+table: users
+columns:
+  - name: email
+    type: text
+indexes:
+  - columns:
+      - { foo: bar }
+`;
+    expect(() => parseTable(yaml)).toThrow(/expression/i);
+  });
+
+  it('throws on an empty-string expression', () => {
+    const yaml = `
+table: users
+columns:
+  - name: email
+    type: text
+indexes:
+  - columns:
+      - expression: ""
+`;
+    expect(() => parseTable(yaml)).toThrow(/expression/i);
+  });
+
   it('parses seeds_on_conflict field', () => {
     const yaml = `
 table: statuses

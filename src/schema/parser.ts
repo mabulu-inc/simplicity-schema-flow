@@ -3,6 +3,7 @@ import type {
   TableSchema,
   ColumnDef,
   IndexDef,
+  IndexKey,
   IndexMethod,
   CheckDef,
   UniqueConstraintDef,
@@ -128,9 +129,24 @@ function parseColumnDef(raw: Record<string, unknown>, context: string): ColumnDe
 const INDEX_METHODS: readonly IndexMethod[] = ['btree', 'gin', 'gist', 'hash', 'brin'];
 
 function parseIndexDef(raw: Record<string, unknown>, context: string): IndexDef {
-  const idx: IndexDef = {
-    columns: requireArray<string>(raw, 'columns', context),
-  };
+  // Each `columns` entry is either a plain column name (string) or an object
+  // with an `expression` field. Expressions let us declare functional /
+  // coalescing indexes in YAML instead of dropping down to raw SQL.
+  const rawColumns = requireArray<unknown>(raw, 'columns', context);
+  const columns = rawColumns.map((entry, i): IndexKey => {
+    if (typeof entry === 'string') return entry;
+    if (entry && typeof entry === 'object' && 'expression' in entry) {
+      const expr = (entry as Record<string, unknown>).expression;
+      if (typeof expr !== 'string' || expr.trim().length === 0) {
+        throw new Error(`${context}.columns[${i}]: 'expression' must be a non-empty string`);
+      }
+      return { expression: expr };
+    }
+    throw new Error(
+      `${context}.columns[${i}]: expected a column name (string) or an object with an 'expression' field`,
+    );
+  });
+  const idx: IndexDef = { columns };
   if (raw.name !== undefined) idx.name = String(raw.name);
   if (raw.unique !== undefined) idx.unique = Boolean(raw.unique);
   if (raw.method !== undefined) idx.method = validateEnum(String(raw.method), INDEX_METHODS, 'method', context);

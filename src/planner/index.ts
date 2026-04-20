@@ -9,6 +9,7 @@ import type {
   TableSchema,
   ColumnDef,
   IndexDef,
+  IndexKey,
   CheckDef,
   UniqueConstraintDef,
   TriggerDef,
@@ -658,7 +659,7 @@ function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
     for (const idx of table.indexes) {
       ops.push(createIndexOp(table.table, idx, pgSchema));
       if (idx.comment) {
-        const idxName = idx.name || `idx_${table.table}_${idx.columns.join('_')}`;
+        const idxName = idx.name || defaultIndexName(table.table, idx);
         ops.push({
           type: 'set_comment',
           phase: 7,
@@ -1100,6 +1101,58 @@ function diffColumn(table: string, desired: ColumnDef, existing: ColumnDef, pgSc
 
 // ─── Indexes ───────────────────────────────────────────────────
 
+/**
+ * Slug for a single index key, used when generating a default index name.
+ * Plain columns pass through; expressions are aggressively slugged — the
+ * human-readable name isn't load-bearing for expressions (they're typically
+ * given an explicit `name` in YAML), but we still produce something stable
+ * in case the user forgets to name one.
+ */
+function indexKeySlug(key: IndexKey): string {
+  if (typeof key === 'string') return key;
+  return (
+    key.expression
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 30) || 'expr'
+  );
+}
+
+/** Default generated name for an index missing `name` in YAML. Exported so
+ *  drift can compute the same name. */
+export function defaultIndexName(table: string, idx: IndexDef): string {
+  return `idx_${table}_${idx.columns.map(indexKeySlug).join('_')}`;
+}
+
+/**
+ * SQL fragment for one index key in the CREATE INDEX column list.
+ * Plain columns are quoted identifiers; expressions are wrapped in parens
+ * per Postgres syntax: `CREATE INDEX … USING btree ((lower(email)))`.
+ */
+function indexKeySql(key: IndexKey, opclass?: string): string {
+  const base = typeof key === 'string' ? `"${key}"` : `(${key.expression})`;
+  return opclass ? `${base} ${opclass}` : base;
+}
+
+/**
+ * Identity of an index key for cross-state equality. Whitespace is
+ * collapsed and case-folded for expressions because Postgres's
+ * `pg_get_expr` re-renders them with its own spacing; two equivalent
+ * expressions shouldn't look different to the diff just because of
+ * formatting.
+ */
+function indexKeyIdentity(key: IndexKey): string {
+  if (typeof key === 'string') return `col:${key.toLowerCase()}`;
+  return `expr:${key.expression.replace(/\s+/g, ' ').trim().toLowerCase()}`;
+}
+
+/** Combined identity for an index's full key list (columns + opclass).
+ *  Exported so drift uses the same equality semantics. */
+export function indexKeysIdentity(idx: IndexDef): string {
+  return idx.columns.map((k) => indexKeyIdentity(k)).join('|') + (idx.opclass ? `|opclass:${idx.opclass}` : '');
+}
+
 function diffIndexes(table: string, desired: IndexDef[], existing: IndexDef[], pgSchema: string): Operation[] {
   const ops: Operation[] = [];
   const existingByName = new Map<string, IndexDef>();
@@ -1108,9 +1161,20 @@ function diffIndexes(table: string, desired: IndexDef[], existing: IndexDef[], p
   }
 
   for (const idx of desired) {
-    const name = idx.name || `idx_${table}_${idx.columns.join('_')}`;
+    const name = idx.name || defaultIndexName(table, idx);
     const existingIdx = existingByName.get(name);
     if (!existingIdx) {
+      ops.push(createIndexOp(table, { ...idx, name }, pgSchema));
+    } else if (indexNeedsRecreate(idx, existingIdx)) {
+      // Keys, where-clause, include-list, or uniqueness changed. PG has no
+      // ALTER INDEX for these; drop and recreate.
+      ops.push({
+        type: 'drop_index',
+        phase: 7,
+        objectName: name,
+        sql: `DROP INDEX IF EXISTS "${pgSchema}"."${name}"`,
+        destructive: true,
+      });
       ops.push(createIndexOp(table, { ...idx, name }, pgSchema));
     }
     if (idx.comment && idx.comment !== existingIdx?.comment) {
@@ -1126,7 +1190,7 @@ function diffIndexes(table: string, desired: IndexDef[], existing: IndexDef[], p
   }
 
   // Drop indexes not in desired
-  const desiredNames = new Set(desired.map((idx) => idx.name || `idx_${table}_${idx.columns.join('_')}`));
+  const desiredNames = new Set(desired.map((idx) => idx.name || defaultIndexName(table, idx)));
   for (const idx of existing) {
     if (idx.name && !desiredNames.has(idx.name)) {
       ops.push({
@@ -1142,11 +1206,29 @@ function diffIndexes(table: string, desired: IndexDef[], existing: IndexDef[], p
   return ops;
 }
 
+function indexNeedsRecreate(desired: IndexDef, existing: IndexDef): boolean {
+  if (!!desired.unique !== !!existing.unique) return true;
+  if ((desired.method || 'btree') !== (existing.method || 'btree')) return true;
+  if (indexKeysIdentity(desired) !== indexKeysIdentity(existing)) return true;
+  const desiredWhere = normalizeIndexClause(desired.where);
+  const existingWhere = normalizeIndexClause(existing.where);
+  if (desiredWhere !== existingWhere) return true;
+  const desiredInclude = (desired.include || []).slice().sort().join(',');
+  const existingInclude = (existing.include || []).slice().sort().join(',');
+  if (desiredInclude !== existingInclude) return true;
+  return false;
+}
+
+export function normalizeIndexClause(clause: string | undefined): string {
+  if (!clause) return '';
+  return clause.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 function createIndexOp(table: string, idx: IndexDef, pgSchema: string): Operation {
-  const name = idx.name || `idx_${table}_${idx.columns.join('_')}`;
+  const name = idx.name || defaultIndexName(table, idx);
   const method = idx.method || 'btree';
   const unique = idx.unique ? 'UNIQUE ' : '';
-  const cols = idx.columns.map((c) => (idx.opclass ? `"${c}" ${idx.opclass}` : `"${c}"`)).join(', ');
+  const cols = idx.columns.map((c) => indexKeySql(c, idx.opclass)).join(', ');
   let sql = `CREATE ${unique}INDEX CONCURRENTLY IF NOT EXISTS "${name}" ON "${pgSchema}"."${table}" USING ${method} (${cols})`;
   if (idx.include && idx.include.length > 0) {
     sql += ` INCLUDE (${idx.include.map((c) => `"${c}"`).join(', ')})`;
