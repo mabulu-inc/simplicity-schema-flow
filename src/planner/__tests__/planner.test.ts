@@ -1815,6 +1815,127 @@ describe('Planner', () => {
     });
   });
 
+  // Regression for mabulu-inc/simplicity-schema-flow#19.
+  // Postgres auto-cascades table-level constraints when any of their columns
+  // are dropped, so emitting a separate DROP CONSTRAINT in the same phase
+  // errors with "does not exist" after the column goes. The planner now
+  // skips such drops and, as a defensive hedge, uses DROP CONSTRAINT IF EXISTS.
+  describe('constraint drops when the underlying column is also being dropped', () => {
+    it('skips drop_unique_constraint when the constraint is on a column that is also being dropped', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'things',
+          columns: [{ name: 'id', type: 'serial', primary_key: true }],
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('things', {
+        table: 'things',
+        columns: [
+          { name: 'id', type: 'serial', primary_key: true },
+          { name: 'legacy_code', type: 'varchar(50)' },
+        ],
+        unique_constraints: [{ name: 'things_legacy_code_key', columns: ['legacy_code'] }],
+      });
+      const result = buildPlan(desired, actual, { allowDestructive: true });
+
+      // drop_column should be present — Postgres will cascade the constraint.
+      const colDrops = findOps(result.operations, 'drop_column');
+      expect(colDrops).toHaveLength(1);
+      expect(colDrops[0].sql).toContain('DROP COLUMN "legacy_code"');
+
+      // drop_unique_constraint must NOT be emitted — it would fail with
+      // "does not exist" because the column drop auto-cascaded it.
+      const ucDrops = findOps(result.operations, 'drop_unique_constraint');
+      expect(ucDrops).toHaveLength(0);
+    });
+
+    it('skips drop_unique_constraint when any column of a multi-column unique is being dropped', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'things',
+          columns: [
+            { name: 'id', type: 'serial', primary_key: true },
+            { name: 'a', type: 'text' },
+          ],
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('things', {
+        table: 'things',
+        columns: [
+          { name: 'id', type: 'serial', primary_key: true },
+          { name: 'a', type: 'text' },
+          { name: 'b', type: 'text' },
+        ],
+        unique_constraints: [{ name: 'things_a_b_key', columns: ['a', 'b'] }],
+      });
+      const result = buildPlan(desired, actual, { allowDestructive: true });
+
+      // Drop 'b' is planned; unique (a, b) cascades, so no DROP CONSTRAINT.
+      expect(findOps(result.operations, 'drop_column')).toHaveLength(1);
+      expect(findOps(result.operations, 'drop_unique_constraint')).toHaveLength(0);
+    });
+
+    it('still drops a unique constraint whose columns all remain (normal removal)', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'things',
+          columns: [
+            { name: 'id', type: 'serial', primary_key: true },
+            { name: 'email', type: 'text' },
+          ],
+          // Note: no unique_constraints declared — existing uc should be dropped.
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('things', {
+        table: 'things',
+        columns: [
+          { name: 'id', type: 'serial', primary_key: true },
+          { name: 'email', type: 'text' },
+        ],
+        unique_constraints: [{ name: 'things_email_key', columns: ['email'] }],
+      });
+      const result = buildPlan(desired, actual, { allowDestructive: true });
+
+      expect(findOps(result.operations, 'drop_column')).toHaveLength(0);
+      const ucDrops = findOps(result.operations, 'drop_unique_constraint');
+      expect(ucDrops).toHaveLength(1);
+      // Defensive hedge: uses IF EXISTS so user/script-driven cascades are tolerated.
+      expect(ucDrops[0].sql).toContain('DROP CONSTRAINT IF EXISTS "things_email_key"');
+    });
+
+    it('emits DROP CONSTRAINT IF EXISTS for drop_check (tolerates cascade)', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'things',
+          columns: [
+            { name: 'id', type: 'serial', primary_key: true },
+            { name: 'status', type: 'text' },
+          ],
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('things', {
+        table: 'things',
+        columns: [
+          { name: 'id', type: 'serial', primary_key: true },
+          { name: 'status', type: 'text' },
+        ],
+        checks: [{ name: 'things_status_check', expression: "status IN ('a','b')" }],
+      });
+      const result = buildPlan(desired, actual, { allowDestructive: true });
+      const checkDrops = findOps(result.operations, 'drop_check');
+      expect(checkDrops).toHaveLength(1);
+      expect(checkDrops[0].sql).toContain('DROP CONSTRAINT IF EXISTS "things_status_check"');
+    });
+  });
+
   describe('function grants', () => {
     it('produces grant_function operations from function grants', () => {
       const desired = emptyDesired();

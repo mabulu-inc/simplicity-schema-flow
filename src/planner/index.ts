@@ -912,9 +912,14 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
     }
   }
 
-  // Drop columns not in desired
+  // Drop columns not in desired. Also remember which columns are going away
+  // so constraint-diff functions below can skip drops that Postgres will
+  // auto-cascade (dropping a column cascades any table-level constraint
+  // involving only that column, per Postgres ALTER TABLE docs).
+  const droppedColNames = new Set<string>();
   for (const col of existing.columns) {
     if (!desiredColMap.has(col.name)) {
+      droppedColNames.add(col.name);
       ops.push({
         type: 'drop_column',
         phase: 6,
@@ -933,6 +938,7 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
       existing.unique_constraints || [],
       desired.columns,
       pgSchema,
+      droppedColNames,
     ),
   );
 
@@ -1176,7 +1182,7 @@ function diffChecks(table: string, desired: CheckDef[], existing: CheckDef[], pg
         type: 'drop_check',
         phase: 6,
         objectName: `${table}.${check.name}`,
-        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT "${check.name}"`,
+        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${check.name}"`,
         destructive: false,
       });
       ops.push({
@@ -1201,7 +1207,9 @@ function diffChecks(table: string, desired: CheckDef[], existing: CheckDef[], pg
     }
   }
 
-  // Drop check constraints not in desired
+  // Drop check constraints not in desired. `IF EXISTS` tolerates the case
+  // where Postgres has already auto-cascaded the check because all columns
+  // it referenced were dropped earlier in the same phase.
   const desiredNames = new Set(desired.map((c) => c.name));
   for (const [name] of existingByName) {
     if (!desiredNames.has(name)) {
@@ -1209,7 +1217,7 @@ function diffChecks(table: string, desired: CheckDef[], existing: CheckDef[], pg
         type: 'drop_check',
         phase: 6,
         objectName: `${table}.${name}`,
-        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT "${name}"`,
+        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${name}"`,
         destructive: true,
       });
     }
@@ -1226,6 +1234,7 @@ function diffUniqueConstraints(
   existing: UniqueConstraintDef[],
   desiredColumns: ColumnDef[],
   pgSchema: string,
+  droppedColNames: Set<string> = new Set(),
 ): Operation[] {
   const ops: Operation[] = [];
   const existingByName = new Map(existing.map((uc) => [uc.name || `uq_${table}_${uc.columns.join('_')}`, uc]));
@@ -1240,7 +1249,7 @@ function diffUniqueConstraints(
         type: 'drop_unique_constraint',
         phase: 6,
         objectName: `${table}.${ucName}`,
-        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT "${ucName}"`,
+        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${ucName}"`,
         destructive: true,
       });
     }
@@ -1288,18 +1297,23 @@ function diffUniqueConstraints(
     }
   }
 
-  // Drop unique constraints not in desired (and not managed at column level)
+  // Drop unique constraints not in desired (and not managed at column level).
+  // Skip when the constraint references any column that's also being dropped —
+  // Postgres auto-cascades table-level constraints whose columns go away
+  // ("Indexes and table constraints involving the column will be automatically
+  // dropped" — ALTER TABLE docs). Emitting a separate DROP CONSTRAINT in the
+  // same phase would fail with "does not exist" after the drop_column runs.
   const desiredNames = new Set(desired.map((uc) => uc.name || `uq_${table}_${uc.columns.join('_')}`));
-  for (const [name] of existingByName) {
-    if (!desiredNames.has(name) && !columnLevelUniqueNames.has(name)) {
-      ops.push({
-        type: 'drop_unique_constraint',
-        phase: 6,
-        objectName: `${table}.${name}`,
-        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT "${name}"`,
-        destructive: true,
-      });
-    }
+  for (const [name, uc] of existingByName) {
+    if (desiredNames.has(name) || columnLevelUniqueNames.has(name)) continue;
+    if (uc.columns.some((c) => droppedColNames.has(c))) continue;
+    ops.push({
+      type: 'drop_unique_constraint',
+      phase: 6,
+      objectName: `${table}.${name}`,
+      sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${name}"`,
+      destructive: true,
+    });
   }
 
   return ops;
