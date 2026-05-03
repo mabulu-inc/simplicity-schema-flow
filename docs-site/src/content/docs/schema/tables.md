@@ -304,6 +304,23 @@ grants:
     with_grant_option: false
 ```
 
+### Mixing column-level and table-level grants
+
+A single role can have both a column-qualified grant on a subset of columns and a table-level grant on the rest. Use two blocks for the same role:
+
+```yaml
+grants:
+  # Column-qualified grant — restricts SELECT/INSERT/UPDATE to these columns
+  - to: app_user
+    privileges: [SELECT, INSERT, UPDATE]
+    columns: [id, email, name]
+  # Table-level grant — applies to the whole table, no column qualifier
+  - to: app_user
+    privileges: [DELETE, INSERT, SELECT, UPDATE]
+```
+
+The table-level grant subsumes any overlapping column-level privileges for the same role, so a no-change re-run is a no-op — the planner emits no GRANT or REVOKE.
+
 ## Pre-migration checks
 
 ```yaml

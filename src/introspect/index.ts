@@ -819,15 +819,27 @@ async function getPolicies(client: Client, table: string, schema: string): Promi
 
 async function getColumnGrants(client: Client, table: string, schema: string): Promise<GrantDef[]> {
   // Query column_privileges from information_schema to find column-level grants.
-  // We group by grantee and privilege_type, aggregating the column names.
+  // Postgres populates column_privileges with one row per column for table-level
+  // grants too, indistinguishable from a real column-qualified grant. Exclude
+  // any (grantee, privilege) pair that already exists at the table level, so
+  // we only return grants that are *truly* column-restricted. (Issue #29.)
   const result = await client.query(
     `SELECT grantee, privilege_type,
             array_agg(column_name::text ORDER BY column_name) AS columns,
             bool_or(is_grantable = 'YES') AS is_grantable
-     FROM information_schema.column_privileges
+     FROM information_schema.column_privileges cp
      WHERE table_schema = $2
        AND table_name = $1
        AND grantor <> grantee
+       AND NOT EXISTS (
+         SELECT 1
+           FROM information_schema.table_privileges tp
+          WHERE tp.table_schema = cp.table_schema
+            AND tp.table_name = cp.table_name
+            AND tp.grantee = cp.grantee
+            AND tp.privilege_type = cp.privilege_type
+            AND tp.grantor <> tp.grantee
+       )
      GROUP BY grantee, privilege_type
      ORDER BY grantee, privilege_type`,
     [table, schema],

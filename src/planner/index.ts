@@ -1656,7 +1656,43 @@ export function normalizeGrants(grants: GrantDef[]): GrantDef[] {
       normalized.push(part);
     }
   }
-  return normalized;
+
+  // A column-qualified grant whose (grantee, privilege, with_grant_option) is
+  // already covered by a table-level grant in the same set is a no-op in
+  // Postgres — the table grant subsumes it, and the DB never stores the
+  // column-level entry separately. Dropping the subsumed entries here keeps
+  // both sides of the diff in the same canonical form so a no-change YAML
+  // produces zero plan ops. (Issue #29.)
+  const tableLevelByGrantee = new Map<string, Set<string>>();
+  for (const g of normalized) {
+    if (g.columns && g.columns.length > 0) continue;
+    const key = `${g.to}::${!!g.with_grant_option}`;
+    let set = tableLevelByGrantee.get(key);
+    if (!set) {
+      set = new Set();
+      tableLevelByGrantee.set(key, set);
+    }
+    for (const p of g.privileges) set.add(p.toUpperCase());
+  }
+
+  const deduped: GrantDef[] = [];
+  for (const g of normalized) {
+    if (!g.columns || g.columns.length === 0) {
+      deduped.push(g);
+      continue;
+    }
+    const covered = tableLevelByGrantee.get(`${g.to}::${!!g.with_grant_option}`);
+    if (!covered) {
+      deduped.push(g);
+      continue;
+    }
+    const remaining = g.privileges.filter((p) => !covered.has(p.toUpperCase()));
+    if (remaining.length === 0) continue;
+    const part: GrantDef = { to: g.to, privileges: remaining, columns: g.columns };
+    if (g.with_grant_option) part.with_grant_option = true;
+    deduped.push(part);
+  }
+  return deduped;
 }
 
 /**
