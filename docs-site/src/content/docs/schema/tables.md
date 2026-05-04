@@ -242,6 +242,22 @@ indexes:
 
 Indexes are created using `CONCURRENTLY` outside of a transaction where possible.
 
+### Column ordering (ASC/DESC, NULLS FIRST/LAST)
+
+By default each indexed column uses Postgres's defaults — `ASC` order, `NULLS LAST` for `ASC` and `NULLS FIRST` for `DESC`. To override, use the object form for the column entry:
+
+```yaml
+indexes:
+  - name: idx_events_tenant_created_desc
+    columns:
+      - column: tenant_id # plain key, all defaults
+      - column: created_at
+        order: DESC # ASC (default) | DESC
+        nulls: LAST # FIRST | LAST; defaults to LAST for ASC, FIRST for DESC
+```
+
+Useful when an index is meant to satisfy a specific `ORDER BY` (Postgres can use a non-default-ordered index to skip an external sort). Writing the default modifiers explicitly is a no-op; the diff resolves both sides to the same canonical (order, nulls) pair before comparing, so an explicit `ASC NULLS LAST` doesn't churn against an introspected bare column.
+
 ## Check constraints
 
 ```yaml

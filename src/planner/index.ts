@@ -1145,6 +1145,7 @@ function diffColumn(table: string, desired: ColumnDef, existing: ColumnDef, pgSc
  */
 function indexKeySlug(key: IndexKey): string {
   if (typeof key === 'string') return key;
+  if ('column' in key) return key.column;
   return (
     key.expression
       .toLowerCase()
@@ -1164,10 +1165,24 @@ export function defaultIndexName(table: string, idx: IndexDef): string {
  * SQL fragment for one index key in the CREATE INDEX column list.
  * Plain columns are quoted identifiers; expressions are wrapped in parens
  * per Postgres syntax: `CREATE INDEX … USING btree ((lower(email)))`.
+ * Order/nulls modifiers (only on `IndexColumn`) are appended *after* the
+ * close paren — `name DESC NULLS FIRST` is column-level syntax and
+ * Postgres rejects it inside expression parens.
  */
 function indexKeySql(key: IndexKey, opclass?: string): string {
-  const base = typeof key === 'string' ? `"${key}"` : `(${key.expression})`;
-  return opclass ? `${base} ${opclass}` : base;
+  let base: string;
+  let modifiers = '';
+  if (typeof key === 'string') {
+    base = `"${key}"`;
+  } else if ('column' in key) {
+    base = `"${key.column}"`;
+    if (key.order) modifiers += ` ${key.order}`;
+    if (key.nulls) modifiers += ` NULLS ${key.nulls}`;
+  } else {
+    base = `(${key.expression})`;
+  }
+  const opc = opclass ? ` ${opclass}` : '';
+  return `${base}${opc}${modifiers}`;
 }
 
 /**
@@ -1177,9 +1192,19 @@ function indexKeySql(key: IndexKey, opclass?: string): string {
  * expressions shouldn't look different to the diff just because of
  * formatting. Whitespace adjacent to `(`, `)`, or `,` is also stripped
  * so e.g. `lower(email)` matches `lower( email )`.
+ *
+ * For `IndexColumn` keys, `order` and `nulls` are default-resolved before
+ * comparison: `ASC` defaults `nulls=LAST`, `DESC` defaults `nulls=FIRST`,
+ * matching Postgres's behaviour. This way YAML that explicitly writes
+ * the default still matches an introspected form that elides it.
  */
 function indexKeyIdentity(key: IndexKey): string {
-  if (typeof key === 'string') return `col:${key.toLowerCase()}`;
+  if (typeof key === 'string') return `col:${key.toLowerCase()}|asc|last`;
+  if ('column' in key) {
+    const order = key.order ?? 'ASC';
+    const nulls = key.nulls ?? (order === 'ASC' ? 'LAST' : 'FIRST');
+    return `col:${key.column.toLowerCase()}|${order.toLowerCase()}|${nulls.toLowerCase()}`;
+  }
   return `expr:${normalizeExpressionForCompare(key.expression)}`;
 }
 

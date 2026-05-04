@@ -145,6 +145,12 @@ indexes:
   - columns: [name]
     include: [email] # Covering index (INCLUDE)
     opclass: text_pattern_ops
+  - name: idx_events_recent
+    columns:
+      - column: tenant_id
+      - column: created_at
+        order: DESC # ASC | DESC; default ASC
+        nulls: LAST # FIRST | LAST; defaults to LAST for ASC, FIRST for DESC
 
 checks:
   - name: email_not_empty
@@ -796,7 +802,7 @@ interface DriftItem {
 ### What's Compared
 
 - **Tables**: existence, columns (name, type, default, nullability, generated expressions)
-- **Indexes**: existence, columns, uniqueness, method, partial conditions (WHERE), covering columns (INCLUDE), opclass
+- **Indexes**: existence, columns (with optional per-column ASC/DESC and NULLS FIRST/LAST), uniqueness, method, partial conditions (WHERE), covering columns (INCLUDE), opclass
 - **Constraints**: checks (expression), foreign keys (actions, deferrable, initially_deferred), unique constraints, exclusion constraints (method, elements, partial WHERE)
 - **Enums**: existence, values (order matters)
 - **Functions**: existence, body, args, return type, security, volatility, parallel, strict, leakproof, cost, rows, set params

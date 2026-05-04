@@ -52,7 +52,22 @@ export type IndexMethod = 'btree' | 'gin' | 'gist' | 'hash' | 'brin';
  * declaratively, including functional and coalescing ones that would
  * otherwise live outside the YAML contract.
  */
-export type IndexKey = string | { expression: string };
+/**
+ * Per-key ordering metadata for an index column. `order` defaults to `ASC`;
+ * `nulls` defaults to `LAST` for `ASC` and `FIRST` for `DESC` (matching
+ * Postgres). Both are optional — a bare `string` `IndexKey` (or `IndexColumn`
+ * with neither field set) means "all defaults".
+ */
+export type IndexOrder = 'ASC' | 'DESC';
+export type IndexNulls = 'FIRST' | 'LAST';
+
+export interface IndexColumn {
+  column: string;
+  order?: IndexOrder;
+  nulls?: IndexNulls;
+}
+
+export type IndexKey = string | { expression: string } | IndexColumn;
 
 export interface IndexDef {
   name?: string;

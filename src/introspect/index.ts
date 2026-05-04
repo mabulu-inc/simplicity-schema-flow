@@ -573,6 +573,11 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
   // full CREATE INDEX statement. `indnkeyatts` is the count of key columns
   // (excludes INCLUDE columns); `indnatts` is the total — slots
   // `indnkeyatts+1 … indnatts` are the INCLUDE columns.
+  // `indoption` is a smallint vector with one entry per key column (not
+  // INCLUDE columns). Bit 0 = DESC, bit 1 = NULLS FIRST. `pg_get_indexdef`
+  // for individual columns does *not* include order/nulls, so we read them
+  // separately here. Cast to int[] for client-side parsing — note this is
+  // 0-indexed (issue #26 lesson) so we re-emit it 1-indexed when joining.
   const result = await client.query(
     `SELECT
        i.relname AS name,
@@ -587,6 +592,7 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
          SELECT pg_get_indexdef(ix.indexrelid, k::int, true)
          FROM generate_series(ix.indnkeyatts + 1, ix.indnatts) AS k
        ) AS include_cols,
+       ix.indoption::int[] AS indoptions,
        obj_description(i.oid, 'pg_class') AS comment
      FROM pg_catalog.pg_index ix
      JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
@@ -606,7 +612,9 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
   );
 
   return result.rows.map((r: Record<string, unknown>) => {
-    const keys = (r.keys as string[]).map((k) => parseIndexKey(k));
+    const rawKeys = r.keys as string[];
+    const indoptions = (r.indoptions as number[]) || [];
+    const keys = rawKeys.map((k, i) => attachIndexOrdering(parseIndexKey(k), indoptions[i] ?? 0));
     const idx: IndexDef = {
       name: r.name as string,
       columns: keys,
@@ -622,6 +630,45 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
     if (includeCols.length > 0) idx.include = includeCols;
     return idx;
   });
+}
+
+const INDOPTION_DESC = 0x0001;
+const INDOPTION_NULLS_FIRST = 0x0002;
+
+/**
+ * Combine a parsed key with its `indoption` bitfield. If the resulting
+ * order/nulls combination matches Postgres's defaults (`ASC` for column,
+ * `NULLS LAST` for `ASC` / `NULLS FIRST` for `DESC`), the original key
+ * shape is returned unchanged so introspected output stays terse for the
+ * common case. Non-default ordering returns an `IndexColumn` object with
+ * only the non-default fields populated.
+ */
+function attachIndexOrdering(
+  key: import('../schema/types.js').IndexKey,
+  indoption: number,
+): import('../schema/types.js').IndexKey {
+  const isDesc = (indoption & INDOPTION_DESC) !== 0;
+  const isNullsFirst = (indoption & INDOPTION_NULLS_FIRST) !== 0;
+  // Default: ASC + NULLS LAST (=0). DESC + NULLS FIRST (=DESC|NULLS_FIRST=3) is
+  // also fully default. Anything else carries non-default ordering metadata.
+  const defaultNullsForOrder = isDesc ? true /* FIRST */ : false; /* LAST */
+  const orderIsDefault = !isDesc;
+  const nullsIsDefault = isNullsFirst === defaultNullsForOrder;
+  if (orderIsDefault && nullsIsDefault) return key;
+
+  // Pull the column name out of whatever shape we have. Expressions can't
+  // carry order/nulls in our model — Postgres allows `(expr) DESC` but it's
+  // an unusual case; if we see one we just drop the modifiers rather than
+  // mis-modelling them.
+  let column: string | undefined;
+  if (typeof key === 'string') column = key;
+  else if ('column' in key) column = key.column;
+  if (!column) return key;
+
+  const out: { column: string; order?: 'ASC' | 'DESC'; nulls?: 'FIRST' | 'LAST' } = { column };
+  if (isDesc) out.order = 'DESC';
+  if (!nullsIsDefault) out.nulls = isNullsFirst ? 'FIRST' : 'LAST';
+  return out;
 }
 
 function stripQuotes(s: string): string {

@@ -137,15 +137,40 @@ function parseIndexDef(raw: Record<string, unknown>, context: string): IndexDef 
   const rawColumns = requireArray<unknown>(raw, 'columns', context);
   const columns = rawColumns.map((entry, i): IndexKey => {
     if (typeof entry === 'string') return entry;
-    if (entry && typeof entry === 'object' && 'expression' in entry) {
-      const expr = (entry as Record<string, unknown>).expression;
-      if (typeof expr !== 'string' || expr.trim().length === 0) {
-        throw new Error(`${context}.columns[${i}]: 'expression' must be a non-empty string`);
+    if (entry && typeof entry === 'object') {
+      const obj = entry as Record<string, unknown>;
+      if ('expression' in obj) {
+        const expr = obj.expression;
+        if (typeof expr !== 'string' || expr.trim().length === 0) {
+          throw new Error(`${context}.columns[${i}]: 'expression' must be a non-empty string`);
+        }
+        return { expression: expr };
       }
-      return { expression: expr };
+      if ('column' in obj) {
+        const col = obj.column;
+        if (typeof col !== 'string' || col.trim().length === 0) {
+          throw new Error(`${context}.columns[${i}]: 'column' must be a non-empty string`);
+        }
+        const result: { column: string; order?: 'ASC' | 'DESC'; nulls?: 'FIRST' | 'LAST' } = { column: col };
+        if (obj.order !== undefined) {
+          const ord = String(obj.order).toUpperCase();
+          if (ord !== 'ASC' && ord !== 'DESC') {
+            throw new Error(`${context}.columns[${i}].order: must be 'ASC' or 'DESC' (got '${obj.order}')`);
+          }
+          result.order = ord;
+        }
+        if (obj.nulls !== undefined) {
+          const n = String(obj.nulls).toUpperCase();
+          if (n !== 'FIRST' && n !== 'LAST') {
+            throw new Error(`${context}.columns[${i}].nulls: must be 'FIRST' or 'LAST' (got '${obj.nulls}')`);
+          }
+          result.nulls = n;
+        }
+        return result;
+      }
     }
     throw new Error(
-      `${context}.columns[${i}]: expected a column name (string) or an object with an 'expression' field`,
+      `${context}.columns[${i}]: expected a column name (string), or an object with 'expression' or 'column'`,
     );
   });
   const idx: IndexDef = { columns };
