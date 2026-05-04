@@ -12,8 +12,12 @@ import type {
   TableSchema,
   ColumnDef,
   IndexDef,
+  IndexKey, // string | { expression } | IndexColumn
+  IndexColumn, // { column, order?, nulls? }
   CheckDef,
   UniqueConstraintDef,
+  ExclusionConstraintDef,
+  ExclusionConstraintElement,
   TriggerDef,
   PolicyDef,
   MixinSchema,
@@ -40,6 +44,8 @@ import type {
 import type {
   ForeignKeyAction, // 'CASCADE' | 'SET NULL' | 'SET DEFAULT' | 'RESTRICT' | 'NO ACTION'
   IndexMethod, // 'btree' | 'gin' | 'gist' | 'hash' | 'brin'
+  IndexOrder, // 'ASC' | 'DESC'
+  IndexNulls, // 'FIRST' | 'LAST'
   FunctionSecurity, // 'invoker' | 'definer'
   FunctionVolatility, // 'volatile' | 'stable' | 'immutable'
   FunctionParallel, // 'unsafe' | 'safe' | 'restricted'
