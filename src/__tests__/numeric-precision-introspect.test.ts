@@ -107,6 +107,10 @@ columns:
   });
 
   it('introspects varchar(N) and char(N) columns correctly', async () => {
+    // Introspection uses format_type(atttypid, atttypmod) so the type
+    // string matches PG's canonical renderer — `character varying(10)`,
+    // not the `varchar(10)` shorthand. The planner's normalizeTypeName
+    // collapses the alias on diff so YAML can keep using either form.
     await client.query(`
       CREATE TABLE ${TEST_SCHEMA}.strings (
         id serial PRIMARY KEY,
@@ -121,8 +125,8 @@ columns:
     const fixedCol = table.columns.find((c) => c.name === 'fixed');
     const unlimitedCol = table.columns.find((c) => c.name === 'unlimited');
 
-    expect(codeCol!.type).toBe('varchar(10)');
-    expect(fixedCol!.type).toBe('char(5)');
-    expect(unlimitedCol!.type).toBe('varchar');
+    expect(codeCol!.type).toBe('character varying(10)');
+    expect(fixedCol!.type).toBe('character(5)');
+    expect(unlimitedCol!.type).toBe('character varying');
   });
 });

@@ -146,6 +146,41 @@ exclusion_constraints:
     expect(second.executed).toBe(0);
   });
 
+  it('column type with whitespace inside parameters re-applies as a no-op (#40)', async () => {
+    // YAML may declare `numeric(10, 2)` or `varchar(50)`; PG's format_type
+    // canonicalises both with no inner whitespace, mixed-case parameters,
+    // and friendly aliases (varchar → character varying). Same shape
+    // covers PostGIS geography(Polygon, 4326) which information_schema
+    // strips of its typmod entirely.
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/orders.yaml': `
+table: orders
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+  - name: total
+    type: 'numeric(10, 2)'
+    nullable: false
+  - name: code
+    type: 'varchar(50)'
+    nullable: false
+  - name: created_at
+    type: timestamptz
+    nullable: false
+`,
+    });
+
+    const first = await runMigration(ctx);
+    expect(first.executed).toBeGreaterThan(0);
+
+    const second = await runMigration(ctx);
+    expect(second.executedOperations).toEqual([]);
+    expect(second.executed).toBe(0);
+  });
+
   it('grant_sequence is suppressed when the role already has USAGE+SELECT on the sequence', async () => {
     // Per-table sequence grants are auto-derived from each grant block with
     // a write privilege; without an existing-state check they re-emit every
