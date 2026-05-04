@@ -26,6 +26,7 @@ import {
   normalizeCheckExpressions,
   normalizeIndexWhereClauses,
 } from '../planner/normalize-expression.js';
+import { filterUnchangedSeeds } from '../planner/filter-seeds.js';
 import { execute } from '../executor/index.js';
 import type { ExecuteResult } from '../executor/index.js';
 import { getPool } from '../core/db.js';
@@ -88,6 +89,7 @@ export async function runPipeline(
       await normalizePolicyExpressions(normClient, desired.tables);
       await normalizeCheckExpressions(normClient, desired.tables);
       await normalizeIndexWhereClauses(normClient, desired.tables);
+      await filterUnchangedSeeds(normClient, desired.tables, config.pgSchema);
     } finally {
       normClient.release();
     }

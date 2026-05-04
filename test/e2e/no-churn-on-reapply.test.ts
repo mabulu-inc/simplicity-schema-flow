@@ -101,6 +101,89 @@ checks:
     expect(second.executed).toBe(0);
   });
 
+  it('seeds whose rows already exist verbatim re-apply as a no-op', async () => {
+    // Idempotent INSERT/UPDATE makes seed re-application correct on the
+    // executor side, but the planner emitted a seed_table op every plan
+    // regardless. With pre-flight comparison via temp-table EXCEPT, the
+    // op is suppressed when every seed row matches the live data.
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/colors.yaml': `
+table: colors
+columns:
+  - name: color_id
+    type: integer
+    primary_key: true
+  - name: name
+    type: text
+    nullable: false
+seeds:
+  - color_id: 1
+    name: red
+  - color_id: 2
+    name: green
+  - color_id: 3
+    name: blue
+seeds_on_conflict: 'DO NOTHING'
+`,
+    });
+
+    const first = await runMigration(ctx);
+    expect(first.executed).toBeGreaterThan(0);
+
+    const second = await runMigration(ctx);
+    expect(second.executedOperations).toEqual([]);
+    expect(second.executed).toBe(0);
+  });
+
+  it('seed_table is still emitted when YAML adds a new row', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/colors.yaml': `
+table: colors
+columns:
+  - name: color_id
+    type: integer
+    primary_key: true
+  - name: name
+    type: text
+    nullable: false
+seeds:
+  - color_id: 1
+    name: red
+seeds_on_conflict: 'DO NOTHING'
+`,
+    });
+
+    await runMigration(ctx);
+
+    // Add a second seed row — the planner must still emit the op.
+    writeSchema(ctx.dir, {
+      'tables/colors.yaml': `
+table: colors
+columns:
+  - name: color_id
+    type: integer
+    primary_key: true
+  - name: name
+    type: text
+    nullable: false
+seeds:
+  - color_id: 1
+    name: red
+  - color_id: 2
+    name: green
+seeds_on_conflict: 'DO NOTHING'
+`,
+    });
+
+    const second = await runMigration(ctx);
+    const seedOps = second.executedOperations.filter((o) => o.type === 'seed_table');
+    expect(seedOps).toHaveLength(1);
+  });
+
   it('self-qualified policy USING / CHECK / partial-index WHERE re-applies as a no-op (#32)', async () => {
     // Covers the common RLS pattern of writing `tablename.col` inside an
     // EXISTS subquery so the inner FROM disambiguates joined tables, and
