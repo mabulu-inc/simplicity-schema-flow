@@ -181,6 +181,43 @@ columns:
     expect(second.executed).toBe(0);
   });
 
+  it('column DEFAULT with functional expression re-applies as a no-op (#41)', async () => {
+    // Functional defaults like CURRENT_TIMESTAMP + INTERVAL '7 days'
+    // get rewritten by PG (parens, casts, normalised whitespace), so a
+    // literal string compare against pg_attrdef would re-fire the alter
+    // every plan. The default round-trip pass settles them.
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/sessions.yaml': `
+table: sessions
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+  - name: created_at
+    type: timestamptz
+    nullable: false
+    default: CURRENT_TIMESTAMP
+  - name: expires_at
+    type: timestamptz
+    nullable: false
+    default: CURRENT_TIMESTAMP + INTERVAL '7 days'
+  - name: active
+    type: boolean
+    nullable: false
+    default: 'true'
+`,
+    });
+
+    const first = await runMigration(ctx);
+    expect(first.executed).toBeGreaterThan(0);
+
+    const second = await runMigration(ctx);
+    expect(second.executedOperations).toEqual([]);
+    expect(second.executed).toBe(0);
+  });
+
   it('grant_sequence is suppressed when the role already has USAGE+SELECT on the sequence', async () => {
     // Per-table sequence grants are auto-derived from each grant block with
     // a write privilege; without an existing-state check they re-emit every

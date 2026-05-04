@@ -169,6 +169,72 @@ export async function normalizeIndexWhereClauses(client: PoolClient, tables: Tab
   }
 }
 
+/**
+ * Normalize all column DEFAULT expressions in the given tables by
+ * round-tripping through PostgreSQL. PG canonicalises functional defaults
+ * — `CURRENT_TIMESTAMP + INTERVAL '7 days'` becomes
+ * `(CURRENT_TIMESTAMP + '7 days'::interval)`, regex literals get `::text`
+ * casts, etc. — so the diff has to compare the YAML text against PG's
+ * post-rewrite form for ALTER COLUMN SET DEFAULT to settle on a re-plan.
+ *
+ * Bare-literal defaults (`true`, `'foo'`, `0`) round-trip unchanged in
+ * most cases but go through the same path so the behaviour is uniform.
+ */
+export async function normalizeColumnDefaults(client: PoolClient, tables: TableSchema[]): Promise<void> {
+  const tablesWithDefaults = tables.filter(
+    (t) => t.table && t.columns.some((c) => c.default !== undefined && c.default !== null),
+  );
+  if (tablesWithDefaults.length === 0) return;
+
+  await client.query('BEGIN');
+  try {
+    for (const table of tablesWithDefaults) {
+      for (const col of table.columns) {
+        if (col.default === undefined || col.default === null) continue;
+        col.default = await normalizeColumnDefault(client, table, col.name, col.type, col.default);
+      }
+    }
+  } finally {
+    await client.query('ROLLBACK');
+  }
+}
+
+async function normalizeColumnDefault(
+  client: PoolClient,
+  table: TableSchema,
+  columnName: string,
+  columnType: string,
+  expression: string,
+): Promise<string> {
+  // See normalizeExpression for the temp-table-shadows-real-table rationale.
+  const tempTable = table.table;
+
+  await client.query('SAVEPOINT normalize_default');
+  try {
+    await client.query(
+      `CREATE TEMP TABLE "${tempTable}" ("${columnName}" ${mapColumnType(columnType)} DEFAULT ${expression})`,
+    );
+
+    const result = await client.query(
+      `SELECT pg_get_expr(ad.adbin, ad.adrelid) AS expr
+       FROM pg_catalog.pg_attrdef ad
+       JOIN pg_catalog.pg_class cls ON cls.oid = ad.adrelid
+       JOIN pg_catalog.pg_attribute a ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
+       WHERE cls.relname = $1
+         AND a.attname = $2
+         AND cls.relnamespace = pg_my_temp_schema()`,
+      [tempTable, columnName],
+    );
+
+    const expr = result.rows[0]?.expr as string | undefined;
+    await client.query('ROLLBACK TO normalize_default');
+    return expr ?? expression;
+  } catch {
+    await client.query('ROLLBACK TO normalize_default').catch(() => {});
+    return expression;
+  }
+}
+
 async function normalizeIndexWhere(client: PoolClient, table: TableSchema, where: string): Promise<string> {
   // See normalizeExpression for the temp-table-shadows-real-table rationale.
   const tempTable = table.table;
