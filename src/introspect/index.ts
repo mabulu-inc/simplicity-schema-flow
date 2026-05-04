@@ -54,6 +54,50 @@ export async function getExistingTables(client: Client, schema: string): Promise
   return result.rows.map((r: { tablename: string }) => r.tablename);
 }
 
+/**
+ * Map of sequence name → role name → Set of privilege types granted on that
+ * sequence to that role. Privilege types match the PG strings: USAGE,
+ * SELECT, UPDATE.
+ */
+export type SequenceGrantMap = Map<string, Map<string, Set<string>>>;
+
+/**
+ * Aggregate existing sequence grants in a schema. Used so the planner can
+ * suppress repeat GRANT ops when the privileges are already in place — GRANT
+ * is idempotent in Postgres but the plan output gets noisy without this.
+ */
+export async function getSequenceGrants(client: Client, schema: string): Promise<SequenceGrantMap> {
+  const result = await client.query(
+    `SELECT c.relname AS seq,
+            pg_get_userbyid(ae.grantee) AS role,
+            ae.privilege_type
+     FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     CROSS JOIN LATERAL aclexplode(c.relacl) ae
+     WHERE c.relkind = 'S'
+       AND n.nspname = $1
+       AND ae.grantee <> 0
+     ORDER BY c.relname, role, ae.privilege_type`,
+    [schema],
+  );
+
+  const out: SequenceGrantMap = new Map();
+  for (const row of result.rows as { seq: string; role: string; privilege_type: string }[]) {
+    let bySeq = out.get(row.seq);
+    if (!bySeq) {
+      bySeq = new Map();
+      out.set(row.seq, bySeq);
+    }
+    let byRole = bySeq.get(row.role);
+    if (!byRole) {
+      byRole = new Set();
+      bySeq.set(row.role, byRole);
+    }
+    byRole.add(row.privilege_type);
+  }
+  return out;
+}
+
 /** Get all enum types and their values in a schema, excluding extension-owned enums. */
 export async function getExistingEnums(client: Client, schema: string): Promise<EnumSchema[]> {
   const result = await client.query(

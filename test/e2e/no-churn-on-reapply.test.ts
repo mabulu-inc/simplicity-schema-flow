@@ -1,7 +1,12 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { useTestProject, writeSchema, runMigration } from './helpers.js';
+import { useTestProject, writeSchema, runMigration, queryDb } from './helpers.js';
 import { DATABASE_URL } from './setup.js';
 import type { TestProject } from './helpers.js';
+
+let counter = 0;
+function uniqueRole(base: string): string {
+  return `${base}_${Date.now()}_${counter++}`;
+}
 
 describe('E2E: no-change reapply produces zero plan ops (#26)', () => {
   let ctx: TestProject;
@@ -99,6 +104,47 @@ checks:
     const second = await runMigration(ctx);
     expect(second.executedOperations).toEqual([]);
     expect(second.executed).toBe(0);
+  });
+
+  it('grant_sequence is suppressed when the role already has USAGE+SELECT on the sequence', async () => {
+    // Per-table sequence grants are auto-derived from each grant block with
+    // a write privilege; without an existing-state check they re-emit every
+    // plan even though the live ACL already carries USAGE+SELECT.
+    ctx = await useTestProject(DATABASE_URL);
+    const roleName = uniqueRole('seq_grant');
+    ctx.registerRole(roleName);
+    await queryDb(
+      ctx,
+      `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${roleName}') THEN
+          CREATE ROLE "${roleName}";
+        END IF;
+      END $$`,
+    );
+
+    writeSchema(ctx.dir, {
+      'tables/items.yaml': `
+table: items
+columns:
+  - name: id
+    type: serial
+    primary_key: true
+  - name: name
+    type: text
+    nullable: false
+grants:
+  - to: ${roleName}
+    privileges: [INSERT, SELECT, UPDATE]
+`,
+    });
+
+    const first = await runMigration(ctx);
+    const firstSeqOps = first.executedOperations.filter((o) => o.type === 'grant_sequence');
+    expect(firstSeqOps.length).toBeGreaterThan(0);
+
+    const second = await runMigration(ctx);
+    const secondSeqOps = second.executedOperations.filter((o) => o.type === 'grant_sequence');
+    expect(secondSeqOps).toEqual([]);
   });
 
   it('seeds whose rows already exist verbatim re-apply as a no-op', async () => {
