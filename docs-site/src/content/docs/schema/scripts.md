@@ -14,6 +14,27 @@ Run **before** schema migration, in alphabetical order. Use for data cleanup, te
 DELETE FROM temp_data WHERE created_at < now() - interval '30 days';
 ```
 
+### Schema changes from pre-scripts
+
+After pre-scripts run, schema-flow re-introspects the database and re-plans the apply phase against the post-pre-script state. This means a pre-script can perform schema changes the declarative planner can't express — most commonly, column or table renames — and the corresponding YAML change won't collide with a stale `add_column` op.
+
+```sql
+-- schema/pre/202604281000-rename-tenant-to-org.sql
+ALTER TABLE IF EXISTS widgets RENAME COLUMN tenant_id TO org_id;
+```
+
+```yaml
+# tables/widgets.yaml — column is now `org_id`
+table: widgets
+columns:
+  - name: widget_id
+    type: serial
+    primary_key: true
+  - name: org_id
+    type: integer
+    nullable: false
+```
+
 ## Post-scripts
 
 File location: `schema/post/<name>.sql`

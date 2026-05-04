@@ -68,10 +68,11 @@ export async function runPipeline(
 
   let operations: ReturnType<typeof buildPlan>['operations'] = [];
   let blocked: ReturnType<typeof buildPlan>['blocked'] = []; // eslint-disable-line no-useless-assignment
+  let desired: DesiredState | null = null;
 
   if (shouldMigrate && discovered.schema.length > 0) {
     // 2. Parse YAML files
-    const desired = await parseDesiredState(discovered.schema, config.baseDir, logger);
+    desired = await parseDesiredState(discovered.schema, config.baseDir, logger);
 
     // 3. Normalize policy expressions via PG round-trip
     const pool = getPool(config.connectionString);
@@ -102,6 +103,23 @@ export async function runPipeline(
     logger.info(`Plan: ${operations.length} operations (${blocked.length} blocked)`);
   }
 
+  // Re-plan against the post-pre-script DB state. Pre-scripts can mutate the
+  // DB in ways the original plan can't reflect (e.g. column renames the
+  // planner cannot express declaratively). Without this, the apply phase
+  // collides with state pre-scripts already established. (Issue #28.)
+  const desiredForReplan = desired;
+  const replanAfterPreScripts =
+    shouldMigrate && desiredForReplan
+      ? async () => {
+          const actual = await introspectDatabase(config, logger);
+          const plan = buildPlan(desiredForReplan, actual, {
+            allowDestructive: config.allowDestructive,
+            pgSchema: config.pgSchema,
+          });
+          return plan.operations;
+        }
+      : undefined;
+
   // 6. Execute
   const result = await execute({
     connectionString: config.connectionString,
@@ -114,6 +132,7 @@ export async function runPipeline(
     lockTimeout: config.lockTimeout,
     statementTimeout: config.statementTimeout,
     logger,
+    replanAfterPreScripts,
   });
 
   // 7. Record schema files in history after successful migration

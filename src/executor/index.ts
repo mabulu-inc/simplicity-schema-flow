@@ -28,6 +28,15 @@ export interface ExecuteOptions {
   lockTimeout?: number;
   statementTimeout?: number;
   logger?: Logger;
+  /**
+   * Optional callback invoked after pre-scripts execute. Returns the operation
+   * list to apply, computed against the post-pre-script DB state. Pre-scripts
+   * routinely mutate the DB in ways the original plan can't reflect (e.g.
+   * column renames the planner cannot express declaratively), so the apply
+   * phase must use a fresh plan or it collides with state the pre-script
+   * already established. (Issue #28.)
+   */
+  replanAfterPreScripts?: () => Promise<Operation[]>;
 }
 
 export interface ExecuteResult {
@@ -224,7 +233,6 @@ WHERE NOT EXISTS (
 export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
   const {
     connectionString,
-    operations,
     preScripts = [],
     postScripts = [],
     pgSchema = 'public',
@@ -233,7 +241,9 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     lockTimeout,
     statementTimeout,
     logger,
+    replanAfterPreScripts,
   } = options;
+  let operations = options.operations;
 
   const result: ExecuteResult = {
     executed: 0,
@@ -273,13 +283,6 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
       // Ensure _smplcty_schema_flow schema and history table
       await ensureHistoryTable(lockClient);
 
-      // Auto-save a migration snapshot before executing (for rollback support)
-      if (operations.length > 0 && !validateOnly) {
-        await ensureSnapshotsTable(lockClient);
-        await saveSnapshot(lockClient, operations, pgSchema);
-        logger?.debug('Auto-saved migration snapshot');
-      }
-
       // Run pre-scripts (each in its own transaction, tracked by hash)
       for (const script of preScripts) {
         const changed = await fileNeedsApply(lockClient, script.relativePath, script.hash);
@@ -307,6 +310,23 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
         await recordFile(lockClient, script.relativePath, script.hash, 'pre');
         result.preScriptsRun++;
         logger?.info(`Executed pre-script: ${script.relativePath}`);
+      }
+
+      // Pre-scripts may have mutated state in ways the original plan can't
+      // reflect (e.g. column renames). Re-plan against the current DB so
+      // the apply phase doesn't collide with state pre-scripts established.
+      if (result.preScriptsRun > 0 && replanAfterPreScripts) {
+        operations = await replanAfterPreScripts();
+        logger?.debug(`Re-planned after pre-scripts: ${operations.length} operations`);
+      }
+
+      // Auto-save a migration snapshot of the operations actually about to
+      // execute (post-replan, if any). Saving here — rather than before
+      // pre-scripts — keeps the snapshot in sync with what gets applied.
+      if (operations.length > 0 && !validateOnly) {
+        await ensureSnapshotsTable(lockClient);
+        await saveSnapshot(lockClient, operations, pgSchema);
+        logger?.debug('Auto-saved migration snapshot');
       }
 
       // Execute operations (sorted by phase)
