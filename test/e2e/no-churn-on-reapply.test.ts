@@ -70,4 +70,34 @@ policies:
     expect(second.executedOperations).toEqual([]);
     expect(second.executed).toBe(0);
   });
+
+  it('regex check constraint (slug format) re-applies as a no-op', async () => {
+    // Pulled directly from the issue body: `tenants_slug_format_check` was
+    // one of the constraints dropped+re-added on every run. Regex literals
+    // in CHECK expressions get a `::text` cast appended by Postgres.
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/tenants.yaml': `
+table: tenants
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+  - name: slug
+    type: text
+    nullable: false
+checks:
+  - name: tenants_slug_format_check
+    expression: slug ~ '^[a-z0-9-]+$'
+`,
+    });
+
+    const first = await runMigration(ctx);
+    expect(first.executed).toBeGreaterThan(0);
+
+    const second = await runMigration(ctx);
+    expect(second.executedOperations).toEqual([]);
+    expect(second.executed).toBe(0);
+  });
 });
