@@ -2352,6 +2352,32 @@ describe('Planner', () => {
       expect(ops).toHaveLength(1);
       expect(ops[0].sql).toContain('"writer"');
     });
+
+    it('dedupes grant_sequence when one role has multiple write-privilege grant blocks', () => {
+      // Common YAML pattern: a column-qualified grant for INSERT/SELECT/UPDATE
+      // and a table-level grant for DELETE alongside it. Both blocks expand
+      // to the same per-sequence GRANT for the same role, so the planner
+      // must collapse them to a single op.
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'items',
+          columns: [
+            { name: 'id', type: 'serial', primary_key: true },
+            { name: 'name', type: 'text' },
+          ],
+          grants: [
+            { to: 'app_user', privileges: ['INSERT', 'SELECT', 'UPDATE'], columns: ['id', 'name'] },
+            { to: 'app_user', privileges: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'] },
+          ],
+        },
+      ];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'grant_sequence');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain('"app_user"');
+      expect(ops[0].sql).toContain('items_id_seq');
+    });
   });
 
   describe('CONCURRENTLY indexes', () => {
