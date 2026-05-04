@@ -2002,21 +2002,29 @@ function createSequenceGrantOps(
   grants: GrantDef[],
   pgSchema: string,
 ): Operation[] {
-  const ops: Operation[] = [];
   const serialCols = columns.filter((c) => SERIAL_TYPES.has(c.type.toLowerCase()));
-  if (serialCols.length === 0) return ops;
+  if (serialCols.length === 0) return [];
+
+  // Tables commonly declare multiple grant blocks for the same role to
+  // mix column-qualified and table-level privileges; both blocks expand
+  // to the same per-sequence GRANT, which Postgres treats as identical.
+  // Dedupe keyed on (sequence, role) to keep the plan one-op-per-effect.
+  const seen = new Set<string>();
+  const ops: Operation[] = [];
 
   for (const grant of grants) {
-    // Only generate sequence grants for roles that need write access
     const needsSequence = grant.privileges.some((p) => SEQUENCE_NEEDING_PRIVILEGES.has(p.toUpperCase()));
     if (!needsSequence) continue;
 
     for (const col of serialCols) {
       const seqName = `${table}_${col.name}_seq`;
+      const key = `${seqName}.${grant.to}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       ops.push({
         type: 'grant_sequence',
         phase: 13,
-        objectName: `${seqName}.${grant.to}`,
+        objectName: key,
         sql: `GRANT USAGE, SELECT ON SEQUENCE "${pgSchema}"."${seqName}" TO "${grant.to}"`,
         destructive: false,
       });
