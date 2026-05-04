@@ -2273,7 +2273,16 @@ function escapeQuote(s: string): string {
 }
 
 function normalizeTypeName(t: string): string {
-  const lower = t.toLowerCase().trim();
+  // Strip whitespace adjacent to parens/commas so `numeric(10, 2)` matches
+  // `numeric(10,2)` (PG's format_type renders without the inner space).
+  const stripped = t
+    .toLowerCase()
+    .trim()
+    .replace(/\s*([(),])\s*/g, '$1');
+  // Split into base name and optional parenthesised args.
+  const match = stripped.match(/^([^()]+?)(\(.+\))?$/);
+  const base = match ? match[1].trim() : stripped;
+  const params = match && match[2] ? match[2] : '';
   const aliases: Record<string, string> = {
     int: 'integer',
     int4: 'integer',
@@ -2284,8 +2293,21 @@ function normalizeTypeName(t: string): string {
     bool: 'boolean',
     serial: 'integer',
     bigserial: 'bigint',
+    smallserial: 'smallint',
+    varchar: 'character varying',
+    'character varying': 'character varying',
+    char: 'character',
+    bpchar: 'character',
+    character: 'character',
+    timestamptz: 'timestamp with time zone',
+    'timestamp with time zone': 'timestamp with time zone',
+    'timestamp without time zone': 'timestamp without time zone',
+    timetz: 'time with time zone',
+    'time with time zone': 'time with time zone',
+    'time without time zone': 'time without time zone',
   };
-  return aliases[lower] || lower;
+  const canonicalBase = aliases[base] || base;
+  return `${canonicalBase}${params}`;
 }
 
 function normalizeWhitespace(s: string): string {

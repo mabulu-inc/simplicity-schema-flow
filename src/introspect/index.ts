@@ -523,89 +523,57 @@ async function getCompositePrimaryKey(
 }
 
 async function getColumns(client: Client, table: string, schema: string): Promise<ColumnDef[]> {
+  // Type comes from format_type(atttypid, atttypmod) on pg_attribute —
+  // PG's own canonical renderer. It handles every parametrised type
+  // uniformly: numeric(p,s), varchar(n), timestamptz, geography(Polygon,
+  // 4326), int4range, etc. information_schema.columns drops the typmod
+  // for PostGIS types, so anything geography/geometry-shaped gets
+  // perpetual alter_column drift if the YAML carries a typmod.
   const result = await client.query(
     `SELECT
-       c.column_name AS name,
-       c.udt_name AS udt_type,
-       c.character_maximum_length AS max_length,
-       c.numeric_precision AS num_precision,
-       c.numeric_scale AS num_scale,
-       c.is_nullable = 'YES' AS nullable,
-       c.column_default AS "default",
-       c.is_generated = 'ALWAYS' AS is_generated,
-       c.generation_expression,
-       col_description(
-         (SELECT oid FROM pg_catalog.pg_class WHERE relname = $1 AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = $2)),
-         c.ordinal_position
-       ) AS comment,
+       a.attname AS name,
+       format_type(a.atttypid, a.atttypmod) AS type,
+       NOT a.attnotnull AS nullable,
+       pg_get_expr(d.adbin, d.adrelid) AS "default",
+       a.attgenerated <> '' AS is_generated,
+       CASE WHEN a.attgenerated <> '' THEN pg_get_expr(d.adbin, d.adrelid) END AS generation_expression,
+       col_description(c.oid, a.attnum) AS comment,
        EXISTS (
          SELECT 1 FROM pg_catalog.pg_constraint con
-         JOIN pg_catalog.pg_class cls ON cls.oid = con.conrelid
-         JOIN pg_catalog.pg_namespace ns ON ns.oid = cls.relnamespace
          WHERE con.contype = 'p'
-           AND cls.relname = $1
-           AND ns.nspname = $2
-           AND c.ordinal_position = ANY(con.conkey)
+           AND con.conrelid = c.oid
+           AND a.attnum = ANY(con.conkey)
        ) AS is_primary_key
-     FROM information_schema.columns c
-     WHERE c.table_schema = $2
-       AND c.table_name = $1
-     ORDER BY c.ordinal_position`,
+     FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+     LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+     WHERE c.relname = $1
+       AND n.nspname = $2
+     ORDER BY a.attnum`,
     [table, schema],
   );
 
   return result.rows.map((r: Record<string, unknown>) => {
     const col: ColumnDef = {
       name: r.name as string,
-      type: normalizeType(
-        r.udt_type as string,
-        r.max_length as number | null,
-        r.num_precision as number | null,
-        r.num_scale as number | null,
-      ),
+      type: r.type as string,
       nullable: r.nullable as boolean,
     };
 
     if (r.is_primary_key) col.primary_key = true;
-    if (r.default !== null && r.default !== undefined) col.default = r.default as string;
+    // pg_attrdef carries both the SET DEFAULT expression and the
+    // generated-column expression. Only treat it as a default when the
+    // column isn't generated — otherwise the planner would chase it as a
+    // mismatched DEFAULT.
+    if (!r.is_generated && r.default !== null && r.default !== undefined) {
+      col.default = r.default as string;
+    }
     if (r.comment) col.comment = r.comment as string;
     if (r.is_generated && r.generation_expression) col.generated = r.generation_expression as string;
 
     return col;
   });
-}
-
-function normalizeType(
-  udtType: string,
-  maxLength: number | null,
-  numPrecision: number | null,
-  numScale: number | null,
-): string {
-  // Map common udt_name values to user-friendly types
-  const typeMap: Record<string, string> = {
-    int4: 'integer',
-    int8: 'bigint',
-    int2: 'smallint',
-    float4: 'real',
-    float8: 'double precision',
-    bool: 'boolean',
-    timestamptz: 'timestamptz',
-    timestamp: 'timestamp',
-    varchar: maxLength ? `varchar(${maxLength})` : 'varchar',
-    bpchar: maxLength ? `char(${maxLength})` : 'char',
-    numeric: numPrecision != null ? `numeric(${numPrecision},${numScale ?? 0})` : 'numeric',
-  };
-
-  if (typeMap[udtType]) return typeMap[udtType];
-
-  // For arrays, information_schema shows ARRAY but udt_name starts with _
-  if (udtType.startsWith('_')) {
-    const baseType = udtType.slice(1);
-    const mapped = typeMap[baseType] || baseType;
-    return `${mapped}[]`;
-  }
-
-  return udtType;
 }
 
 async function getIndexes(client: Client, table: string, schema: string): Promise<IndexDef[]> {
