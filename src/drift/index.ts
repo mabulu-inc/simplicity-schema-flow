@@ -7,18 +7,14 @@
 
 import type { PoolClient } from 'pg';
 import type { DesiredState, ActualState } from '../planner/index.js';
-import {
-  defaultIndexName,
-  indexKeysIdentity,
-  normalizeGrants,
-  normalizeIndexClause,
-} from '../planner/index.js';
+import { defaultIndexName, indexKeysIdentity, normalizeGrants, normalizeIndexClause } from '../planner/index.js';
 import type {
   TableSchema,
   ColumnDef,
   IndexDef,
   CheckDef,
   UniqueConstraintDef,
+  ExclusionConstraintDef,
   TriggerDef,
   PolicyDef,
   GrantDef,
@@ -283,6 +279,9 @@ function driftTables(desired: TableSchema[], actual: Map<string, TableSchema>): 
       items.push(...driftChecks(dt.table, dt.checks || [], at.checks || []));
       items.push(
         ...driftUniqueConstraints(dt.table, dt.unique_constraints || [], at.unique_constraints || [], dt.columns),
+      );
+      items.push(
+        ...driftExclusionConstraints(dt.table, dt.exclusion_constraints || [], at.exclusion_constraints || []),
       );
       items.push(...driftTriggers(dt.table, dt.triggers || [], at.triggers || []));
       items.push(...driftRls(dt, at));
@@ -850,6 +849,43 @@ function driftUniqueConstraints(
   for (const uc of actual) {
     const name = getName(uc);
     if (!desiredNames.has(name) && !columnLevelUniqueNames.has(name)) {
+      items.push({ type: 'constraint', object: `${table}.${name}`, status: 'missing_in_yaml' });
+    }
+  }
+  return items;
+}
+
+// ─── Exclusion Constraints ─────────────────────────────────────
+
+function driftExclusionConstraints(
+  table: string,
+  desired: ExclusionConstraintDef[],
+  actual: ExclusionConstraintDef[],
+): DriftItem[] {
+  const items: DriftItem[] = [];
+  const getName = (ec: ExclusionConstraintDef) =>
+    ec.name || `excl_${table}_${ec.elements.map((e) => e.column).join('_')}`;
+  const identity = (ec: ExclusionConstraintDef) => {
+    const using = (ec.using || 'gist').toLowerCase();
+    const elems = ec.elements.map((e) => `${e.column.toLowerCase()}::${e.operator}`).join(',');
+    const where = (ec.where || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    return `${using}|${elems}|${where}`;
+  };
+
+  const actualByName = new Map(actual.map((ec) => [getName(ec), ec]));
+  for (const ec of desired) {
+    const name = getName(ec);
+    const a = actualByName.get(name);
+    if (!a) {
+      items.push({ type: 'constraint', object: `${table}.${name}`, status: 'missing_in_db' });
+    } else if (identity(ec) !== identity(a)) {
+      items.push({ type: 'constraint', object: `${table}.${name}`, status: 'different' });
+    }
+  }
+  const desiredNames = new Set(desired.map(getName));
+  for (const ec of actual) {
+    const name = getName(ec);
+    if (!desiredNames.has(name)) {
       items.push({ type: 'constraint', object: `${table}.${name}`, status: 'missing_in_yaml' });
     }
   }

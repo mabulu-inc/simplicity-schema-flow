@@ -265,6 +265,27 @@ Created safely: `CREATE UNIQUE INDEX CONCURRENTLY` then `ADD CONSTRAINT ... USIN
 
 Set `nulls_not_distinct: true` to treat NULL values as equal within the unique constraint. By default, PostgreSQL considers each NULL distinct, allowing multiple rows with NULL in unique columns. With this option, only one NULL per unique group is permitted. Requires PostgreSQL 15 or later.
 
+## Exclusion constraints
+
+```yaml
+exclusion_constraints:
+  - name: bookings_no_overlap # optional
+    using: gist # default: gist
+    elements: # required
+      - column: room_id
+        operator: '='
+      - column: during
+        operator: '&&'
+    where: status <> 'cancelled' # optional partial predicate
+    comment: 'description'
+```
+
+Generates `ALTER TABLE … ADD CONSTRAINT … EXCLUDE USING <method> (col WITH op, …) [WHERE (…)]`.
+
+- The default index method is `gist`. Multi-element non-spatial cases (e.g. `room_id WITH =, during WITH &&`) require `btree_gist` listed in `extensions.yaml`.
+- Operator tokens pass through verbatim — same string-pass-through model as `check.expression`.
+- Unlike CHECK and FK, EXCLUDE constraints don't support `NOT VALID`. Adding one against a populated table validates immediately and fails on conflicting rows; deduplicate first if applying against existing data.
+
 ## Triggers
 
 ```yaml

@@ -24,6 +24,8 @@ const DESCRIPTIONS: Record<OperationType, string> = {
   drop_foreign_key: 'Dropped foreign key',
   add_unique_constraint: 'Added unique constraint',
   drop_unique_constraint: 'Dropped unique constraint',
+  add_exclusion_constraint: 'Added exclusion constraint',
+  drop_exclusion_constraint: 'Dropped exclusion constraint',
   // Enums
   create_enum: 'Created enum',
   add_enum_value: 'Added enum value',

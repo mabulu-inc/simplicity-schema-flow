@@ -87,6 +87,29 @@ export interface UniqueConstraintDef {
   comment?: string;
 }
 
+// ─── Exclusion Constraint ───────────────────────────────────────
+
+export interface ExclusionConstraintElement {
+  /** Indexed column name. (Future widening: an `expression` field for
+   *  expression-based EXCLUDE keys.) */
+  column: string;
+  /** Operator token used between the value and the row's existing
+   *  values. Common cases: `=` for equality, `&&` for range/geometry
+   *  overlap. Pass-through; no escaping. */
+  operator: string;
+}
+
+export interface ExclusionConstraintDef {
+  name?: string;
+  /** Index method. Defaults to `gist`. Multi-element non-spatial cases
+   *  typically need `btree_gist` listed in `extensions.yaml`. */
+  using?: string;
+  elements: ExclusionConstraintElement[];
+  /** Optional partial-constraint predicate (e.g. `geofence IS NOT NULL`). */
+  where?: string;
+  comment?: string;
+}
+
 // ─── Trigger ────────────────────────────────────────────────────
 
 export type TriggerTiming = 'BEFORE' | 'AFTER' | 'INSTEAD OF';
@@ -159,6 +182,7 @@ export interface TableSchema {
   indexes?: IndexDef[];
   checks?: CheckDef[];
   unique_constraints?: UniqueConstraintDef[];
+  exclusion_constraints?: ExclusionConstraintDef[];
   triggers?: TriggerDef[];
   rls?: boolean;
   force_rls?: boolean;

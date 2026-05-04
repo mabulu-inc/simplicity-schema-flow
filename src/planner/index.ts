@@ -12,6 +12,7 @@ import type {
   IndexKey,
   CheckDef,
   UniqueConstraintDef,
+  ExclusionConstraintDef,
   TriggerDef,
   PolicyDef,
   GrantDef,
@@ -47,6 +48,8 @@ export type OperationType =
   | 'drop_foreign_key'
   | 'add_unique_constraint'
   | 'drop_unique_constraint'
+  | 'add_exclusion_constraint'
+  | 'drop_exclusion_constraint'
   // Enums
   | 'create_enum'
   | 'add_enum_value'
@@ -632,6 +635,13 @@ function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
     }
   }
 
+  // Exclusion constraints
+  if (table.exclusion_constraints) {
+    for (const ec of table.exclusion_constraints) {
+      colDefs.push(`CONSTRAINT "${exclusionName(table.table, ec)}" ${exclusionClause(ec)}`);
+    }
+  }
+
   ops.push({
     type: 'create_table',
     phase: 6,
@@ -811,6 +821,21 @@ function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
     }
   }
 
+  if (table.exclusion_constraints) {
+    for (const ec of table.exclusion_constraints) {
+      if (ec.comment) {
+        const ecName = exclusionName(table.table, ec);
+        ops.push({
+          type: 'set_comment',
+          phase: 14,
+          objectName: `${table.table}.${ecName}`,
+          sql: `COMMENT ON CONSTRAINT "${ecName}" ON "${pgSchema}"."${table.table}" IS '${escapeQuote(ec.comment)}'`,
+          destructive: false,
+        });
+      }
+    }
+  }
+
   // Seeds (phase 15)
   if (table.seeds && table.seeds.length > 0) {
     ops.push(createSeedTableOp(table.table, table.seeds, table.columns, pgSchema, table.seeds_on_conflict));
@@ -940,6 +965,16 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
       desired.columns,
       pgSchema,
       droppedColNames,
+    ),
+  );
+
+  // Diff exclusion constraints
+  ops.push(
+    ...diffExclusionConstraints(
+      desired.table,
+      desired.exclusion_constraints || [],
+      existing.exclusion_constraints || [],
+      pgSchema,
     ),
   );
 
@@ -1414,6 +1449,95 @@ function diffUniqueConstraints(
     });
   }
 
+  return ops;
+}
+
+// ─── Exclusion Constraints ────────────────────────────────────
+
+/** Default name for an exclusion constraint, mirroring the `uq_` shape. */
+function exclusionName(table: string, ec: ExclusionConstraintDef): string {
+  if (ec.name) return ec.name;
+  const slug = ec.elements.map((e) => e.column).join('_');
+  return `excl_${table}_${slug}`;
+}
+
+/** SQL fragment for the EXCLUDE body — used inline in CREATE TABLE and in
+ *  ALTER TABLE ADD CONSTRAINT. Operator tokens pass through untouched, same
+ *  as CHECK expression bodies. */
+function exclusionClause(ec: ExclusionConstraintDef): string {
+  const using = ec.using || 'gist';
+  const elems = ec.elements.map((e) => `"${e.column}" WITH ${e.operator}`).join(', ');
+  const where = ec.where ? ` WHERE (${ec.where})` : '';
+  return `EXCLUDE USING ${using} (${elems})${where}`;
+}
+
+/** Stable identity of an exclusion constraint, ignoring name. Used to
+ *  detect when only the body changed and the constraint must be recreated. */
+function exclusionIdentity(ec: ExclusionConstraintDef): string {
+  const using = (ec.using || 'gist').toLowerCase();
+  const elems = ec.elements.map((e) => `${e.column.toLowerCase()}::${e.operator}`).join(',');
+  const where = (ec.where || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  return `${using}|${elems}|${where}`;
+}
+
+function diffExclusionConstraints(
+  table: string,
+  desired: ExclusionConstraintDef[],
+  existing: ExclusionConstraintDef[],
+  pgSchema: string,
+): Operation[] {
+  const ops: Operation[] = [];
+  const existingByName = new Map(existing.map((ec) => [exclusionName(table, ec), ec]));
+
+  for (const ec of desired) {
+    const name = exclusionName(table, ec);
+    const existingEc = existingByName.get(name);
+    const needsRecreate = existingEc && exclusionIdentity(ec) !== exclusionIdentity(existingEc);
+
+    if (needsRecreate) {
+      ops.push({
+        type: 'drop_exclusion_constraint',
+        phase: 6,
+        objectName: `${table}.${name}`,
+        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${name}"`,
+        destructive: true,
+      });
+    }
+    if (!existingEc || needsRecreate) {
+      // EXCLUDE constraints don't support NOT VALID, so this validates
+      // immediately against existing rows. Issue #30 calls this out — it
+      // can't be made non-blocking like CHECK / FK can.
+      ops.push({
+        type: 'add_exclusion_constraint',
+        phase: 6,
+        objectName: `${table}.${name}`,
+        sql: `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${name}') THEN ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${name}" ${exclusionClause(ec)}; END IF; END $$`,
+        destructive: false,
+      });
+    }
+    if (ec.comment && (!existingEc || ec.comment !== existingEc.comment)) {
+      ops.push({
+        type: 'set_comment',
+        phase: 14,
+        objectName: `${table}.${name}`,
+        sql: `COMMENT ON CONSTRAINT "${name}" ON "${pgSchema}"."${table}" IS '${escapeQuote(ec.comment)}'`,
+        destructive: false,
+      });
+    }
+  }
+
+  // Drop exclusion constraints not in desired.
+  const desiredNames = new Set(desired.map((ec) => exclusionName(table, ec)));
+  for (const [name] of existingByName) {
+    if (desiredNames.has(name)) continue;
+    ops.push({
+      type: 'drop_exclusion_constraint',
+      phase: 6,
+      objectName: `${table}.${name}`,
+      sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${name}"`,
+      destructive: true,
+    });
+  }
   return ops;
 }
 

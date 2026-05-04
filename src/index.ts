@@ -41,6 +41,8 @@ export type {
   IndexDef,
   CheckDef,
   UniqueConstraintDef,
+  ExclusionConstraintDef,
+  ExclusionConstraintElement,
   TriggerTiming,
   TriggerEvent,
   TriggerForEach,

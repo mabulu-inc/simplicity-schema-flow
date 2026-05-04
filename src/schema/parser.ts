@@ -7,6 +7,8 @@ import type {
   IndexMethod,
   CheckDef,
   UniqueConstraintDef,
+  ExclusionConstraintDef,
+  ExclusionConstraintElement,
   TriggerDef,
   TriggerTiming,
   TriggerEvent,
@@ -241,6 +243,21 @@ function parseUniqueConstraintDef(raw: Record<string, unknown>, context: string)
   return uc;
 }
 
+function parseExclusionConstraintDef(raw: Record<string, unknown>, context: string): ExclusionConstraintDef {
+  const rawElements = requireArray<Record<string, unknown>>(raw, 'elements', context);
+  const elements: ExclusionConstraintElement[] = rawElements.map((el, i) => ({
+    column: requireString(el, 'column', `${context}.elements[${i}]`),
+    operator: requireString(el, 'operator', `${context}.elements[${i}]`),
+  }));
+  const def: ExclusionConstraintDef = { elements };
+  if (raw.name !== undefined) def.name = String(raw.name);
+  if (raw.using !== undefined) def.using = String(raw.using);
+  if (raw.where !== undefined) def.where = String(raw.where);
+  const cmt = resolveComment(raw);
+  if (cmt !== undefined) def.comment = cmt;
+  return def;
+}
+
 function parsePrecheckDef(raw: Record<string, unknown>, context: string): PrecheckDef {
   return {
     name: requireString(raw, 'name', context),
@@ -273,6 +290,10 @@ export function parseTable(yamlStr: string): TableSchema {
   if (raw.unique_constraints !== undefined)
     table.unique_constraints = (raw.unique_constraints as Record<string, unknown>[]).map((uc, i) =>
       parseUniqueConstraintDef(uc, `${ctx}.unique_constraints[${i}]`),
+    );
+  if (raw.exclusion_constraints !== undefined)
+    table.exclusion_constraints = (raw.exclusion_constraints as Record<string, unknown>[]).map((ec, i) =>
+      parseExclusionConstraintDef(ec, `${ctx}.exclusion_constraints[${i}]`),
     );
   if (raw.triggers !== undefined)
     table.triggers = (raw.triggers as Record<string, unknown>[]).map((t, i) =>

@@ -142,6 +142,9 @@ function buildTableYaml(table: TableSchema): Record<string, unknown> {
   if (table.unique_constraints && table.unique_constraints.length > 0) {
     result.unique_constraints = table.unique_constraints;
   }
+  if (table.exclusion_constraints && table.exclusion_constraints.length > 0) {
+    result.exclusion_constraints = table.exclusion_constraints;
+  }
   if (table.triggers && table.triggers.length > 0) result.triggers = table.triggers;
   if (table.policies && table.policies.length > 0) result.policies = table.policies;
   if (table.grants && table.grants.length > 0) result.grants = table.grants;

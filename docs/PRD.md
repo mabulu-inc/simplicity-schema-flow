@@ -157,6 +157,16 @@ unique_constraints:
     nulls_not_distinct: true # PostgreSQL 15+: treat NULLs as equal
     comment: 'One email per tenant'
 
+exclusion_constraints:
+  - name: bookings_no_overlap
+    using: gist # default: gist
+    elements:
+      - column: room_id
+        operator: '='
+      - column: during
+        operator: '&&'
+    where: status <> 'cancelled' # optional partial predicate
+
 triggers:
   - name: set_updated_at
     timing: BEFORE # BEFORE | AFTER | INSTEAD OF
@@ -629,7 +639,7 @@ The planner produces typed `Operation` objects:
 `add_index`, `add_unique_index`, `drop_index`
 
 **Constraints:**
-`add_check`, `add_check_not_valid`, `drop_check`, `add_foreign_key`, `add_foreign_key_not_valid`, `validate_constraint`, `drop_foreign_key`, `add_unique_constraint`, `drop_unique_constraint`
+`add_check`, `add_check_not_valid`, `drop_check`, `add_foreign_key`, `add_foreign_key_not_valid`, `validate_constraint`, `drop_foreign_key`, `add_unique_constraint`, `drop_unique_constraint`, `add_exclusion_constraint`, `drop_exclusion_constraint`
 
 **Enums:**
 `create_enum`, `add_enum_value`, `remove_enum_value`
@@ -672,7 +682,7 @@ The following operations are **blocked by default** and require `--allow-destruc
 - `drop_table`, `drop_column`, `drop_index`, `drop_foreign_key`
 - `drop_view`, `drop_materialized_view`, `drop_extension`
 - `disable_rls`, `drop_policy`, `drop_trigger`
-- `drop_check`, `drop_unique_constraint`
+- `drop_check`, `drop_unique_constraint`, `drop_exclusion_constraint`
 - Column type narrowing (e.g., `text` → `varchar(50)`)
 - Enum value removal (`remove_enum_value`)
 
@@ -787,7 +797,7 @@ interface DriftItem {
 
 - **Tables**: existence, columns (name, type, default, nullability, generated expressions)
 - **Indexes**: existence, columns, uniqueness, method, partial conditions (WHERE), covering columns (INCLUDE), opclass
-- **Constraints**: checks (expression), foreign keys (actions, deferrable, initially_deferred), unique constraints
+- **Constraints**: checks (expression), foreign keys (actions, deferrable, initially_deferred), unique constraints, exclusion constraints (method, elements, partial WHERE)
 - **Enums**: existence, values (order matters)
 - **Functions**: existence, body, args, return type, security, volatility, parallel, strict, leakproof, cost, rows, set params
 - **Views**: existence, query, options, triggers
@@ -832,6 +842,7 @@ When `--apply` is passed, drift detection generates a migration plan to fix all 
   - `add_foreign_key` / `add_foreign_key_not_valid` → `DROP CONSTRAINT`
   - `add_check` / `add_check_not_valid` → `DROP CONSTRAINT`
   - `add_unique_constraint` → `DROP CONSTRAINT`
+  - `add_exclusion_constraint` → `DROP CONSTRAINT`
   - `create_enum` → `DROP TYPE`
   - `create_function` → `DROP FUNCTION`
   - `create_trigger` → `DROP TRIGGER`

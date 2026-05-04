@@ -14,6 +14,7 @@ import type {
   TriggerDef,
   PolicyDef,
   GrantDef,
+  ExclusionConstraintDef,
   EnumSchema,
   FunctionSchema,
   FunctionArg,
@@ -350,6 +351,7 @@ export async function introspectTable(client: Client, tableName: string, schema:
   const tableGrants = await getTableLevelGrants(client, tableName, schema);
   const rlsInfo = await getRlsStatus(client, tableName, schema);
   const uniqueConstraints = await getUniqueConstraints(client, tableName, schema);
+  const exclusionConstraints = await getExclusionConstraints(client, tableName, schema);
 
   // Merge FK info into columns
   for (const fk of fkInfo) {
@@ -416,6 +418,7 @@ export async function introspectTable(client: Client, tableName: string, schema:
     });
   }
 
+  if (exclusionConstraints.length > 0) result.exclusion_constraints = exclusionConstraints;
   if (triggers.length > 0) result.triggers = triggers;
   if (policies.length > 0) result.policies = policies;
   if (rlsInfo.rls) result.rls = true;
@@ -667,6 +670,103 @@ async function getChecks(client: Client, table: string, schema: string): Promise
     if (r.comment) check.comment = r.comment;
     return check;
   });
+}
+
+async function getExclusionConstraints(
+  client: Client,
+  table: string,
+  schema: string,
+): Promise<ExclusionConstraintDef[]> {
+  const result = await client.query(
+    `SELECT con.conname AS name,
+            pg_get_constraintdef(con.oid, true) AS definition,
+            obj_description(con.oid, 'pg_constraint') AS comment
+     FROM pg_catalog.pg_constraint con
+     JOIN pg_catalog.pg_class cls ON cls.oid = con.conrelid
+     JOIN pg_catalog.pg_namespace ns ON ns.oid = cls.relnamespace
+     WHERE con.contype = 'x'
+       AND cls.relname = $1
+       AND ns.nspname = $2
+     ORDER BY con.conname`,
+    [table, schema],
+  );
+
+  const out: ExclusionConstraintDef[] = [];
+  for (const r of result.rows as { name: string; definition: string; comment: string | null }[]) {
+    const parsed = parseExclusionConstraintDef(r.definition);
+    if (!parsed) continue;
+    const def: ExclusionConstraintDef = {
+      name: r.name,
+      using: parsed.using,
+      elements: parsed.elements,
+    };
+    if (parsed.where) def.where = parsed.where;
+    if (r.comment) def.comment = r.comment;
+    out.push(def);
+  }
+  return out;
+}
+
+/**
+ * Parse a `pg_get_constraintdef` output for an EXCLUDE constraint.
+ * Examples:
+ *   `EXCLUDE USING gist (room_id WITH =, during WITH &&)`
+ *   `EXCLUDE USING gist (geofence WITH &&) WHERE (geofence IS NOT NULL)`
+ *
+ * Returns null if the input doesn't look like a recognised EXCLUDE form.
+ */
+function parseExclusionConstraintDef(
+  def: string,
+): { using: string; elements: { column: string; operator: string }[]; where?: string } | null {
+  const usingMatch = def.match(/^EXCLUDE\s+USING\s+(\w+)\s*\(/);
+  if (!usingMatch) return null;
+  const using = usingMatch[1];
+  const openIdx = def.indexOf('(', usingMatch[0].length - 1);
+  if (openIdx < 0) return null;
+  // Walk forward to find the matching close paren, accounting for nested
+  // parens inside operator tokens (rare but possible) and inside expressions.
+  let depth = 0;
+  let closeIdx = -1;
+  for (let i = openIdx; i < def.length; i++) {
+    if (def[i] === '(') depth++;
+    else if (def[i] === ')') {
+      depth--;
+      if (depth === 0) {
+        closeIdx = i;
+        break;
+      }
+    }
+  }
+  if (closeIdx < 0) return null;
+  const elementList = def.slice(openIdx + 1, closeIdx);
+  const elements: { column: string; operator: string }[] = [];
+  for (const part of splitTopLevelCommas(elementList)) {
+    const m = part.trim().match(/^"?([^"]+?)"?\s+WITH\s+(.+)$/);
+    if (!m) return null;
+    elements.push({ column: m[1], operator: m[2].trim() });
+  }
+  const tail = def.slice(closeIdx + 1).trim();
+  let where: string | undefined;
+  const whereMatch = tail.match(/^WHERE\s+\((.*)\)$/s);
+  if (whereMatch) where = whereMatch[1];
+  return { using, elements, where };
+}
+
+function splitTopLevelCommas(s: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === ',' && depth === 0) {
+      out.push(s.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(s.slice(start));
+  return out;
 }
 
 async function getForeignKeys(client: Client, table: string, schema: string): Promise<FKInfo[]> {
