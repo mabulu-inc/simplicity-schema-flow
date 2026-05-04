@@ -51,6 +51,24 @@ export interface ExecuteResult {
 }
 
 /**
+ * Run an operation's SQL inside a context wrapper that, on failure,
+ * prepends the operation type, object name, and SQL to the error
+ * message. The original error is rethrown (not replaced) so callers
+ * that inspect `.code`, `.detail`, etc. on Postgres errors keep
+ * working. (Issue #27.)
+ */
+async function withOpContext<T>(op: Operation, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof Error) {
+      err.message = `${op.type} ${op.objectName}: ${err.message}\n  SQL: ${op.sql}`;
+    }
+    throw err;
+  }
+}
+
+/**
  * Acquire a PostgreSQL advisory lock (non-blocking).
  * Returns true if the lock was acquired, false if already held.
  */
@@ -366,12 +384,14 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
 
           for (const op of transactionalOps) {
             logger?.debug(`Executing: ${op.type} ${op.objectName}`);
-            if (op.type === 'seed_table') {
-              const counts = await executeSeedTable(opClient, op, pgSchema);
-              op.seedResult = counts;
-            } else {
-              await opClient.query(op.sql);
-            }
+            await withOpContext(op, async () => {
+              if (op.type === 'seed_table') {
+                const counts = await executeSeedTable(opClient, op, pgSchema);
+                op.seedResult = counts;
+              } else {
+                await opClient.query(op.sql);
+              }
+            });
             result.executed++;
             result.executedOperations.push(op);
           }
@@ -396,7 +416,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           const concClient = await pool.connect();
           try {
             logger?.debug(`Executing (concurrent): ${op.type} ${op.objectName}`);
-            await concClient.query(op.sql);
+            await withOpContext(op, () => concClient.query(op.sql));
             result.executed++;
             result.executedOperations.push(op);
           } finally {
