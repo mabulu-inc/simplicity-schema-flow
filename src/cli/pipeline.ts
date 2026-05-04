@@ -21,7 +21,11 @@ import {
 } from '../introspect/index.js';
 import { buildPlan } from '../planner/index.js';
 import type { DesiredState, ActualState } from '../planner/index.js';
-import { normalizePolicyExpressions } from '../planner/normalize-expression.js';
+import {
+  normalizePolicyExpressions,
+  normalizeCheckExpressions,
+  normalizeIndexWhereClauses,
+} from '../planner/normalize-expression.js';
 import { execute } from '../executor/index.js';
 import type { ExecuteResult } from '../executor/index.js';
 import { getPool } from '../core/db.js';
@@ -74,11 +78,16 @@ export async function runPipeline(
     // 2. Parse YAML files
     desired = await parseDesiredState(discovered.schema, config.baseDir, logger);
 
-    // 3. Normalize policy expressions via PG round-trip
+    // 3. Normalize SQL expressions via PG round-trip — policy USING/CHECK,
+    //    table CHECK constraints, and partial-index WHERE clauses. Without
+    //    this, every migrate would emit drop+recreate ops for objects whose
+    //    source text differs only in PG's added casts and parens (issue #26).
     const pool = getPool(config.connectionString);
     const normClient = await pool.connect();
     try {
       await normalizePolicyExpressions(normClient, desired.tables);
+      await normalizeCheckExpressions(normClient, desired.tables);
+      await normalizeIndexWhereClauses(normClient, desired.tables);
     } finally {
       normClient.release();
     }

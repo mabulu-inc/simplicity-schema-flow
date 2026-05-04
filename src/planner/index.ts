@@ -1140,11 +1140,20 @@ function indexKeySql(key: IndexKey, opclass?: string): string {
  * collapsed and case-folded for expressions because Postgres's
  * `pg_get_expr` re-renders them with its own spacing; two equivalent
  * expressions shouldn't look different to the diff just because of
- * formatting.
+ * formatting. Whitespace adjacent to `(`, `)`, or `,` is also stripped
+ * so e.g. `lower(email)` matches `lower( email )`.
  */
 function indexKeyIdentity(key: IndexKey): string {
   if (typeof key === 'string') return `col:${key.toLowerCase()}`;
-  return `expr:${key.expression.replace(/\s+/g, ' ').trim().toLowerCase()}`;
+  return `expr:${normalizeExpressionForCompare(key.expression)}`;
+}
+
+function normalizeExpressionForCompare(expr: string): string {
+  return expr
+    .replace(/\s+/g, ' ')
+    .replace(/\s*([(),])\s*/g, '$1')
+    .trim()
+    .toLowerCase();
 }
 
 /** Combined identity for an index's full key list (columns + opclass).
@@ -1596,10 +1605,22 @@ function policyChanged(desired: PolicyDef, existing: PolicyDef): boolean {
   const ePermissive = existing.permissive !== false;
   if (dPermissive !== ePermissive) return true;
   if ((desired.for || 'ALL') !== (existing.for || 'ALL')) return true;
-  if (desired.to !== existing.to) return true;
+  if (normalizePolicyRoles(desired.to) !== normalizePolicyRoles(existing.to)) return true;
   if ((desired.using || '') !== (existing.using || '')) return true;
   if ((desired.check || '') !== (existing.check || '')) return true;
   return false;
+}
+
+// Normalize a policy `to` field for comparison. Postgres stores `PUBLIC` as
+// the lowercase `public` role; YAML conventionally writes `PUBLIC`. Roles
+// can also be a comma-separated list. Case-fold and trim so the desired and
+// introspected forms compare equal.
+function normalizePolicyRoles(to: string): string {
+  return to
+    .split(',')
+    .map((r) => r.trim().toLowerCase())
+    .sort()
+    .join(',');
 }
 
 function createPolicyOp(table: string, policy: PolicyDef, pgSchema: string): Operation {

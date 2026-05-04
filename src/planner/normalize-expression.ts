@@ -1,7 +1,11 @@
 /**
- * Normalize RLS policy USING/CHECK expressions by round-tripping
- * through PostgreSQL so the desired (YAML) form matches the introspected
- * (pg_get_expr) form exactly.
+ * Normalize SQL expressions in YAML-defined schema (RLS policy USING/CHECK
+ * clauses, table CHECK constraints, partial-index WHERE clauses) by
+ * round-tripping each through PostgreSQL so the desired (YAML) form
+ * matches the introspected (pg_get_expr / pg_get_constraintdef) form
+ * exactly. Without this, every migrate would emit drop+recreate ops
+ * for objects whose source text differs only in PG's added casts and
+ * parens — see issue #26.
  */
 
 import type { PoolClient } from 'pg';
@@ -83,4 +87,111 @@ function mapColumnType(type: string): string {
     return 'integer';
   }
   return type;
+}
+
+/**
+ * Normalize all CHECK constraint expressions in the given tables by
+ * round-tripping through PostgreSQL — same approach as
+ * `normalizePolicyExpressions`, but for table-level checks where
+ * PG canonically rewrites e.g. `total >= 0` as `total >= 0::numeric`.
+ */
+export async function normalizeCheckExpressions(client: PoolClient, tables: TableSchema[]): Promise<void> {
+  const tablesWithChecks = tables.filter((t) => t.table && t.checks?.length);
+  if (tablesWithChecks.length === 0) return;
+
+  await client.query('BEGIN');
+  try {
+    for (const table of tablesWithChecks) {
+      for (const check of table.checks!) {
+        check.expression = await normalizeCheckExpression(client, table, check.expression);
+      }
+    }
+  } finally {
+    await client.query('ROLLBACK');
+  }
+}
+
+async function normalizeCheckExpression(client: PoolClient, table: TableSchema, expression: string): Promise<string> {
+  const suffix = Math.random().toString(36).slice(2, 10);
+  const tempTable = `_sf_norm_${suffix}`;
+  const constraintName = `_sf_norm_check`;
+
+  await client.query('SAVEPOINT normalize_check');
+  try {
+    const colDefs = table.columns.map((c) => `"${c.name}" ${mapColumnType(c.type)}`).join(', ');
+    await client.query(`CREATE TEMP TABLE "${tempTable}" (${colDefs})`);
+    await client.query(`ALTER TABLE "${tempTable}" ADD CONSTRAINT "${constraintName}" CHECK (${expression})`);
+
+    const result = await client.query(
+      `SELECT pg_get_constraintdef(con.oid, true) AS def
+       FROM pg_catalog.pg_constraint con
+       JOIN pg_catalog.pg_class cls ON cls.oid = con.conrelid
+       WHERE cls.relname = $1 AND con.conname = $2`,
+      [tempTable, constraintName],
+    );
+
+    const def = result.rows[0]?.def as string | undefined;
+    await client.query('ROLLBACK TO normalize_check');
+    if (!def) return expression;
+    // pg_get_constraintdef returns "CHECK ((expr))" or "CHECK (expr)" — extract inner.
+    const m = def.match(/^CHECK\s*\(\((.*)\)\)$/s) || def.match(/^CHECK\s*\((.*)\)$/s);
+    return m ? m[1] : expression;
+  } catch {
+    await client.query('ROLLBACK TO normalize_check').catch(() => {});
+    return expression;
+  }
+}
+
+/**
+ * Normalize all partial-index WHERE clauses in the given tables by
+ * round-tripping through PostgreSQL. Same shape as the policy/check
+ * normalisers; uses a temp index to capture PG's canonical form.
+ */
+export async function normalizeIndexWhereClauses(client: PoolClient, tables: TableSchema[]): Promise<void> {
+  const tablesWithPartialIdx = tables.filter((t) => t.table && t.indexes?.some((i) => i.where));
+  if (tablesWithPartialIdx.length === 0) return;
+
+  await client.query('BEGIN');
+  try {
+    for (const table of tablesWithPartialIdx) {
+      for (const idx of table.indexes!) {
+        if (!idx.where) continue;
+        idx.where = await normalizeIndexWhere(client, table, idx.where);
+      }
+    }
+  } finally {
+    await client.query('ROLLBACK');
+  }
+}
+
+async function normalizeIndexWhere(client: PoolClient, table: TableSchema, where: string): Promise<string> {
+  const suffix = Math.random().toString(36).slice(2, 10);
+  const tempTable = `_sf_norm_${suffix}`;
+  const tempIdx = `_sf_norm_idx_${suffix}`;
+  // Pick the first column for the index key — only the WHERE clause's
+  // canonical form matters here; the key column is irrelevant.
+  const firstCol = table.columns[0]?.name;
+  if (!firstCol) return where;
+
+  await client.query('SAVEPOINT normalize_where');
+  try {
+    const colDefs = table.columns.map((c) => `"${c.name}" ${mapColumnType(c.type)}`).join(', ');
+    await client.query(`CREATE TEMP TABLE "${tempTable}" (${colDefs})`);
+    await client.query(`CREATE INDEX "${tempIdx}" ON "${tempTable}" ("${firstCol}") WHERE (${where})`);
+
+    const result = await client.query(
+      `SELECT pg_get_expr(ix.indpred, ix.indrelid) AS expr
+       FROM pg_catalog.pg_index ix
+       JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
+       WHERE i.relname = $1`,
+      [tempIdx],
+    );
+
+    const expr = result.rows[0]?.expr as string | undefined;
+    await client.query('ROLLBACK TO normalize_where');
+    return expr ?? where;
+  } catch {
+    await client.query('ROLLBACK TO normalize_where').catch(() => {});
+    return where;
+  }
 }

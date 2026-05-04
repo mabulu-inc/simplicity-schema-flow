@@ -566,10 +566,10 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
   // the N-th key's user-facing SQL form: a bare identifier for a plain
   // column (`email`), a quoted identifier when the column is case-sensitive
   // or reserved (`"Order"`), or a full expression (`lower(email)`,
-  // `COALESCE(x, '…'::text)`). The previous query joined `pg_attribute`
-  // on `attnum = ANY(indkey)`, which silently dropped expression keys
-  // (their indkey entry is 0) — so expression indexes introspected as
-  // empty and looked like something to drop on every run. See #18.
+  // `COALESCE(x, '…'::text)`). The N is 1-indexed; passing 0 returns the
+  // full CREATE INDEX statement. `indnkeyatts` is the count of key columns
+  // (excludes INCLUDE columns); `indnatts` is the total — slots
+  // `indnkeyatts+1 … indnatts` are the INCLUDE columns.
   const result = await client.query(
     `SELECT
        i.relname AS name,
@@ -577,9 +577,13 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
        am.amname AS method,
        pg_get_expr(ix.indpred, ix.indrelid) AS where_clause,
        array(
-         SELECT pg_get_indexdef(ix.indexrelid, s::int, true)
-         FROM generate_subscripts(ix.indkey::int[], 1) AS s
+         SELECT pg_get_indexdef(ix.indexrelid, k::int, true)
+         FROM generate_series(1, ix.indnkeyatts) AS k
        ) AS keys,
+       array(
+         SELECT pg_get_indexdef(ix.indexrelid, k::int, true)
+         FROM generate_series(ix.indnkeyatts + 1, ix.indnatts) AS k
+       ) AS include_cols,
        obj_description(i.oid, 'pg_class') AS comment
      FROM pg_catalog.pg_index ix
      JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
@@ -611,8 +615,15 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
     }
     if (r.where_clause) idx.where = r.where_clause as string;
     if (r.comment) idx.comment = r.comment as string;
+    const includeCols = (r.include_cols as string[]).map((k) => stripQuotes(k.trim()));
+    if (includeCols.length > 0) idx.include = includeCols;
     return idx;
   });
+}
+
+function stripQuotes(s: string): string {
+  const m = s.match(/^"([^"]+)"$/);
+  return m ? m[1] : s;
 }
 
 /**
