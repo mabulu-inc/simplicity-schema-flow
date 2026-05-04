@@ -2068,23 +2068,29 @@ function diffViews(desired: ViewSchema[], actual: Map<string, ViewSchema>, pgSch
   const ops: Operation[] = [];
 
   for (const view of desired) {
-    ops.push({
-      type: 'create_view',
-      phase: 9,
-      objectName: view.name,
-      sql: `CREATE OR REPLACE VIEW "${pgSchema}"."${view.name}"${formatViewOptions(view.options)} AS ${view.query}`,
-      destructive: false,
-    });
+    const existingView = actual.get(view.name);
+
+    // Bodies arrive normalised on both sides — desired is round-tripped
+    // through the temp-view normaliser, existing comes from
+    // pg_get_viewdef. Skip the CREATE OR REPLACE when they match.
+    if (!existingView || existingView.query !== view.query) {
+      ops.push({
+        type: 'create_view',
+        phase: 9,
+        objectName: view.name,
+        sql: `CREATE OR REPLACE VIEW "${pgSchema}"."${view.name}"${formatViewOptions(view.options)} AS ${view.query}`,
+        destructive: false,
+      });
+    }
 
     // Diff triggers on the view (INSTEAD OF triggers)
-    const existingView = actual.get(view.name);
     const desiredTriggers = view.triggers || [];
     const existingTriggers = existingView?.triggers || [];
     if (desiredTriggers.length > 0 || existingTriggers.length > 0) {
       ops.push(...diffTriggers(view.name, desiredTriggers, existingTriggers, pgSchema));
     }
 
-    if (view.comment) {
+    if (view.comment && view.comment !== existingView?.comment) {
       ops.push({
         type: 'set_comment',
         phase: 14,
@@ -2095,16 +2101,7 @@ function diffViews(desired: ViewSchema[], actual: Map<string, ViewSchema>, pgSch
     }
 
     if (view.grants) {
-      for (const grant of view.grants) {
-        const privileges = grant.privileges.join(', ');
-        ops.push({
-          type: 'grant_table',
-          phase: 13,
-          objectName: `${view.name}.${grant.to}`,
-          sql: `GRANT ${privileges} ON "${pgSchema}"."${view.name}" TO "${grant.to}"`,
-          destructive: false,
-        });
-      }
+      ops.push(...diffGrants(view.name, view.grants, existingView?.grants ?? [], pgSchema));
     }
   }
 

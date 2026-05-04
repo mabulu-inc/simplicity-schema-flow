@@ -148,6 +148,55 @@ async function normalizeCheckExpression(client: PoolClient, table: TableSchema, 
 }
 
 /**
+ * Normalize each view's `query` by round-tripping through PostgreSQL.
+ * `pg_get_viewdef` returns the canonical, fully-qualified, reformatted
+ * body — without this round-trip, a literal compare against the YAML
+ * form would re-fire `CREATE OR REPLACE VIEW` on every plan because PG
+ * adds parens, normalises whitespace, expands `*`, and qualifies
+ * identifiers.
+ *
+ * Mutates each view's `query` in place. Errors (referenced tables don't
+ * yet exist on a fresh DB) leave the YAML form unchanged so the first
+ * apply still creates the view.
+ */
+export async function normalizeViewBodies(client: PoolClient, views: { name: string; query: string }[]): Promise<void> {
+  if (views.length === 0) return;
+
+  await client.query('BEGIN');
+  try {
+    for (const view of views) {
+      view.query = await normalizeViewBody(client, view.name, view.query);
+    }
+  } finally {
+    await client.query('ROLLBACK');
+  }
+}
+
+async function normalizeViewBody(client: PoolClient, viewName: string, query: string): Promise<string> {
+  await client.query('SAVEPOINT normalize_view');
+  try {
+    // Use the real view name for the temp view — pg_temp shadows any
+    // persistent same-named view for the savepoint's lifetime.
+    await client.query(`CREATE TEMP VIEW "${viewName}" AS ${query}`);
+
+    const result = await client.query(
+      `SELECT pg_get_viewdef(c.oid, true) AS def
+       FROM pg_catalog.pg_class c
+       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+       WHERE c.relname = $1 AND n.oid = pg_my_temp_schema()`,
+      [viewName],
+    );
+
+    const def = result.rows[0]?.def as string | undefined;
+    await client.query('ROLLBACK TO normalize_view');
+    return def ? def.trim().replace(/;$/, '') : query;
+  } catch {
+    await client.query('ROLLBACK TO normalize_view').catch(() => {});
+    return query;
+  }
+}
+
+/**
  * Normalize all partial-index WHERE clauses in the given tables by
  * round-tripping through PostgreSQL. Same shape as the policy/check
  * normalisers; uses a temp index to capture PG's canonical form.
