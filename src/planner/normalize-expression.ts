@@ -45,8 +45,11 @@ async function normalizeExpression(
   expression: string,
   kind: 'using' | 'check',
 ): Promise<string> {
-  const suffix = Math.random().toString(36).slice(2, 10);
-  const tempTable = `_sf_norm_${suffix}`;
+  // The temp table reuses the real table name so self-qualified
+  // references in the expression (`yards.region_id`) resolve against the
+  // temp's columns — pg_temp is searched first on search_path and
+  // shadows any persistent same-named table for the savepoint's lifetime.
+  const tempTable = table.table;
   const policyName = '_sf_norm_policy';
 
   await client.query('SAVEPOINT normalize_expr');
@@ -64,7 +67,8 @@ async function normalizeExpression(
       `SELECT ${exprColumn} AS expr
        FROM pg_catalog.pg_policy pol
        JOIN pg_catalog.pg_class cls ON cls.oid = pol.polrelid
-       WHERE cls.relname = $1 AND pol.polname = $2`,
+       WHERE cls.relname = $1 AND pol.polname = $2
+         AND cls.relnamespace = pg_my_temp_schema()`,
       [tempTable, policyName],
     );
 
@@ -112,8 +116,8 @@ export async function normalizeCheckExpressions(client: PoolClient, tables: Tabl
 }
 
 async function normalizeCheckExpression(client: PoolClient, table: TableSchema, expression: string): Promise<string> {
-  const suffix = Math.random().toString(36).slice(2, 10);
-  const tempTable = `_sf_norm_${suffix}`;
+  // See normalizeExpression for the temp-table-shadows-real-table rationale.
+  const tempTable = table.table;
   const constraintName = `_sf_norm_check`;
 
   await client.query('SAVEPOINT normalize_check');
@@ -126,7 +130,8 @@ async function normalizeCheckExpression(client: PoolClient, table: TableSchema, 
       `SELECT pg_get_constraintdef(con.oid, true) AS def
        FROM pg_catalog.pg_constraint con
        JOIN pg_catalog.pg_class cls ON cls.oid = con.conrelid
-       WHERE cls.relname = $1 AND con.conname = $2`,
+       WHERE cls.relname = $1 AND con.conname = $2
+         AND cls.relnamespace = pg_my_temp_schema()`,
       [tempTable, constraintName],
     );
 
@@ -165,8 +170,9 @@ export async function normalizeIndexWhereClauses(client: PoolClient, tables: Tab
 }
 
 async function normalizeIndexWhere(client: PoolClient, table: TableSchema, where: string): Promise<string> {
+  // See normalizeExpression for the temp-table-shadows-real-table rationale.
+  const tempTable = table.table;
   const suffix = Math.random().toString(36).slice(2, 10);
-  const tempTable = `_sf_norm_${suffix}`;
   const tempIdx = `_sf_norm_idx_${suffix}`;
   // Pick the first column for the index key — only the WHERE clause's
   // canonical form matters here; the key column is irrelevant.
@@ -183,7 +189,9 @@ async function normalizeIndexWhere(client: PoolClient, table: TableSchema, where
       `SELECT pg_get_expr(ix.indpred, ix.indrelid) AS expr
        FROM pg_catalog.pg_index ix
        JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
-       WHERE i.relname = $1`,
+       JOIN pg_catalog.pg_namespace ns ON ns.oid = i.relnamespace
+       WHERE i.relname = $1
+         AND ns.oid = pg_my_temp_schema()`,
       [tempIdx],
     );
 
