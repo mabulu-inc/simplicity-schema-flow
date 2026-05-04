@@ -1,6 +1,6 @@
 {
   "name": "@smplcty/schema-flow",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Declarative PostgreSQL schema management tool",
   "license": "MIT",
   "repository": {
