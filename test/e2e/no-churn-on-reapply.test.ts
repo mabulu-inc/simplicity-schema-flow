@@ -100,4 +100,52 @@ checks:
     expect(second.executedOperations).toEqual([]);
     expect(second.executed).toBe(0);
   });
+
+  it('self-qualified policy USING / CHECK / partial-index WHERE re-applies as a no-op (#32)', async () => {
+    // Covers the common RLS pattern of writing `tablename.col` inside an
+    // EXISTS subquery so the inner FROM disambiguates joined tables, and
+    // the same shape inside CHECK and partial-index WHERE clauses.
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/things.yaml': `
+table: things
+rls: true
+columns:
+  - name: thing_id
+    type: integer
+    primary_key: true
+  - name: owner_id
+    type: integer
+    nullable: false
+  - name: status
+    type: text
+    nullable: false
+checks:
+  - name: things_owner_positive
+    expression: things.owner_id > 0
+indexes:
+  - name: idx_things_active_owner
+    columns: [owner_id]
+    where: things.status <> 'archived'
+policies:
+  - name: things_owner_visibility
+    for: SELECT
+    to: PUBLIC
+    using: |-
+      EXISTS (
+        SELECT 1 FROM things t2
+        WHERE t2.owner_id = things.owner_id
+          AND t2.status = things.status
+      )
+`,
+    });
+
+    const first = await runMigration(ctx);
+    expect(first.executed).toBeGreaterThan(0);
+
+    const second = await runMigration(ctx);
+    expect(second.executedOperations).toEqual([]);
+    expect(second.executed).toBe(0);
+  });
 });
