@@ -145,6 +145,10 @@ export interface ActualState {
   materializedViews: Map<string, MaterializedViewSchema>;
   roles: Map<string, RoleSchema>;
   extensions: string[];
+  /** Sequence grants keyed by sequence → role → granted privilege set.
+   *  Used to suppress repeat grant_sequence ops when the live ACL already
+   *  carries USAGE+SELECT for the role. */
+  sequenceGrants?: Map<string, Map<string, Set<string>>>;
 }
 
 export interface PlanOptions {
@@ -177,7 +181,7 @@ export function buildPlan(desired: DesiredState, actual: ActualState, options: P
   allOps.push(...diffFunctions(desired.functions, actual.functions, pgSchema));
 
   // Diff tables (without FKs first)
-  allOps.push(...diffTables(desired.tables, actual.tables, pgSchema));
+  allOps.push(...diffTables(desired.tables, actual.tables, pgSchema, actual.sequenceGrants));
 
   // Diff views
   allOps.push(...diffViews(desired.views, actual.views, pgSchema));
@@ -519,15 +523,20 @@ function diffFunctions(desired: FunctionSchema[], actual: Map<string, FunctionSc
 
 // ─── Tables ────────────────────────────────────────────────────
 
-function diffTables(desired: TableSchema[], actual: Map<string, TableSchema>, pgSchema: string): Operation[] {
+function diffTables(
+  desired: TableSchema[],
+  actual: Map<string, TableSchema>,
+  pgSchema: string,
+  sequenceGrants?: Map<string, Map<string, Set<string>>>,
+): Operation[] {
   const ops: Operation[] = [];
 
   for (const desiredTable of desired) {
     const existing = actual.get(desiredTable.table);
     if (!existing) {
-      ops.push(...createTableOps(desiredTable, pgSchema));
+      ops.push(...createTableOps(desiredTable, pgSchema, sequenceGrants));
     } else {
-      ops.push(...alterTableOps(desiredTable, existing, pgSchema));
+      ops.push(...alterTableOps(desiredTable, existing, pgSchema, sequenceGrants));
     }
   }
 
@@ -557,7 +566,11 @@ function wrapConstraintIdempotent(constraintName: string, alterSql: string): str
   return `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${constraintName}') THEN ${alterSql}; END IF; END $$`;
 }
 
-function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
+function createTableOps(
+  table: TableSchema,
+  pgSchema: string,
+  sequenceGrants?: Map<string, Map<string, Set<string>>>,
+): Operation[] {
   const ops: Operation[] = [];
 
   // Prechecks (phase 0 — run before any operations)
@@ -766,7 +779,7 @@ function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
       ops.push(createGrantOp(table.table, grant, pgSchema));
     }
     // Auto-generate sequence grants for serial/bigserial columns
-    ops.push(...createSequenceGrantOps(table.table, table.columns, table.grants, pgSchema));
+    ops.push(...createSequenceGrantOps(table.table, table.columns, table.grants, pgSchema, sequenceGrants));
   }
 
   // Comments (phase 14)
@@ -844,7 +857,12 @@ function createTableOps(table: TableSchema, pgSchema: string): Operation[] {
   return ops;
 }
 
-function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: string): Operation[] {
+function alterTableOps(
+  desired: TableSchema,
+  existing: TableSchema,
+  pgSchema: string,
+  sequenceGrants?: Map<string, Map<string, Set<string>>>,
+): Operation[] {
   const ops: Operation[] = [];
 
   // Prechecks (phase 0 — run before any operations)
@@ -1001,12 +1019,11 @@ function alterTableOps(desired: TableSchema, existing: TableSchema, pgSchema: st
   ops.push(...diffGrants(desired.table, desired.grants || [], existing.grants || [], pgSchema));
 
   // Sequence grants are auto-derived from table grants for serial/bigserial
-  // columns and aren't yet introspected back, so we still emit them blindly
-  // here. They use `GRANT USAGE, SELECT` which is idempotent in Postgres
-  // (no error, no re-grant), but they do still count against the plan size.
-  // Follow-up: introspect sequence privileges and diff them here too.
+  // columns. The introspector pulls existing sequence ACLs into
+  // `sequenceGrants` (when supplied) so this diff suppresses repeats when
+  // the live ACL already carries USAGE+SELECT for the role.
   if (desired.grants) {
-    ops.push(...createSequenceGrantOps(desired.table, desired.columns, desired.grants, pgSchema));
+    ops.push(...createSequenceGrantOps(desired.table, desired.columns, desired.grants, pgSchema, sequenceGrants));
   }
 
   // Comment
@@ -2001,6 +2018,7 @@ function createSequenceGrantOps(
   columns: ColumnDef[],
   grants: GrantDef[],
   pgSchema: string,
+  existingSequenceGrants?: Map<string, Map<string, Set<string>>>,
 ): Operation[] {
   const serialCols = columns.filter((c) => SERIAL_TYPES.has(c.type.toLowerCase()));
   if (serialCols.length === 0) return [];
@@ -2021,6 +2039,10 @@ function createSequenceGrantOps(
       const key = `${seqName}.${grant.to}`;
       if (seen.has(key)) continue;
       seen.add(key);
+
+      const live = existingSequenceGrants?.get(seqName)?.get(grant.to);
+      if (live && live.has('USAGE') && live.has('SELECT')) continue;
+
       ops.push({
         type: 'grant_sequence',
         phase: 13,

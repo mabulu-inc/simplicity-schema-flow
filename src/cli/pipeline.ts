@@ -17,6 +17,7 @@ import {
   getExistingViews,
   getExistingMaterializedViews,
   getExistingRoles,
+  getSequenceGrants,
   introspectTable,
 } from '../introspect/index.js';
 import { buildPlan } from '../planner/index.js';
@@ -268,6 +269,8 @@ async function introspectDatabase(config: SimplicitySchemaConfig, logger: Logger
     const extResult = await client.query("SELECT extname FROM pg_extension WHERE extname != 'plpgsql'");
     const extensions = extResult.rows.map((r: { extname: string }) => r.extname);
 
+    const sequenceGrants = await getSequenceGrants(client, config.pgSchema);
+
     logger.debug(`Introspected: ${tableNames.length} tables, ${enumList.length} enums, ${fnList.length} functions`);
 
     return {
@@ -278,6 +281,7 @@ async function introspectDatabase(config: SimplicitySchemaConfig, logger: Logger
       materializedViews: matViewsMap,
       roles: rolesMap,
       extensions,
+      sequenceGrants,
     };
   } finally {
     client.release();
