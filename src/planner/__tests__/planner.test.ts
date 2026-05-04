@@ -1252,7 +1252,8 @@ describe('Planner', () => {
       expect(grantOps).toHaveLength(2);
       expect(grantOps[0].sql).toContain('"app_readonly"');
       expect(grantOps[1].sql).toContain('"app_writer"');
-      expect(grantOps[1].sql).toContain('SELECT, INSERT');
+      // diffGrants sorts privileges alphabetically before emission.
+      expect(grantOps[1].sql).toContain('INSERT, SELECT');
     });
 
     it('generates WITH clause when options are specified', () => {

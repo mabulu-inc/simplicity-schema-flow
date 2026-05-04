@@ -246,7 +246,9 @@ function parseArgList(arglist: string): FunctionArg[] {
 /** Get all regular views in a schema, excluding extension-owned views. */
 export async function getExistingViews(client: Client, schema: string): Promise<ViewSchema[]> {
   const result = await client.query(
-    `SELECT v.viewname AS name, v.definition AS query
+    `SELECT v.viewname AS name,
+            pg_get_viewdef(c.oid, true) AS query,
+            obj_description(c.oid, 'pg_class') AS comment
      FROM pg_catalog.pg_views v
      JOIN pg_catalog.pg_class c ON c.relname = v.viewname
      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace AND n.nspname = v.schemaname
@@ -261,18 +263,49 @@ export async function getExistingViews(client: Client, schema: string): Promise<
     [schema],
   );
   const views: ViewSchema[] = [];
-  for (const r of result.rows as { name: string; query: string }[]) {
+  for (const r of result.rows as { name: string; query: string; comment: string | null }[]) {
     const view: ViewSchema = {
       name: r.name,
-      query: r.query.trim(),
+      // pg_get_viewdef appends a trailing semicolon and may include a
+      // trailing newline; strip both so the canonical form matches what
+      // the round-trip normaliser produces for desired views.
+      query: r.query.trim().replace(/;$/, '').trim(),
     };
+    if (r.comment) view.comment = r.comment;
     const triggers = await getTriggers(client, r.name, schema);
-    if (triggers.length > 0) {
-      view.triggers = triggers;
-    }
+    if (triggers.length > 0) view.triggers = triggers;
+    const grants = await getViewGrants(client, r.name, schema);
+    if (grants.length > 0) view.grants = grants;
     views.push(view);
   }
   return views;
+}
+
+async function getViewGrants(client: Client, view: string, schema: string): Promise<GrantDef[]> {
+  const result = await client.query(
+    `SELECT grantee, privilege_type, is_grantable
+     FROM information_schema.role_table_grants
+     WHERE table_schema = $2
+       AND table_name = $1
+       AND grantor <> grantee
+     ORDER BY grantee, privilege_type`,
+    [view, schema],
+  );
+
+  const mergeMap = new Map<string, GrantDef>();
+  for (const row of result.rows as { grantee: string; privilege_type: string; is_grantable: string }[]) {
+    const key = row.grantee;
+    const existing = mergeMap.get(key);
+    if (existing) {
+      existing.privileges.push(row.privilege_type);
+      existing.privileges.sort();
+    } else {
+      const grant: GrantDef = { to: row.grantee, privileges: [row.privilege_type] };
+      if (row.is_grantable === 'YES') grant.with_grant_option = true;
+      mergeMap.set(key, grant);
+    }
+  }
+  return [...mergeMap.values()];
 }
 
 /** Get all materialized views in a schema, excluding extension-owned ones. */

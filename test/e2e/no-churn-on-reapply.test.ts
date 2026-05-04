@@ -218,6 +218,58 @@ columns:
     expect(second.executed).toBe(0);
   });
 
+  it('view body, comment, and grants re-apply as a no-op (#42)', async () => {
+    // pg_get_viewdef rewrites view bodies (parens, qualifications,
+    // whitespace) so a literal compare against the YAML query would
+    // re-fire CREATE OR REPLACE every plan. Round-trip both sides.
+    // Comment and grant cascading are also covered.
+    ctx = await useTestProject(DATABASE_URL);
+    const roleName = uniqueRole('view_grant');
+    ctx.registerRole(roleName);
+    await queryDb(
+      ctx,
+      `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${roleName}') THEN
+          CREATE ROLE "${roleName}";
+        END IF;
+      END $$`,
+    );
+
+    writeSchema(ctx.dir, {
+      'tables/orders.yaml': `
+table: orders
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+  - name: status
+    type: text
+    nullable: false
+  - name: total
+    type: integer
+    nullable: false
+`,
+      'views/active_orders.yaml': `
+name: active_orders
+query: |-
+  SELECT id, total
+    FROM orders
+    WHERE status = 'active' AND total > 0
+comment: Visible orders that haven't been archived.
+grants:
+  - to: ${roleName}
+    privileges: [SELECT]
+`,
+    });
+
+    const first = await runMigration(ctx);
+    expect(first.executed).toBeGreaterThan(0);
+
+    const second = await runMigration(ctx);
+    expect(second.executedOperations).toEqual([]);
+    expect(second.executed).toBe(0);
+  });
+
   it('grant_sequence is suppressed when the role already has USAGE+SELECT on the sequence', async () => {
     // Per-table sequence grants are auto-derived from each grant block with
     // a write privilege; without an existing-state check they re-emit every
