@@ -106,6 +106,46 @@ checks:
     expect(second.executed).toBe(0);
   });
 
+  it('exclusion-constraint-backed indexes are not seen as orphan on re-plan (#39)', async () => {
+    // The introspector filters constraint-backed indexes for unique
+    // constraints, but the same filter has to apply to exclusion
+    // constraints too — otherwise the GiST index that backs an EXCLUDE
+    // constraint looks orphan on every plan and gets queued for drop.
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'extensions.yaml': 'extensions:\n  - btree_gist\n',
+      'tables/bookings.yaml': `
+table: bookings
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+  - name: room_id
+    type: integer
+    nullable: false
+  - name: during
+    type: int4range
+    nullable: false
+exclusion_constraints:
+  - name: bookings_no_overlap
+    using: gist
+    elements:
+      - column: room_id
+        operator: '='
+      - column: during
+        operator: '&&'
+`,
+    });
+
+    const first = await runMigration(ctx);
+    expect(first.executed).toBeGreaterThan(0);
+
+    const second = await runMigration(ctx);
+    expect(second.executedOperations).toEqual([]);
+    expect(second.executed).toBe(0);
+  });
+
   it('grant_sequence is suppressed when the role already has USAGE+SELECT on the sequence', async () => {
     // Per-table sequence grants are auto-derived from each grant block with
     // a write privilege; without an existing-state check they re-emit every

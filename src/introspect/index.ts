@@ -649,7 +649,7 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
        AND NOT EXISTS (
          SELECT 1 FROM pg_catalog.pg_constraint con
          WHERE con.conindid = ix.indexrelid
-           AND con.contype = 'u'
+           AND con.contype IN ('u', 'x')
        )
      ORDER BY i.relname`,
     [table, schema],
