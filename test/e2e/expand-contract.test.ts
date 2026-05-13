@@ -10,7 +10,7 @@ import {
 import { DATABASE_URL } from './setup.js';
 import type { TestProject } from './helpers.js';
 import { getPool } from '../../src/core/db.js';
-import { ensureExpandStateTable, runContract, getExpandStatus } from '../../src/expand/index.js';
+import { runContract, getExpandStatus, runBackfillAll, runBackfill } from '../../src/expand/index.js';
 
 describe('E2E: Expand/contract lifecycle', () => {
   let ctx: TestProject;
@@ -21,11 +21,9 @@ describe('E2E: Expand/contract lifecycle', () => {
     }
   });
 
-  it('(1) expand column — new column created, dual-write trigger exists, backfill works', async () => {
+  it('(1) expand column — new column + trigger created, state recorded, backfill is separate', async () => {
     ctx = await useTestProject(DATABASE_URL);
 
-    // Step 1: Create the base table with source data (use integer PK to avoid
-    // serial default being dropped on re-migration — a known planner limitation)
     writeSchema(ctx.dir, {
       'tables/users.yaml': `
 table: users
@@ -42,13 +40,12 @@ columns:
     await runMigration(ctx);
     await assertTableExists(ctx, 'users');
 
-    // Insert some rows before expand (explicit IDs since no serial)
     await queryDb(
       ctx,
       `INSERT INTO "${ctx.schema}".users (id, email) VALUES (1, 'Alice@Example.COM'), (2, 'BOB@test.org')`,
     );
 
-    // Step 2: Add an expand column and re-run migration
+    // Adding the expand column.
     writeSchema(ctx.dir, {
       'tables/users.yaml': `
 table: users
@@ -70,15 +67,28 @@ columns:
     const result = await runMigration(ctx);
     expect(result.executed).toBeGreaterThan(0);
 
-    // Verify: new column exists
     await assertColumnExists(ctx, 'users', 'email_lower');
 
-    // Verify: backfill populated existing rows
-    const backfilled = await queryDb(ctx, `SELECT email, email_lower FROM "${ctx.schema}".users ORDER BY id`);
-    expect(backfilled.rows[0].email_lower).toBe('alice@example.com');
-    expect(backfilled.rows[1].email_lower).toBe('bob@test.org');
+    // Pre-existing rows are NOT backfilled by `run` — that's a separate step.
+    const stillNull = await queryDb(
+      ctx,
+      `SELECT count(*)::int AS cnt FROM "${ctx.schema}".users WHERE email_lower IS NULL`,
+    );
+    expect(stillNull.rows[0].cnt).toBe(2);
 
-    // Verify: dual-write trigger fires on new INSERT
+    // Expand state row is recorded automatically by the migration.
+    const pool = getPool(ctx.config.connectionString);
+    const client = await pool.connect();
+    try {
+      const states = await getExpandStatus(client);
+      const ours = states.filter((s) => s.table_name === `${ctx.schema}.users`);
+      expect(ours.length).toBe(1);
+      expect(ours[0].status).toBe('expanded');
+    } finally {
+      client.release();
+    }
+
+    // Dual-write trigger fires on new INSERT (only sets new when not provided).
     await queryDb(ctx, `INSERT INTO "${ctx.schema}".users (id, email) VALUES (3, 'Charlie@NewDomain.IO')`);
     const newRow = await queryDb(
       ctx,
@@ -86,23 +96,39 @@ columns:
     );
     expect(newRow.rows[0].email_lower).toBe('charlie@newdomain.io');
 
-    // Verify: dual-write trigger fires on UPDATE
+    // Dual-write trigger fires on UPDATE that changes the source column.
     await queryDb(ctx, `UPDATE "${ctx.schema}".users SET email = 'UPDATED@EXAMPLE.COM' WHERE id = 1`);
     const updated = await queryDb(ctx, `SELECT email_lower FROM "${ctx.schema}".users WHERE id = 1`);
     expect(updated.rows[0].email_lower).toBe('updated@example.com');
   });
 
-  it('(2) contract phase — old column dropped, trigger removed', async () => {
+  it('(2) backfill drains pre-existing rows then contract drops the old column', async () => {
     ctx = await useTestProject(DATABASE_URL);
 
-    // Create table and run expand
     writeSchema(ctx.dir, {
       'tables/users.yaml': `
 table: users
 columns:
   - name: id
-    type: serial
+    type: integer
     primary_key: true
+    nullable: false
+  - name: email
+    type: text
+    nullable: false
+`,
+    });
+    await runMigration(ctx);
+    await queryDb(ctx, `INSERT INTO "${ctx.schema}".users (id, email) VALUES (1, 'A@X.com'), (2, 'B@y.com')`);
+
+    writeSchema(ctx.dir, {
+      'tables/users.yaml': `
+table: users
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
   - name: email
     type: text
     nullable: false
@@ -115,40 +141,28 @@ columns:
     });
     await runMigration(ctx);
 
-    // Insert expand_state record (pipeline doesn't auto-insert)
-    const pool = getPool(ctx.config.connectionString);
-    const client = await pool.connect();
-    try {
-      await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
-      await ensureExpandStateTable(client);
-      await client.query(
-        `INSERT INTO _smplcty_schema_flow.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
-         VALUES ($1, $2, $3, $4, $5, 'expanded')`,
-        [
-          `${ctx.schema}.users`,
-          'email_lower',
-          'email',
-          'lower(email)',
-          `_smplcty_sf_dw_${ctx.schema}_users_email_lower`,
-        ],
-      );
-    } finally {
-      client.release();
-    }
+    // Backfill drains the pre-existing rows.
+    const backfilled = await runBackfillAll({
+      connectionString: ctx.config.connectionString,
+      pgSchema: ctx.schema,
+    });
+    expect(backfilled.processed).toBeGreaterThan(0);
 
-    // Run contract
+    const after = await queryDb(ctx, `SELECT email_lower FROM "${ctx.schema}".users ORDER BY id`);
+    expect(after.rows[0].email_lower).toBe('a@x.com');
+    expect(after.rows[1].email_lower).toBe('b@y.com');
+
+    // Now contract succeeds (no diverged rows).
     const contractResult = await runContract({
       connectionString: ctx.config.connectionString,
       tableName: 'users',
       newColumn: 'email_lower',
       pgSchema: ctx.schema,
     });
-
     expect(contractResult.dropped).toBe(true);
-    expect(contractResult.oldColumn).toBe('email');
-    expect(contractResult.triggerDropped).toBe(true);
+    expect(contractResult.rowsDiverged).toBe(0);
 
-    // Verify: old column is gone
+    // Old column is gone.
     const colResult = await queryDb(
       ctx,
       `SELECT column_name FROM information_schema.columns
@@ -157,7 +171,7 @@ columns:
     );
     expect(colResult.rowCount).toBe(0);
 
-    // Verify: trigger is gone
+    // Trigger is gone.
     const triggerResult = await queryDb(
       ctx,
       `SELECT trigger_name FROM information_schema.triggers
@@ -166,21 +180,36 @@ columns:
     );
     expect(triggerResult.rowCount).toBe(0);
 
-    // Verify: new column still exists and has data
     await assertColumnExists(ctx, 'users', 'email_lower');
   });
 
-  it('(3) expand-status shows in-progress migration before contract', async () => {
+  it('(3) contract refuses when backfill is incomplete', async () => {
     ctx = await useTestProject(DATABASE_URL);
 
-    // Create table and run expand
     writeSchema(ctx.dir, {
       'tables/users.yaml': `
 table: users
 columns:
   - name: id
-    type: serial
+    type: integer
     primary_key: true
+    nullable: false
+  - name: email
+    type: text
+    nullable: false
+`,
+    });
+    await runMigration(ctx);
+    await queryDb(ctx, `INSERT INTO "${ctx.schema}".users (id, email) VALUES (1, 'A@X.com'), (2, 'B@y.com')`);
+
+    writeSchema(ctx.dir, {
+      'tables/users.yaml': `
+table: users
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
   - name: email
     type: text
     nullable: false
@@ -193,58 +222,105 @@ columns:
     });
     await runMigration(ctx);
 
-    // Insert expand_state record
-    const pool = getPool(ctx.config.connectionString);
-    const client = await pool.connect();
-    try {
-      await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
-      await ensureExpandStateTable(client);
-      await client.query(
-        `INSERT INTO _smplcty_schema_flow.expand_state (table_name, new_column, old_column, transform, trigger_name, status)
-         VALUES ($1, $2, $3, $4, $5, 'expanded')`,
-        [
-          `${ctx.schema}.users`,
-          'email_lower',
-          'email',
-          'lower(email)',
-          `_smplcty_sf_dw_${ctx.schema}_users_email_lower`,
-        ],
-      );
+    // Skip backfill — contract should refuse.
+    await expect(
+      runContract({
+        connectionString: ctx.config.connectionString,
+        tableName: 'users',
+        newColumn: 'email_lower',
+        pgSchema: ctx.schema,
+      }),
+    ).rejects.toThrow(/row\(s\) still satisfy/);
 
-      // Check expand-status
-      const states = await getExpandStatus(client);
-      const ours = states.filter((s) => s.table_name === `${ctx.schema}.users`);
-      expect(ours.length).toBe(1);
-      expect(ours[0].status).toBe('expanded');
-      expect(ours[0].new_column).toBe('email_lower');
-      expect(ours[0].old_column).toBe('email');
-    } finally {
-      client.release();
-    }
-
-    // After contract, status should be 'contracted'
-    await runContract({
-      connectionString: ctx.config.connectionString,
-      tableName: 'users',
-      newColumn: 'email_lower',
-      pgSchema: ctx.schema,
-    });
-
-    const client2 = await pool.connect();
-    try {
-      const states = await getExpandStatus(client2);
-      const ours = states.filter((s) => s.table_name === `${ctx.schema}.users`);
-      expect(ours.length).toBe(1);
-      expect(ours[0].status).toBe('contracted');
-    } finally {
-      client2.release();
-    }
+    // Old column should still be present.
+    const stillThere = await queryDb(
+      ctx,
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = $1 AND table_name = 'users' AND column_name = 'email'`,
+      [ctx.schema],
+    );
+    expect(stillThere.rowCount).toBe(1);
   });
 
-  it('(4) expand with reverse transform — dual-write copies new→old', async () => {
+  it('(4) zero-downtime rename recipe — identity transform on a nullable source', async () => {
     ctx = await useTestProject(DATABASE_URL);
 
-    // Create table with source data (integer PK for re-migration compatibility)
+    writeSchema(ctx.dir, {
+      'tables/users.yaml': `
+table: users
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
+  - name: middle_name
+    type: text
+`,
+    });
+    await runMigration(ctx);
+    await queryDb(
+      ctx,
+      `INSERT INTO "${ctx.schema}".users (id, middle_name)
+       VALUES (1, 'Quincy'), (2, NULL), (3, 'Ann')`,
+    );
+
+    // Add the new column as an identity-transform expand (the "rename" pattern).
+    writeSchema(ctx.dir, {
+      'tables/users.yaml': `
+table: users
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+    nullable: false
+  - name: middle_name
+    type: text
+  - name: middle_name_v2
+    type: text
+    expand:
+      from: middle_name
+      transform: "middle_name"
+`,
+    });
+    await runMigration(ctx);
+
+    // Backfill: copies non-null values; rows where source is NULL satisfy
+    // the invariant already (both NULL), so no infinite loop.
+    const backfilled = await runBackfill({
+      connectionString: ctx.config.connectionString,
+      tableName: 'users',
+      newColumn: 'middle_name_v2',
+      transform: 'middle_name',
+      pgSchema: ctx.schema,
+    });
+    expect(backfilled.rowsUpdated).toBe(2); // rows 1 and 3; row 2 already satisfied (both NULL)
+
+    // Confirm the invariant holds across NULL and non-NULL rows.
+    const diverged = await queryDb(
+      ctx,
+      `SELECT count(*)::int AS cnt FROM "${ctx.schema}".users
+       WHERE middle_name_v2 IS DISTINCT FROM middle_name`,
+    );
+    expect(diverged.rows[0].cnt).toBe(0);
+
+    // Contract drops the old column.
+    const contractResult = await runContract({
+      connectionString: ctx.config.connectionString,
+      tableName: 'users',
+      newColumn: 'middle_name_v2',
+      pgSchema: ctx.schema,
+    });
+    expect(contractResult.dropped).toBe(true);
+
+    const stillNullable = await queryDb(ctx, `SELECT middle_name_v2 FROM "${ctx.schema}".users ORDER BY id`);
+    expect(stillNullable.rows[0].middle_name_v2).toBe('Quincy');
+    expect(stillNullable.rows[1].middle_name_v2).toBeNull();
+    expect(stillNullable.rows[2].middle_name_v2).toBe('Ann');
+  });
+
+  it('(5) expand with reverse transform — bidirectional dual-write', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+
     writeSchema(ctx.dir, {
       'tables/items.yaml': `
 table: items
@@ -261,7 +337,6 @@ columns:
     await runMigration(ctx);
     await queryDb(ctx, `INSERT INTO "${ctx.schema}".items (id, price_cents) VALUES (1, 1000), (2, 2500)`);
 
-    // Add expand column with reverse transform
     writeSchema(ctx.dir, {
       'tables/items.yaml': `
 table: items
@@ -281,88 +356,83 @@ columns:
       reverse: "price_dollars * 100"
 `,
     });
-    const result = await runMigration(ctx);
-    expect(result.executed).toBeGreaterThan(0);
+    await runMigration(ctx);
 
-    // Verify: forward transform works (backfill)
+    // Backfill the pre-existing rows.
+    await runBackfill({
+      connectionString: ctx.config.connectionString,
+      tableName: 'items',
+      newColumn: 'price_dollars',
+      transform: 'price_cents / 100.0',
+      pgSchema: ctx.schema,
+    });
     const backfilled = await queryDb(ctx, `SELECT price_cents, price_dollars FROM "${ctx.schema}".items ORDER BY id`);
     expect(Number(backfilled.rows[0].price_dollars)).toBe(10);
     expect(Number(backfilled.rows[1].price_dollars)).toBe(25);
 
-    // Verify: forward dual-write on INSERT
-    await queryDb(ctx, `INSERT INTO "${ctx.schema}".items (id, price_cents) VALUES (3, 500)`);
-    const fwd = await queryDb(ctx, `SELECT price_dollars FROM "${ctx.schema}".items WHERE price_cents = 500`);
-    expect(Number(fwd.rows[0].price_dollars)).toBe(5);
-
-    // Verify: reverse transform is present in the trigger function body
-    const fnBody = await queryDb(ctx, `SELECT prosrc FROM pg_proc WHERE proname = $1`, [
-      `_smplcty_sf_dw_fn_${ctx.schema}_items_price_dollars`,
-    ]);
-    expect(fnBody.rows.length).toBe(1);
-    expect(fnBody.rows[0].prosrc).toContain('NEW.price_cents');
-    expect(fnBody.rows[0].prosrc).toContain('NEW.price_dollars');
-
-    // Verify: updating the old column propagates via forward transform
+    // Forward dual-write on UPDATE of source column.
     await queryDb(ctx, `UPDATE "${ctx.schema}".items SET price_cents = 9999 WHERE id = 1`);
-    const rev = await queryDb(ctx, `SELECT price_cents, price_dollars FROM "${ctx.schema}".items WHERE id = 1`);
-    expect(Number(rev.rows[0].price_cents)).toBe(9999);
-    expect(Number(rev.rows[0].price_dollars)).toBeCloseTo(99.99, 2);
+    const fwd = await queryDb(ctx, `SELECT price_dollars FROM "${ctx.schema}".items WHERE id = 1`);
+    expect(Number(fwd.rows[0].price_dollars)).toBeCloseTo(99.99, 2);
+
+    // Reverse dual-write on UPDATE of new column only.
+    await queryDb(ctx, `UPDATE "${ctx.schema}".items SET price_dollars = 50 WHERE id = 2`);
+    const rev = await queryDb(ctx, `SELECT price_cents, price_dollars FROM "${ctx.schema}".items WHERE id = 2`);
+    expect(Number(rev.rows[0].price_cents)).toBe(5000);
+    expect(Number(rev.rows[0].price_dollars)).toBe(50);
   });
 
-  it('(5) expand with custom batch_size', async () => {
+  it('(6) expand-status reflects in-progress migration before contract', async () => {
     ctx = await useTestProject(DATABASE_URL);
 
-    // Create table with many rows (integer PK for re-migration compatibility)
     writeSchema(ctx.dir, {
-      'tables/records.yaml': `
-table: records
+      'tables/users.yaml': `
+table: users
 columns:
   - name: id
     type: integer
     primary_key: true
     nullable: false
-  - name: name
+  - name: email
     type: text
     nullable: false
+  - name: email_lower
+    type: text
+    expand:
+      from: email
+      transform: "lower(email)"
 `,
     });
     await runMigration(ctx);
 
-    // Insert 20 rows with explicit IDs
-    for (let i = 0; i < 20; i++) {
-      await queryDb(ctx, `INSERT INTO "${ctx.schema}".records (id, name) VALUES ($1, $2)`, [i + 1, `Record_${i}`]);
+    const pool = getPool(ctx.config.connectionString);
+    const client = await pool.connect();
+    try {
+      const states = await getExpandStatus(client);
+      const ours = states.filter((s) => s.table_name === `${ctx.schema}.users`);
+      expect(ours.length).toBe(1);
+      expect(ours[0].status).toBe('expanded');
+      expect(ours[0].new_column).toBe('email_lower');
+      expect(ours[0].old_column).toBe('email');
+    } finally {
+      client.release();
     }
 
-    // Add expand column with small batch_size
-    writeSchema(ctx.dir, {
-      'tables/records.yaml': `
-table: records
-columns:
-  - name: id
-    type: integer
-    primary_key: true
-    nullable: false
-  - name: name
-    type: text
-    nullable: false
-  - name: name_lower
-    type: text
-    expand:
-      from: name
-      transform: "lower(name)"
-      batch_size: 5
-`,
+    await runContract({
+      connectionString: ctx.config.connectionString,
+      tableName: 'users',
+      newColumn: 'email_lower',
+      pgSchema: ctx.schema,
     });
-    const result = await runMigration(ctx);
-    expect(result.executed).toBeGreaterThan(0);
 
-    // Verify: at least some rows were backfilled (executor runs single batch with LIMIT batch_size)
-    const res = await queryDb(ctx, `SELECT count(*) as cnt FROM "${ctx.schema}".records WHERE name_lower IS NOT NULL`);
-    expect(Number(res.rows[0].cnt)).toBeGreaterThan(0);
-
-    // Verify: new inserts still get dual-write
-    await queryDb(ctx, `INSERT INTO "${ctx.schema}".records (id, name) VALUES (21, 'NEW_RECORD')`);
-    const newRow = await queryDb(ctx, `SELECT name_lower FROM "${ctx.schema}".records WHERE name = 'NEW_RECORD'`);
-    expect(newRow.rows[0].name_lower).toBe('new_record');
+    const client2 = await pool.connect();
+    try {
+      const states = await getExpandStatus(client2);
+      const ours = states.filter((s) => s.table_name === `${ctx.schema}.users`);
+      expect(ours.length).toBe(1);
+      expect(ours[0].status).toBe('contracted');
+    } finally {
+      client2.release();
+    }
   });
 });

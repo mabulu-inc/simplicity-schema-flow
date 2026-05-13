@@ -2891,39 +2891,44 @@ describe('Executor', () => {
 
         const plan = buildPlan(desired, actual, { pgSchema: testSchema });
 
-        // Verify expand operations were generated
+        // Verify expand operations were generated (2 ops, no inline backfill).
         const expandOps = plan.operations.filter((o) => o.type === 'expand_column');
         expect(expandOps.length).toBe(1);
         const triggerOps = plan.operations.filter((o) => o.type === 'create_dual_write_trigger');
         expect(triggerOps.length).toBe(1);
-        const backfillOps = plan.operations.filter((o) => o.type === 'backfill_column');
-        expect(backfillOps.length).toBe(1);
 
-        // Execute the plan
+        // Execute the plan (also records expand_state automatically).
         const result = await execute({
           connectionString: DATABASE_URL,
           operations: plan.operations,
           pgSchema: testSchema,
           logger,
         });
-        expect(result.executed).toBe(3);
+        expect(result.executed).toBe(2);
 
-        // Verify: column exists, backfill worked, trigger fires
         const verifyClient = await pool.connect();
         try {
-          // Check backfilled data
-          const backfilled = await verifyClient.query(
-            `SELECT email, email_lower FROM "${testSchema}".users ORDER BY id`,
+          // Backfill is not part of run — pre-existing rows remain NULL.
+          const stillNull = await verifyClient.query(
+            `SELECT count(*)::int AS cnt FROM "${testSchema}".users WHERE email_lower IS NULL`,
           );
-          expect(backfilled.rows[0].email_lower).toBe('alice@example.com');
-          expect(backfilled.rows[1].email_lower).toBe('bob@test.org');
+          expect(stillNull.rows[0].cnt).toBe(2);
 
-          // Check dual-write trigger fires on new INSERT
+          // Trigger fires on new INSERT and populates the new column.
           await verifyClient.query(`INSERT INTO "${testSchema}".users (email) VALUES ('Charlie@NewDomain.io')`);
           const newRow = await verifyClient.query(
             `SELECT email_lower FROM "${testSchema}".users WHERE email = 'Charlie@NewDomain.io'`,
           );
           expect(newRow.rows[0].email_lower).toBe('charlie@newdomain.io');
+
+          // expand_state row should have been recorded automatically.
+          const stateRes = await verifyClient.query(
+            `SELECT status, new_column FROM _smplcty_schema_flow.expand_state
+             WHERE table_name = $1 AND new_column = 'email_lower'`,
+            [`${testSchema}.users`],
+          );
+          expect(stateRes.rows.length).toBe(1);
+          expect(stateRes.rows[0].status).toBe('expanded');
         } finally {
           await verifyClient.query(`DROP SCHEMA "${testSchema}" CASCADE`);
           verifyClient.release();

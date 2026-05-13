@@ -69,7 +69,6 @@ const DESCRIPTIONS: Record<OperationType, string> = {
   // Expand/contract
   expand_column: 'Expanded column',
   create_dual_write_trigger: 'Created dual-write trigger',
-  backfill_column: 'Backfilled column',
   // Other
   set_comment: 'Set comment',
   add_seed: 'Seeded',

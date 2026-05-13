@@ -13,6 +13,7 @@ import type { Logger } from '../core/logger.js';
 import { getPool } from '../core/db.js';
 import { ensureHistoryTable, fileNeedsApply, recordFile } from '../core/tracker.js';
 import { ensureSnapshotsTable, saveSnapshot } from '../rollback/index.js';
+import { recordExpandState } from '../expand/index.js';
 
 // Advisory lock key — consistent across all schema-flow instances
 const ADVISORY_LOCK_KEY = 737_513; // "ss" in ASCII-inspired number
@@ -392,6 +393,12 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
                 await opClient.query(op.sql);
               }
             });
+            // Record expand state once the trigger is in place; the column has
+            // already been created earlier in this transaction. Idempotent —
+            // re-runs ON CONFLICT DO NOTHING.
+            if (op.type === 'create_dual_write_trigger' && op.expandMeta) {
+              await recordExpandState(opClient, op.expandMeta);
+            }
             result.executed++;
             result.executedOperations.push(op);
           }

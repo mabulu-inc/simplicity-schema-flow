@@ -18,6 +18,9 @@ Commands:
   plan                 Dry-run — show planned operations without executing
   validate             Execute plan in a rollback transaction to verify SQL validity
   status               Show migration status (applied files, pending changes)
+  backfill             Drain pending expand-column backfills
+  contract             Complete expand/contract by dropping the old column
+  expand-status        Show in-progress expand/contract migrations
   init                 Initialize a new schema project directory
   help                 Show this help message
 
@@ -264,20 +267,47 @@ Examples:
 
   contract: `schema-flow contract — Run contract phase of expand/contract migration
 
-Completes the contract phase for the latest expanded column migration, dropping the old column.
+Completes the contract phase for the latest expanded column migration. Verifies
+that backfill is complete (no rows where new_col IS DISTINCT FROM transform(old))
+before dropping the old column and dual-write trigger.
 
 Usage: schema-flow contract [options]
 
 Options:
+  --force                       Drop the old column even if rows still diverge
+  --i-understand-data-loss      Required alongside --force (data-loss confirmation)
 ${COMMON_DB_FLAGS}
 
 Examples:
   schema-flow contract --db postgres://localhost/mydb
+  schema-flow contract --force --i-understand-data-loss
   schema-flow contract --json`,
+
+  backfill: `schema-flow backfill — Drain pending expand-column backfills
+
+Iterates expand_state rows with status='expanded' and copies forward via the
+transform expression, in batches. Idempotent and resumable — re-runs pick up
+where prior invocations left off. Foreground; background with the OS (e.g.
+nohup, systemd, or a CI job).
+
+Usage: schema-flow backfill [options]
+
+Options:
+  --table <name>        Only backfill columns belonging to this table
+  --column <tbl.col>    Only backfill this specific column
+  --concurrency N       Backfills to run in parallel (default 1)
+${COMMON_DB_FLAGS}
+
+Examples:
+  schema-flow backfill
+  schema-flow backfill --table users
+  schema-flow backfill --concurrency 4
+  nohup schema-flow backfill > backfill.log 2>&1 &`,
 
   'expand-status': `schema-flow expand-status — Show expand/contract migration status
 
-Displays the current state of all expand/contract column migrations.
+Displays the current state of all expand/contract column migrations, including
+the count of rows still pending backfill for expanded columns.
 
 Usage: schema-flow expand-status [options]
 

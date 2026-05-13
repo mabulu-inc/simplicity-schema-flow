@@ -20,7 +20,7 @@ import { generateErd } from '../erd/index.js';
 import { generateFromDb } from '../scaffold/index.js';
 import { scaffoldPre, scaffoldPost, scaffoldMixin } from '../scaffold/index.js';
 import { runDown } from '../rollback/index.js';
-import { runContract, getExpandStatus } from '../expand/index.js';
+import { runContract, getExpandStatus, runBackfillAll, checkBackfillComplete } from '../expand/index.js';
 import * as fs from 'node:fs';
 
 async function main(): Promise<void> {
@@ -386,6 +386,14 @@ async function main(): Promise<void> {
           return;
         }
 
+        if (parsed.force && !parsed.iUnderstandDataLoss) {
+          logger.error(
+            '`--force` requires `--i-understand-data-loss` (refusing to drop the old column with unbackfilled rows).',
+          );
+          process.exitCode = 1;
+          return;
+        }
+
         // Find the latest expanded migration and contract it
         const contractPool = getPool(config.connectionString);
         const contractClient = await contractPool.connect();
@@ -397,11 +405,15 @@ async function main(): Promise<void> {
             break;
           }
           const latest = expanded[expanded.length - 1];
+          // table_name is stored as "schema.table" — split for runContract.
+          const tableOnly = latest.table_name.includes('.') ? latest.table_name.split('.').pop()! : latest.table_name;
+          const schemaPrefix = latest.table_name.includes('.') ? latest.table_name.split('.')[0] : config.pgSchema;
           const contractResult = await runContract({
             connectionString: config.connectionString,
-            tableName: latest.table_name,
+            tableName: tableOnly,
             newColumn: latest.new_column,
-            pgSchema: config.pgSchema,
+            pgSchema: schemaPrefix,
+            force: parsed.force,
             logger,
           });
           if (config.json) {
@@ -411,6 +423,35 @@ async function main(): Promise<void> {
           }
         } finally {
           contractClient.release();
+        }
+        break;
+      }
+
+      case 'backfill': {
+        const connected = await testConnection(config.connectionString);
+        if (!connected) {
+          logger.error('Could not connect to database');
+          process.exitCode = 1;
+          return;
+        }
+
+        const backfillResult = await runBackfillAll({
+          connectionString: config.connectionString,
+          pgSchema: config.pgSchema,
+          table: parsed.table,
+          column: parsed.column,
+          concurrency: parsed.concurrency,
+          logger,
+        });
+
+        if (config.json) {
+          console.log(JSON.stringify(backfillResult, null, 2));
+        } else if (backfillResult.processed === 0) {
+          logger.info('No expanded columns pending backfill');
+        } else {
+          logger.info(
+            `Backfilled ${backfillResult.totalRowsUpdated} row(s) across ${backfillResult.processed} column(s)`,
+          );
         }
         break;
       }
@@ -427,14 +468,36 @@ async function main(): Promise<void> {
         const client = await pool.connect();
         try {
           const states = await getExpandStatus(client);
+
+          // Augment expanded states with the row-divergence count so operators
+          // can see backfill progress alongside status.
+          type Augmented = (typeof states)[number] & { rows_remaining?: number };
+          const augmented: Augmented[] = [];
+          for (const s of states) {
+            if (s.status === 'expanded') {
+              try {
+                const rows = await checkBackfillComplete(client, s);
+                augmented.push({ ...s, rows_remaining: rows });
+              } catch {
+                augmented.push({ ...s, rows_remaining: undefined });
+              }
+            } else {
+              augmented.push({ ...s });
+            }
+          }
+
           if (config.json) {
-            console.log(JSON.stringify(states, null, 2));
+            console.log(JSON.stringify(augmented, null, 2));
           } else {
-            if (states.length === 0) {
+            if (augmented.length === 0) {
               logger.info('No expand/contract migrations in progress');
             } else {
-              for (const s of states) {
-                logger.info(`  ${s.table_name}.${s.old_column} → ${s.new_column}: ${s.status}`);
+              for (const s of augmented) {
+                const tail =
+                  s.status === 'expanded' && s.rows_remaining !== undefined
+                    ? ` — ${s.rows_remaining} row(s) remaining`
+                    : '';
+                logger.info(`  ${s.table_name}.${s.old_column} → ${s.new_column}: ${s.status}${tail}`);
               }
             }
           }

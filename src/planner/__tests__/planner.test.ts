@@ -3242,18 +3242,16 @@ describe('Planner', () => {
       expect(expandOps).toHaveLength(1);
       expect(expandOps[0].sql).toContain('ADD COLUMN');
       expect(expandOps[0].sql).toContain('email_lower');
+      expect(expandOps[0].expandMeta?.oldColumn).toBe('email');
 
       // Should produce dual-write trigger
       const triggerOps = findOps(result.operations, 'create_dual_write_trigger');
       expect(triggerOps).toHaveLength(1);
       expect(triggerOps[0].sql).toContain('lower(');
+      expect(triggerOps[0].expandMeta?.transform).toBe('lower(email)');
 
-      // Should produce backfill
-      const backfillOps = findOps(result.operations, 'backfill_column');
-      expect(backfillOps).toHaveLength(1);
-      expect(backfillOps[0].sql).toContain('UPDATE');
-
-      // Should NOT produce a plain add_column
+      // Backfill is now a separate command (`schema-flow backfill`) — not part
+      // of the migration plan.
       const addColOps = findOps(result.operations, 'add_column');
       expect(addColOps).toHaveLength(0);
     });
@@ -3283,8 +3281,6 @@ describe('Planner', () => {
       expect(expandOps).toHaveLength(1);
       const triggerOps = findOps(result.operations, 'create_dual_write_trigger');
       expect(triggerOps).toHaveLength(1);
-      const backfillOps = findOps(result.operations, 'backfill_column');
-      expect(backfillOps).toHaveLength(1);
     });
 
     it('expand operations have higher phase than table creation', () => {
@@ -3304,12 +3300,10 @@ describe('Planner', () => {
       const createOps = findOps(result.operations, 'create_table');
       const expandOps = findOps(result.operations, 'expand_column');
       const triggerOps = findOps(result.operations, 'create_dual_write_trigger');
-      const backfillOps = findOps(result.operations, 'backfill_column');
 
-      // Expand ops should come after table creation
+      // Expand ops should come after table creation; trigger after column add.
       expect(expandOps[0].phase).toBeGreaterThan(createOps[0].phase);
       expect(triggerOps[0].phase).toBeGreaterThan(expandOps[0].phase);
-      expect(backfillOps[0].phase).toBeGreaterThan(triggerOps[0].phase);
     });
 
     it('uses identity transform for simple rename expand', () => {
@@ -3335,8 +3329,10 @@ describe('Planner', () => {
       const result = buildPlan(desired, actual);
       const expandOps = findOps(result.operations, 'expand_column');
       expect(expandOps).toHaveLength(1);
-      const backfillOps = findOps(result.operations, 'backfill_column');
-      expect(backfillOps[0].sql).toContain('full_name');
+      const triggerOps = findOps(result.operations, 'create_dual_write_trigger');
+      // Identity transform rewrites to NEW.<source> inside the trigger.
+      expect(triggerOps[0].sql).toContain('NEW.full_name');
+      expect(triggerOps[0].expandMeta?.transform).toBe('full_name');
     });
   });
 });

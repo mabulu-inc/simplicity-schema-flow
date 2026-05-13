@@ -15,6 +15,7 @@ const VALID_COMMANDS = [
   'new',
   'down',
   'contract',
+  'backfill',
   'expand-status',
   'docs',
   'help',
@@ -42,6 +43,16 @@ export interface ParsedArgs {
   apply?: boolean;
   /** --help was passed after a command (per-command help) */
   helpRequested?: boolean;
+  /** --table <name> filter for backfill */
+  table?: string;
+  /** --column <table.col> filter for backfill */
+  column?: string;
+  /** --concurrency N for backfill */
+  concurrency?: number;
+  /** --force flag for contract */
+  force?: boolean;
+  /** --i-understand-data-loss flag — second confirmation for --force */
+  iUnderstandDataLoss?: boolean;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -57,6 +68,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let apply: boolean | undefined;
   let newSubcommand: NewSubcommand | undefined;
   let helpRequested: boolean | undefined;
+  let table: string | undefined;
+  let column: string | undefined;
+  let concurrency: number | undefined;
+  let force: boolean | undefined;
+  let iUnderstandDataLoss: boolean | undefined;
   let i = 0;
 
   // Check for --help or --version before command
@@ -166,6 +182,21 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case '--apply':
         apply = true;
         break;
+      case '--table':
+        table = args[++i];
+        break;
+      case '--column':
+        column = args[++i];
+        break;
+      case '--concurrency':
+        concurrency = parseInt(args[++i], 10);
+        break;
+      case '--force':
+        force = true;
+        break;
+      case '--i-understand-data-loss':
+        iUnderstandDataLoss = true;
+        break;
       case '--help':
       case '-h':
         helpRequested = true;
@@ -186,6 +217,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (name) result.name = name;
   if (apply) result.apply = apply;
   if (helpRequested) result.helpRequested = helpRequested;
+  if (table) result.table = table;
+  if (column) result.column = column;
+  if (concurrency !== undefined) result.concurrency = concurrency;
+  if (force) result.force = force;
+  if (iUnderstandDataLoss) result.iUnderstandDataLoss = iUnderstandDataLoss;
   return result;
 }
 
@@ -202,5 +238,8 @@ function flagTakesValue(flag: string): boolean {
     '--output',
     '--output-dir',
     '--name',
+    '--table',
+    '--column',
+    '--concurrency',
   ].includes(flag);
 }

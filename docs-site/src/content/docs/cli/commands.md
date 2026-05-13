@@ -128,13 +128,37 @@ Print the YAML format reference to stdout.
 
 Rollback to the previous migration snapshot. See [rollback](/schema-flow/safety/rollback/).
 
+### `schema-flow backfill`
+
+Drain pending expand-column backfills out-of-band. Idempotent and resumable; safe to kill and restart, safe to background via `nohup` / systemd / k8s. Foreground; sequential by default.
+
+```bash
+npx @smplcty/schema-flow backfill                       # drain all pending
+npx @smplcty/schema-flow backfill --table users         # one table only
+npx @smplcty/schema-flow backfill --column users.email_lower
+npx @smplcty/schema-flow backfill --concurrency 4       # opt-in parallelism
+```
+
+| Flag                 | Description                                           |
+| -------------------- | ----------------------------------------------------- |
+| `--table <name>`     | Only backfill columns belonging to this table         |
+| `--column <tbl.col>` | Only backfill this specific column                    |
+| `--concurrency N`    | Backfills to run in parallel (default: 1, sequential) |
+
 ### `schema-flow contract`
 
-Complete the contract phase of an expand/contract migration. Drops old columns and dual-write triggers. Requires `--allow-destructive`.
+Complete the contract phase of an expand/contract migration. Drops the old column and dual-write trigger. Requires `--allow-destructive`.
+
+**Refuses by default** unless every row satisfies `new_col IS NOT DISTINCT FROM transform(old_col)` — i.e. backfill is complete. The error reports the row count remaining.
+
+| Flag                       | Description                                           |
+| -------------------------- | ----------------------------------------------------- |
+| `--force`                  | Drop the old column even if rows still diverge        |
+| `--i-understand-data-loss` | Required alongside `--force` (data-loss confirmation) |
 
 ### `schema-flow expand-status`
 
-Show status of in-progress expand/contract migrations.
+Show status of in-progress expand/contract migrations, including per-state rows remaining for expanded columns.
 
 ## Utility
 

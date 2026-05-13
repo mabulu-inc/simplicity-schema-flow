@@ -25,6 +25,7 @@ import type {
   SeedOnConflict,
 } from '../schema/types.js';
 import { planExpandColumn } from '../expand/index.js';
+import type { ExpandMeta } from '../expand/index.js';
 
 // ─── Operation Types ───────────────────────────────────────────
 
@@ -93,7 +94,6 @@ export type OperationType =
   // Expand/contract
   | 'expand_column'
   | 'create_dual_write_trigger'
-  | 'backfill_column'
   // Other
   | 'set_comment'
   | 'add_seed'
@@ -121,6 +121,8 @@ export interface Operation {
   seedOnConflict?: SeedOnConflict;
   /** Result counts filled by executor after seed_table execution */
   seedResult?: { inserted: number; updated: number; unchanged: number };
+  /** Expand metadata — populated for expand_column and create_dual_write_trigger ops */
+  expandMeta?: ExpandMeta;
 }
 
 // ─── Desired State (parsed from YAML) ──────────────────────────
@@ -673,6 +675,7 @@ function createTableOps(
         objectName: eop.objectName,
         sql: eop.sql,
         destructive: eop.destructive,
+        expandMeta: eop.expandMeta,
       });
     }
   }
@@ -896,6 +899,7 @@ function alterTableOps(
             objectName: eop.objectName,
             sql: eop.sql,
             destructive: eop.destructive,
+            expandMeta: eop.expandMeta,
           });
         }
         continue;

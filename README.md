@@ -126,11 +126,12 @@ schema/
 
 ### Rollback & expand/contract
 
-| Command                                  | Description                        |
-| ---------------------------------------- | ---------------------------------- |
-| `npx @smplcty/schema-flow down`          | Rollback to previous snapshot      |
-| `npx @smplcty/schema-flow contract`      | Complete expand/contract migration |
-| `npx @smplcty/schema-flow expand-status` | Show in-progress expand migrations |
+| Command                                  | Description                                                   |
+| ---------------------------------------- | ------------------------------------------------------------- |
+| `npx @smplcty/schema-flow down`          | Rollback to previous snapshot                                 |
+| `npx @smplcty/schema-flow backfill`      | Drain pending expand-column backfills (resumable, foreground) |
+| `npx @smplcty/schema-flow contract`      | Complete expand/contract migration                            |
+| `npx @smplcty/schema-flow expand-status` | Show in-progress expand migrations + rows remaining           |
 
 ### Global flags
 
@@ -222,6 +223,61 @@ const result = await project.migrate();
 
 await project.cleanup(); // drops isolated test database
 ```
+
+## Zero-downtime column rename
+
+Rename a column without locking the table, dropping writes, or coordinating a stop-the-world deploy. The `expand` keyword with an identity transform is the canonical pattern.
+
+```yaml
+# schema/tables/users.yaml
+table: users
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+  - name: middle_name # the old column — keep it for now
+    type: text
+  - name: middle_name_v2 # the new column
+    type: text
+    expand:
+      from: middle_name
+      transform: middle_name # identity → rename, not transform
+```
+
+What schema-flow does on the next `run`:
+
+1. Adds the new column (`middle_name_v2`).
+2. Installs a guarded dual-write trigger so that any write to `middle_name` mirrors into `middle_name_v2`.
+3. Records state in `_smplcty_schema_flow.expand_state`. No row scan, no lock contention.
+
+Operator sequence:
+
+```bash
+# Day 1 — ship the additive migration. Fast, regardless of table size.
+schema-flow run
+
+# Drain the backfill out-of-band. Idempotent and resumable; safe to background.
+nohup schema-flow backfill > backfill.log 2>&1 &
+disown
+
+# Check progress whenever.
+schema-flow expand-status
+#   public.users.middle_name → middle_name_v2: expanded — 1,234 row(s) remaining
+
+# Deploy the app reading + writing the new column. Old code that still writes
+# the old column stays in sync via the trigger.
+
+# Once the app is fully cut over and backfill has completed, contract.
+# `contract` refuses unless the divergence-count invariant is zero.
+schema-flow contract --allow-destructive
+
+# Cleanup: remove the `expand:` block (and the old column entry) from YAML.
+# The next `run` is a no-op.
+```
+
+The same invariant — `new IS DISTINCT FROM transform(old)` — gates the trigger, the backfill loop, and the contract check. It is null-safe by construction: identity renames of nullable columns work without infinite-looping or stranding rows.
+
+> Need a non-identity migration (e.g. `lower(email)`, `price_cents → price_dollars`)? Same flow. Optionally set `reverse:` for bidirectional dual-write during the transition.
 
 ## Documentation
 

@@ -574,11 +574,12 @@ environments:
 
 ### 6.4 Rollback & Expand/Contract
 
-| Command                     | Description                                           |
-| --------------------------- | ----------------------------------------------------- |
-| `schema-flow down`          | Rollback to previous migration snapshot               |
-| `schema-flow contract`      | Complete contract phase of expand/contract migration  |
-| `schema-flow expand-status` | Show status of in-progress expand/contract migrations |
+| Command                     | Description                                                                               |
+| --------------------------- | ----------------------------------------------------------------------------------------- |
+| `schema-flow down`          | Rollback to previous migration snapshot                                                   |
+| `schema-flow backfill`      | Drain pending expand-column backfills (resumable; `--table`, `--column`, `--concurrency`) |
+| `schema-flow contract`      | Complete contract phase of expand/contract migration (refuses if backfill is incomplete)  |
+| `schema-flow expand-status` | Show status of in-progress expand/contract migrations and rows remaining                  |
 
 ### 6.5 Utility
 
@@ -669,7 +670,7 @@ The planner produces typed `Operation` objects:
 `create_role`, `alter_role`, `grant_membership`, `grant_table`, `grant_column`, `revoke_table`, `revoke_column`, `grant_sequence`, `revoke_sequence`, `grant_function`, `revoke_function`, `grant_schema`
 
 **Expand/Contract:**
-`expand_column`, `create_dual_write_trigger`, `backfill_column`, `contract_column`, `drop_dual_write_trigger`
+`expand_column`, `create_dual_write_trigger` (backfill is no longer part of the migration plan — run `schema-flow backfill` separately)
 
 **Schema:**
 `create_schema`
@@ -729,12 +730,15 @@ The following operations are **blocked by default** and require `--allow-destruc
 
 **Expand/Contract column migrations:**
 
-1. Add new column
-2. Create dual-write trigger (copies data from old column to new on write)
-3. Backfill existing rows (configurable batch size, default 1000)
-4. Application switches to reading new column
-5. Contract: drop old column and trigger (requires `--allow-destructive`)
-6. If `reverse` is defined, the dual-write trigger also copies new→old for backward compatibility
+1. `schema-flow run` adds the new column and installs a guarded dual-write trigger. State recorded in `_smplcty_schema_flow.expand_state`. **Fast — no row scan.**
+2. `schema-flow backfill` drains pending backfills out-of-band. Idempotent and resumable; safe to run multiple times, safe to kill and restart, safe to background with `nohup`/systemd/k8s.
+3. Application switches to reading + writing the new column. Old writes to the old column stay in sync via the trigger (which is guarded so direct writes to the new column are preserved).
+4. `schema-flow contract --allow-destructive` drops the old column and trigger. **Refuses** unless every row satisfies `new_col IS NOT DISTINCT FROM transform(old_col)`. Bypass with `--force --i-understand-data-loss`.
+5. The `expand:` block (and the old column entry) is removed from YAML. The next `run` is a no-op.
+
+If `reverse` is defined, the dual-write trigger also copies new → old, supporting bidirectional reads during the transition.
+
+The same invariant — `new IS DISTINCT FROM transform(old)` — gates the trigger, the backfill loop, and the contract check. It is null-safe, so nullable source columns and identity-transform renames behave correctly.
 
 ### 8.4 Intermediate State Recovery
 
@@ -875,15 +879,17 @@ Zero-downtime column migrations for type changes, renames, or transforms:
      expand:
        from: email
        transform: 'lower(email)'
-       reverse: 'email' # Optional: dual-write new→old
-       batch_size: 5000 # Optional: override default 1000
+       reverse: 'email_lower' # Optional: bidirectional dual-write
+       batch_size: 5000 # Optional: backfill batch size (default 1000)
    ```
-2. `schema-flow run` creates the new column and dual-write trigger
-3. Backfill runs to populate existing rows (batched by configurable size)
-4. Application switches to using new column
-5. `schema-flow contract` drops old column and trigger
+2. `schema-flow run` adds the new column, installs a guarded dual-write trigger, and records state — no row scan, no lock contention.
+3. `schema-flow backfill` drains pending backfills out-of-band. Sequential by default; opt-in parallelism via `--concurrency N`. Filter with `--table <name>` or `--column <table.col>`. Resumable: safe to kill and restart, safe to background via `nohup` / systemd / k8s.
+4. Application switches to using the new column. Old writes to the source column stay mirrored.
+5. `schema-flow contract --allow-destructive` drops the old column and the dual-write trigger. Refuses unless every row satisfies the expand invariant; bypass with `--force --i-understand-data-loss`.
 
-State tracked in `_smplcty_schema_flow.expand_state`. `expand-status` shows in-progress migrations.
+State tracked in `_smplcty_schema_flow.expand_state`. `expand-status` shows in-progress migrations along with the per-state row count still pending backfill.
+
+**Zero-downtime rename** is the canonical use of identity transform: `transform: <from>`. The trigger mirrors writes from old to new, the backfill copies existing rows, and contract drops the old column once everything matches. The `IS DISTINCT FROM` invariant makes nullable source columns work correctly. See README "Zero-downtime column rename" for the full operator recipe.
 
 ### 11.4 SQL Generation
 
