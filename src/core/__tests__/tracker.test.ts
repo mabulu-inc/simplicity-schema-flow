@@ -72,7 +72,7 @@ describe('tracker', () => {
         ORDER BY ordinal_position
       `);
       const columns = result.rows.map((r) => r.column_name);
-      expect(columns).toEqual(['file_path', 'file_hash', 'phase', 'applied_at']);
+      expect(columns).toEqual(['file_path', 'file_hash', 'phase', 'pg_schema', 'applied_at']);
     });
   });
 
@@ -82,23 +82,31 @@ describe('tracker', () => {
     });
 
     it('records a file and retrieves its hash', async () => {
-      await recordFile(client, 'tables/users.yaml', 'abc123', 'schema');
+      await recordFile(client, 'tables/users.yaml', 'abc123', 'schema', 'public');
 
-      const hash = await getFileHash(client, 'tables/users.yaml');
+      const hash = await getFileHash(client, 'tables/users.yaml', 'public');
       expect(hash).toBe('abc123');
     });
 
     it('returns null for unknown file', async () => {
-      const hash = await getFileHash(client, 'nonexistent.yaml');
+      const hash = await getFileHash(client, 'nonexistent.yaml', 'public');
       expect(hash).toBeNull();
     });
 
-    it('upserts on duplicate file_path', async () => {
-      await recordFile(client, 'tables/users.yaml', 'hash1', 'schema');
-      await recordFile(client, 'tables/users.yaml', 'hash2', 'schema');
+    it('upserts on duplicate file_path within the same pgSchema', async () => {
+      await recordFile(client, 'tables/users.yaml', 'hash1', 'schema', 'public');
+      await recordFile(client, 'tables/users.yaml', 'hash2', 'schema', 'public');
 
-      const hash = await getFileHash(client, 'tables/users.yaml');
+      const hash = await getFileHash(client, 'tables/users.yaml', 'public');
       expect(hash).toBe('hash2');
+    });
+
+    it('isolates file_path entries across pgSchemas', async () => {
+      await recordFile(client, 'tables/users.yaml', 'hash_a', 'schema', 'app');
+      await recordFile(client, 'tables/users.yaml', 'hash_b', 'schema', 'reports');
+
+      expect(await getFileHash(client, 'tables/users.yaml', 'app')).toBe('hash_a');
+      expect(await getFileHash(client, 'tables/users.yaml', 'reports')).toBe('hash_b');
     });
   });
 
@@ -108,16 +116,16 @@ describe('tracker', () => {
     });
 
     it('returns empty array when no files are tracked', async () => {
-      const history = await getHistory(client);
+      const history = await getHistory(client, 'public');
       expect(history).toEqual([]);
     });
 
-    it('returns all tracked files ordered by path', async () => {
-      await recordFile(client, 'tables/users.yaml', 'hash1', 'schema');
-      await recordFile(client, 'pre/setup.sql', 'hash2', 'pre');
-      await recordFile(client, 'post/cleanup.sql', 'hash3', 'post');
+    it('returns all tracked files for a pgSchema ordered by path', async () => {
+      await recordFile(client, 'tables/users.yaml', 'hash1', 'schema', 'public');
+      await recordFile(client, 'pre/setup.sql', 'hash2', 'pre', 'public');
+      await recordFile(client, 'post/cleanup.sql', 'hash3', 'post', 'public');
 
-      const history = await getHistory(client);
+      const history = await getHistory(client, 'public');
       expect(history).toHaveLength(3);
       expect(history[0].filePath).toBe('post/cleanup.sql');
       expect(history[1].filePath).toBe('pre/setup.sql');
@@ -125,13 +133,22 @@ describe('tracker', () => {
     });
 
     it('returns correct entry fields', async () => {
-      await recordFile(client, 'tables/users.yaml', 'abc123', 'schema');
+      await recordFile(client, 'tables/users.yaml', 'abc123', 'schema', 'public');
 
-      const history = await getHistory(client);
+      const history = await getHistory(client, 'public');
       expect(history[0].filePath).toBe('tables/users.yaml');
       expect(history[0].fileHash).toBe('abc123');
       expect(history[0].phase).toBe('schema');
       expect(history[0].appliedAt).toBeInstanceOf(Date);
+    });
+
+    it('does not leak across pgSchemas', async () => {
+      await recordFile(client, 'tables/users.yaml', 'hash_a', 'schema', 'app');
+      await recordFile(client, 'tables/orders.yaml', 'hash_b', 'schema', 'reports');
+
+      const appHistory = await getHistory(client, 'app');
+      expect(appHistory).toHaveLength(1);
+      expect(appHistory[0].filePath).toBe('tables/users.yaml');
     });
   });
 
@@ -141,21 +158,28 @@ describe('tracker', () => {
     });
 
     it('returns true for new file', async () => {
-      const needs = await fileNeedsApply(client, 'tables/users.yaml', 'newhash');
+      const needs = await fileNeedsApply(client, 'tables/users.yaml', 'newhash', 'public');
       expect(needs).toBe(true);
     });
 
     it('returns false when hash matches', async () => {
-      await recordFile(client, 'tables/users.yaml', 'samehash', 'schema');
+      await recordFile(client, 'tables/users.yaml', 'samehash', 'schema', 'public');
 
-      const needs = await fileNeedsApply(client, 'tables/users.yaml', 'samehash');
+      const needs = await fileNeedsApply(client, 'tables/users.yaml', 'samehash', 'public');
       expect(needs).toBe(false);
     });
 
     it('returns true when hash differs', async () => {
-      await recordFile(client, 'tables/users.yaml', 'oldhash', 'schema');
+      await recordFile(client, 'tables/users.yaml', 'oldhash', 'schema', 'public');
 
-      const needs = await fileNeedsApply(client, 'tables/users.yaml', 'newhash');
+      const needs = await fileNeedsApply(client, 'tables/users.yaml', 'newhash', 'public');
+      expect(needs).toBe(true);
+    });
+
+    it('returns true when the same file_path is recorded under a different pgSchema', async () => {
+      await recordFile(client, 'tables/users.yaml', 'samehash', 'schema', 'app');
+
+      const needs = await fileNeedsApply(client, 'tables/users.yaml', 'samehash', 'reports');
       expect(needs).toBe(true);
     });
   });
@@ -166,17 +190,17 @@ describe('tracker', () => {
     });
 
     it('removes existing entry and returns true', async () => {
-      await recordFile(client, 'tables/users.yaml', 'hash', 'schema');
+      await recordFile(client, 'tables/users.yaml', 'hash', 'schema', 'public');
 
-      const removed = await removeFileHistory(client, 'tables/users.yaml');
+      const removed = await removeFileHistory(client, 'tables/users.yaml', 'public');
       expect(removed).toBe(true);
 
-      const hash = await getFileHash(client, 'tables/users.yaml');
+      const hash = await getFileHash(client, 'tables/users.yaml', 'public');
       expect(hash).toBeNull();
     });
 
     it('returns false for nonexistent entry', async () => {
-      const removed = await removeFileHistory(client, 'nonexistent.yaml');
+      const removed = await removeFileHistory(client, 'nonexistent.yaml', 'public');
       expect(removed).toBe(false);
     });
   });
@@ -250,8 +274,9 @@ describe('tracker', () => {
       `);
       expect(newSchema.rows).toHaveLength(1);
 
-      // Data should be preserved
-      const history = await getHistory(client);
+      // Data should be preserved. Legacy rows back-fill pg_schema='public'
+      // via the ALTER TABLE ADD COLUMN default applied in the upgrade.
+      const history = await getHistory(client, 'public');
       expect(history).toHaveLength(1);
       expect(history[0].filePath).toBe('tables/users.yaml');
       expect(history[0].fileHash).toBe('legacy_hash');

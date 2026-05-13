@@ -11,26 +11,27 @@ afterAll(async () => {
 });
 
 describe('useTestProject', () => {
-  it('creates an isolated database and temp directory', async () => {
+  it('provisions an isolated schema and temp directory inside the shared database', async () => {
     const project = await useTestProject(DATABASE_URL);
     try {
-      // Should use public schema in an isolated database
-      expect(project.schema).toBe('public');
+      // Each project gets a fresh, unique schema name.
+      expect(project.schema).toMatch(/^test_[0-9a-f]{16}$/);
+      expect(project.config.pgSchema).toBe(project.schema);
 
       // Should have a temp directory
       expect(fs.existsSync(project.dir)).toBe(true);
 
-      // Should have a config pointing to the isolated database
-      expect(project.config.connectionString).toBe(project.connectionString);
-      expect(project.config.pgSchema).toBe('public');
+      // The connectionString is the one we handed in — no per-test database.
+      expect(project.config.connectionString).toBe(DATABASE_URL);
+      expect(project.connectionString).toBe(DATABASE_URL);
       expect(project.config.baseDir).toBe(project.dir);
 
-      // Should be able to query in the isolated database
+      // The schema exists and is queryable.
       const pool = getPool(project.connectionString);
       const client = await pool.connect();
       try {
-        await client.query('CREATE TABLE test_table (id serial PRIMARY KEY)');
-        const result = await client.query('SELECT count(*) FROM test_table');
+        await client.query(`CREATE TABLE "${project.schema}".test_table (id serial PRIMARY KEY)`);
+        const result = await client.query(`SELECT count(*) FROM "${project.schema}".test_table`);
         expect(result.rows[0].count).toBe('0');
       } finally {
         client.release();
@@ -40,21 +41,28 @@ describe('useTestProject', () => {
     }
   });
 
-  it('cleanup drops the database and removes the temp directory', async () => {
+  it('cleanup drops the schema (with everything in it) and removes the temp directory', async () => {
     const project = await useTestProject(DATABASE_URL);
-    const dbName = new URL(project.connectionString).pathname.slice(1);
+    const schema = project.schema;
     const dir = project.dir;
+
+    const pool = getPool(project.connectionString);
+    const setupClient = await pool.connect();
+    try {
+      await setupClient.query(`CREATE TABLE "${schema}".doomed (id serial PRIMARY KEY)`);
+    } finally {
+      setupClient.release();
+    }
 
     await project.cleanup();
 
-    // Database should be dropped
-    const pool = getPool(DATABASE_URL);
-    const client = await pool.connect();
+    // Schema should be gone, taking its contents with it.
+    const verifyClient = await pool.connect();
     try {
-      const result = await client.query(`SELECT 1 FROM pg_database WHERE datname = $1`, [dbName]);
+      const result = await verifyClient.query(`SELECT 1 FROM pg_namespace WHERE nspname = $1`, [schema]);
       expect(result.rows.length).toBe(0);
     } finally {
-      client.release();
+      verifyClient.release();
     }
 
     // Temp directory should be removed
@@ -64,30 +72,28 @@ describe('useTestProject', () => {
   it('provides a working migrate helper', async () => {
     const project = await useTestProject(DATABASE_URL);
     try {
-      // Write a table schema
       writeSchema(project.dir, {
         'tables/users.yaml': `table: users
 columns:
   - name: id
     type: serial
-    primaryKey: true
+    primary_key: true
   - name: email
     type: text
     nullable: false
 `,
       });
 
-      // Run migration
       const result = await project.migrate();
       expect(result.executed).toBeGreaterThan(0);
 
-      // Verify the table was created
       const pool = getPool(project.connectionString);
       const client = await pool.connect();
       try {
         const res = await client.query(
           `SELECT column_name FROM information_schema.columns
-           WHERE table_schema = 'public' AND table_name = 'users' ORDER BY ordinal_position`,
+           WHERE table_schema = $1 AND table_name = 'users' ORDER BY ordinal_position`,
+          [project.schema],
         );
         expect(res.rows.map((r: { column_name: string }) => r.column_name)).toEqual(['id', 'email']);
       } finally {

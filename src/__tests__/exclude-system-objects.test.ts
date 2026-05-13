@@ -29,19 +29,23 @@ describe('exclude extension-owned objects from introspection', () => {
     const pool = getPool(project.connectionString);
     const client = await pool.connect();
     try {
-      // Install uuid-ossp extension which creates extension-owned functions
+      // Install uuid-ossp extension which creates extension-owned functions.
+      // Extensions are database-scoped, so this is shared across schemas; the
+      // test only asserts that extension-owned objects are *filtered out* of
+      // introspection, which doesn't depend on a fresh install.
       await client.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
 
-      // Create a user-defined table and function to verify they still appear
+      // Create a user-defined table and function inside the test's schema
+      // so the assertions and the cleanup (DROP SCHEMA CASCADE) line up.
       await client.query(`
-        CREATE TABLE user_defined_table (
+        CREATE TABLE "${project.schema}".user_defined_table (
           id serial PRIMARY KEY,
           name text NOT NULL
         )
       `);
 
       await client.query(`
-        CREATE FUNCTION user_defined_fn() RETURNS void
+        CREATE FUNCTION "${project.schema}".user_defined_fn() RETURNS void
         LANGUAGE sql AS $$ SELECT 1; $$
       `);
     } finally {
@@ -93,8 +97,8 @@ describe('exclude extension-owned objects from introspection', () => {
     const pool = getPool(project.connectionString);
     const client = await pool.connect();
     try {
-      // Create a user-defined enum
-      await client.query("CREATE TYPE user_status AS ENUM ('active', 'inactive')");
+      // Create a user-defined enum inside the test schema
+      await client.query(`CREATE TYPE "${project.schema}".user_status AS ENUM ('active', 'inactive')`);
 
       const enums = await getExistingEnums(client, project.schema);
       const enumNames = enums.map((e) => e.name);
@@ -110,8 +114,8 @@ describe('exclude extension-owned objects from introspection', () => {
     const pool = getPool(project.connectionString);
     const client = await pool.connect();
     try {
-      // Create a user-defined view
-      await client.query('CREATE VIEW user_defined_view AS SELECT 1 AS val');
+      // Create a user-defined view inside the test schema
+      await client.query(`CREATE VIEW "${project.schema}".user_defined_view AS SELECT 1 AS val`);
 
       const views = await getExistingViews(client, project.schema);
       const viewNames = views.map((v) => v.name);

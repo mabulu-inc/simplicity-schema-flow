@@ -84,7 +84,7 @@ describe('Rollback', () => {
         ];
 
         await saveSnapshot(client, ops, 'public');
-        const snapshot = await getLatestSnapshot(client);
+        const snapshot = await getLatestSnapshot(client, 'public');
 
         expect(snapshot).not.toBeNull();
         expect(snapshot!.operations).toHaveLength(1);
@@ -102,7 +102,7 @@ describe('Rollback', () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        const snapshot = await getLatestSnapshot(client);
+        const snapshot = await getLatestSnapshot(client, 'public');
         expect(snapshot).toBeNull();
       } finally {
         client.release();
@@ -122,7 +122,7 @@ describe('Rollback', () => {
 
         await saveSnapshot(client, ops1, 'public');
         await saveSnapshot(client, ops2, 'public');
-        const snapshot = await getLatestSnapshot(client);
+        const snapshot = await getLatestSnapshot(client, 'public');
 
         expect(snapshot!.operations[0].objectName).toBe('second');
       } finally {
@@ -159,7 +159,7 @@ describe('Rollback', () => {
           'public',
         );
 
-        const list = await listSnapshots(client);
+        const list = await listSnapshots(client, 'public');
         expect(list).toHaveLength(2);
         expect(list[0].operations[0].objectName).toBe('second');
         expect(list[1].operations[0].objectName).toBe('first');
@@ -594,7 +594,7 @@ describe('Rollback', () => {
       }
 
       // Run rollback
-      const result = await runDown(DATABASE_URL, { logger });
+      const result = await runDown(DATABASE_URL, { logger, pgSchema: testSchema });
 
       expect(result.executed).toBeGreaterThan(0);
 
@@ -644,7 +644,7 @@ describe('Rollback', () => {
         client.release();
       }
 
-      const result = await runDown(DATABASE_URL, { logger });
+      const result = await runDown(DATABASE_URL, { logger, pgSchema: testSchema });
       expect(result.executed).toBe(2);
 
       // Table should be gone (column dropped first, then table)
@@ -686,12 +686,12 @@ describe('Rollback', () => {
         client.release();
       }
 
-      await runDown(DATABASE_URL, { logger });
+      await runDown(DATABASE_URL, { logger, pgSchema: testSchema });
 
       // Snapshot should be removed
       const client2 = await pool.connect();
       try {
-        const snapshot = await getLatestSnapshot(client2);
+        const snapshot = await getLatestSnapshot(client2, testSchema);
         expect(snapshot).toBeNull();
       } finally {
         client2.release();

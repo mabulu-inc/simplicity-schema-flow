@@ -17,7 +17,11 @@ function uniqueRole(base: string): string {
 }
 
 async function snapshotCount(ctx: TestProject): Promise<number> {
-  const res = await queryDb(ctx, 'SELECT count(*)::int AS cnt FROM _smplcty_schema_flow.snapshots');
+  const res = await queryDb(
+    ctx,
+    'SELECT count(*)::int AS cnt FROM _smplcty_schema_flow.snapshots WHERE pg_schema = $1',
+    [ctx.schema],
+  );
   return res.rows[0].cnt;
 }
 
@@ -74,7 +78,7 @@ columns:
     await runMigration(ctx);
     await assertTableExists(ctx, 'rb_table');
 
-    const result = await runDown(ctx.config.connectionString);
+    const result = await runDown(ctx.config.connectionString, { pgSchema: ctx.schema });
     expect(result.executed).toBeGreaterThan(0);
 
     // Table should be gone
@@ -125,7 +129,7 @@ columns:
     await assertColumnExists(ctx, 'rb_col', 'extra');
 
     // runDown should reverse only the latest snapshot (add_column)
-    const result = await runDown(ctx.config.connectionString);
+    const result = await runDown(ctx.config.connectionString, { pgSchema: ctx.schema });
     expect(result.executed).toBeGreaterThan(0);
 
     // Column should be gone
@@ -188,7 +192,7 @@ indexes:
     );
     expect(idxBefore.rowCount).toBe(1);
 
-    await runDown(ctx.config.connectionString);
+    await runDown(ctx.config.connectionString, { pgSchema: ctx.schema });
 
     // Index should be gone
     const idxAfter = await queryDb(
@@ -271,7 +275,7 @@ triggers:
     );
     expect(trgBefore.rowCount).toBe(1);
 
-    await runDown(ctx.config.connectionString);
+    await runDown(ctx.config.connectionString, { pgSchema: ctx.schema });
 
     // Trigger should be gone
     const trgAfter = await queryDb(
@@ -329,7 +333,7 @@ rls: true
     );
     expect(rlsBefore.rows[0].relrowsecurity).toBe(true);
 
-    await runDown(ctx.config.connectionString);
+    await runDown(ctx.config.connectionString, { pgSchema: ctx.schema });
 
     // RLS should be disabled
     const rlsAfter = await queryDb(
@@ -380,7 +384,7 @@ grants:
     );
     expect(grantBefore.rows[0].has_priv).toBe(true);
 
-    await runDown(ctx.config.connectionString);
+    await runDown(ctx.config.connectionString, { pgSchema: ctx.schema });
 
     // Grant should be revoked (table might be dropped entirely)
     const tableCheck = await queryDb(
@@ -437,7 +441,7 @@ columns:
 
     await runMigration(ctx, { allowDestructive: true });
 
-    const result = await runDown(ctx.config.connectionString);
+    const result = await runDown(ctx.config.connectionString, { pgSchema: ctx.schema });
 
     // Should have skipped the alter_column (irreversible)
     expect(result.skipped.length).toBeGreaterThan(0);
@@ -464,7 +468,7 @@ columns:
     // Snapshot should exist
     expect(await snapshotCount(ctx)).toBe(1);
 
-    await runDown(ctx.config.connectionString);
+    await runDown(ctx.config.connectionString, { pgSchema: ctx.schema });
 
     // Snapshot should be gone
     expect(await snapshotCount(ctx)).toBe(0);
@@ -518,7 +522,7 @@ columns:
     await assertTableExists(ctx, 'rb_multi_b');
 
     // Down should only reverse the latest migration (table B creation)
-    await runDown(ctx.config.connectionString);
+    await runDown(ctx.config.connectionString, { pgSchema: ctx.schema });
 
     // Table A should still exist
     await assertTableExists(ctx, 'rb_multi_a');

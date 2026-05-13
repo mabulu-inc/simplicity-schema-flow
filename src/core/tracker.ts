@@ -80,26 +80,49 @@ async function renameLegacyDualWriteObjects(client: pg.PoolClient, logger?: Logg
 /**
  * Ensure the _smplcty_schema_flow schema and history table exist.
  * On first run, migrates any legacy `_simplicity` schema automatically.
+ * Also upgrades pre-pgSchema-aware tables in place: adds the `pg_schema`
+ * column (defaulting existing rows to 'public') and re-keys the primary
+ * key on `(file_path, pg_schema)` so a single database can manage multiple
+ * pgSchemas independently.
  */
 export async function ensureHistoryTable(client: pg.PoolClient, logger?: Logger): Promise<void> {
   await migrateLegacySchema(client, logger);
   await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
   await client.query(`
     CREATE TABLE IF NOT EXISTS _smplcty_schema_flow.history (
-      file_path  text PRIMARY KEY,
+      file_path  text NOT NULL,
       file_hash  text NOT NULL,
       phase      text NOT NULL,
-      applied_at timestamptz NOT NULL DEFAULT now()
+      pg_schema  text NOT NULL DEFAULT 'public',
+      applied_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (file_path, pg_schema)
     )
   `);
+
+  // Upgrade pre-pgSchema-aware history table in place. The column add and PK
+  // swap are both idempotent: existing rows get pg_schema='public', and the
+  // old single-column PK is replaced with the composite key.
+  const hasColumn = await client.query(
+    `SELECT 1 FROM information_schema.columns
+     WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'history' AND column_name = 'pg_schema'`,
+  );
+  if (hasColumn.rowCount === 0) {
+    await client.query("ALTER TABLE _smplcty_schema_flow.history ADD COLUMN pg_schema text NOT NULL DEFAULT 'public'");
+    await client.query('ALTER TABLE _smplcty_schema_flow.history DROP CONSTRAINT IF EXISTS history_pkey');
+    await client.query('ALTER TABLE _smplcty_schema_flow.history ADD PRIMARY KEY (file_path, pg_schema)');
+  }
 }
 
 /**
- * Get all entries from the history table.
+ * Get all entries from the history table for a given pgSchema.
  */
-export async function getHistory(client: pg.PoolClient): Promise<HistoryEntry[]> {
+export async function getHistory(client: pg.PoolClient, pgSchema: string): Promise<HistoryEntry[]> {
   const result = await client.query(
-    'SELECT file_path, file_hash, phase, applied_at FROM _smplcty_schema_flow.history ORDER BY file_path',
+    `SELECT file_path, file_hash, phase, applied_at
+     FROM _smplcty_schema_flow.history
+     WHERE pg_schema = $1
+     ORDER BY file_path`,
+    [pgSchema],
   );
   return result.rows.map((row) => ({
     filePath: row.file_path,
@@ -110,12 +133,13 @@ export async function getHistory(client: pg.PoolClient): Promise<HistoryEntry[]>
 }
 
 /**
- * Get the stored hash for a specific file, or null if not tracked.
+ * Get the stored hash for a specific file in a pgSchema, or null if not tracked.
  */
-export async function getFileHash(client: pg.PoolClient, filePath: string): Promise<string | null> {
-  const result = await client.query('SELECT file_hash FROM _smplcty_schema_flow.history WHERE file_path = $1', [
-    filePath,
-  ]);
+export async function getFileHash(client: pg.PoolClient, filePath: string, pgSchema: string): Promise<string | null> {
+  const result = await client.query(
+    'SELECT file_hash FROM _smplcty_schema_flow.history WHERE file_path = $1 AND pg_schema = $2',
+    [filePath, pgSchema],
+  );
   return result.rows.length > 0 ? result.rows[0].file_hash : null;
 }
 
@@ -127,30 +151,39 @@ export async function recordFile(
   filePath: string,
   fileHash: string,
   phase: Phase,
+  pgSchema: string,
 ): Promise<void> {
   await client.query(
-    `INSERT INTO _smplcty_schema_flow.history (file_path, file_hash, phase, applied_at)
-     VALUES ($1, $2, $3, now())
-     ON CONFLICT (file_path) DO UPDATE
+    `INSERT INTO _smplcty_schema_flow.history (file_path, file_hash, phase, pg_schema, applied_at)
+     VALUES ($1, $2, $3, $4, now())
+     ON CONFLICT (file_path, pg_schema) DO UPDATE
        SET file_hash = EXCLUDED.file_hash,
            phase = EXCLUDED.phase,
            applied_at = EXCLUDED.applied_at`,
-    [filePath, fileHash, phase],
+    [filePath, fileHash, phase, pgSchema],
   );
 }
 
 /**
- * Check if a file needs to be re-run (new file or hash changed).
+ * Check if a file needs to be re-run (new file or hash changed for this pgSchema).
  */
-export async function fileNeedsApply(client: pg.PoolClient, filePath: string, currentHash: string): Promise<boolean> {
-  const storedHash = await getFileHash(client, filePath);
+export async function fileNeedsApply(
+  client: pg.PoolClient,
+  filePath: string,
+  currentHash: string,
+  pgSchema: string,
+): Promise<boolean> {
+  const storedHash = await getFileHash(client, filePath, pgSchema);
   return storedHash !== currentHash;
 }
 
 /**
- * Remove a file's history entry (e.g., when file is deleted).
+ * Remove a file's history entry for a pgSchema (e.g., when the file is deleted).
  */
-export async function removeFileHistory(client: pg.PoolClient, filePath: string): Promise<boolean> {
-  const result = await client.query('DELETE FROM _smplcty_schema_flow.history WHERE file_path = $1', [filePath]);
+export async function removeFileHistory(client: pg.PoolClient, filePath: string, pgSchema: string): Promise<boolean> {
+  const result = await client.query(
+    'DELETE FROM _smplcty_schema_flow.history WHERE file_path = $1 AND pg_schema = $2',
+    [filePath, pgSchema],
+  );
   return (result.rowCount ?? 0) > 0;
 }

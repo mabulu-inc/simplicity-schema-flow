@@ -8,7 +8,7 @@
 import type pg from 'pg';
 import type { Operation, OperationType } from '../planner/index.js';
 import type { Logger } from '../core/logger.js';
-import { getPool } from '../core/db.js';
+import { acquireClient } from '../core/db.js';
 import { acquireAdvisoryLock, releaseAdvisoryLock } from '../executor/index.js';
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -61,26 +61,30 @@ export async function saveSnapshot(client: pg.PoolClient, operations: Operation[
 }
 
 /**
- * Get the most recent migration snapshot, or null if none exist.
+ * Get the most recent migration snapshot for a given pgSchema, or null if none.
  */
-export async function getLatestSnapshot(client: pg.PoolClient): Promise<MigrationSnapshot | null> {
+export async function getLatestSnapshot(client: pg.PoolClient, pgSchema: string): Promise<MigrationSnapshot | null> {
   const res = await client.query(
     `SELECT id, operations, pg_schema, created_at
      FROM _smplcty_schema_flow.snapshots
+     WHERE pg_schema = $1
      ORDER BY id DESC LIMIT 1`,
+    [pgSchema],
   );
   if (res.rows.length === 0) return null;
   return rowToSnapshot(res.rows[0]);
 }
 
 /**
- * List all snapshots in reverse chronological order.
+ * List all snapshots for a given pgSchema in reverse chronological order.
  */
-export async function listSnapshots(client: pg.PoolClient): Promise<MigrationSnapshot[]> {
+export async function listSnapshots(client: pg.PoolClient, pgSchema: string): Promise<MigrationSnapshot[]> {
   const res = await client.query(
     `SELECT id, operations, pg_schema, created_at
      FROM _smplcty_schema_flow.snapshots
+     WHERE pg_schema = $1
      ORDER BY id DESC`,
+    [pgSchema],
   );
   return res.rows.map(rowToSnapshot);
 }
@@ -338,6 +342,8 @@ function splitObjectName(objectName: string): [string, string] {
 
 export interface RunDownOptions {
   logger?: Logger;
+  /** Postgres schema scope for snapshot lookup and session search_path. */
+  pgSchema?: string;
 }
 
 /**
@@ -345,9 +351,8 @@ export interface RunDownOptions {
  * execute them, and delete the snapshot.
  */
 export async function runDown(connectionString: string, options: RunDownOptions = {}): Promise<RunDownResult> {
-  const { logger } = options;
-  const pool = getPool(connectionString);
-  const lockClient = await pool.connect();
+  const { logger, pgSchema = 'public' } = options;
+  const lockClient = await acquireClient(connectionString, { pgSchema });
 
   try {
     const acquired = await acquireAdvisoryLock(lockClient);
@@ -358,7 +363,7 @@ export async function runDown(connectionString: string, options: RunDownOptions 
     try {
       await ensureSnapshotsTable(lockClient);
 
-      const snapshot = await getLatestSnapshot(lockClient);
+      const snapshot = await getLatestSnapshot(lockClient, pgSchema);
       if (!snapshot) {
         throw new Error('No migration snapshot found — nothing to rollback');
       }
@@ -375,7 +380,7 @@ export async function runDown(connectionString: string, options: RunDownOptions 
       let executed = 0;
 
       if (operations.length > 0) {
-        const opClient = await pool.connect();
+        const opClient = await acquireClient(connectionString, { pgSchema });
         try {
           await opClient.query('BEGIN');
           for (const op of operations) {

@@ -16,15 +16,18 @@ import {
   runDown,
 } from '@smplcty/schema-flow';
 
-// Execute rollback
-const result = await runDown(config, logger);
+// Execute rollback. `pgSchema` scopes snapshot lookup *and* sets `search_path`
+// on the session so unqualified references in the reversed SQL resolve in the
+// managed schema. Defaults to `'public'`.
+const result = await runDown(connectionString, { logger, pgSchema: 'public' });
 
-// Manual snapshot management
+// Manual snapshot management. `getLatestSnapshot` and `listSnapshots` filter
+// by `pg_schema` — pass the schema you saved snapshots against.
 await withClient(connectionString, async (client) => {
   await ensureSnapshotsTable(client);
 
-  const snapshots = await listSnapshots(client);
-  const latest = await getLatestSnapshot(client);
+  const snapshots = await listSnapshots(client, 'public');
+  const latest = await getLatestSnapshot(client, 'public');
 
   if (latest) {
     const reverseOps = computeRollback(latest);
@@ -117,6 +120,7 @@ interface ExpandState {
   old_column: string;
   transform: string;
   trigger_name: string;
+  pg_schema: string; // the managed pgSchema this state belongs to
   status: 'expanded' | 'contracted';
   created_at: Date;
 }

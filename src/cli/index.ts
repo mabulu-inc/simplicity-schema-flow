@@ -10,7 +10,7 @@ import { reportMigrationResult, type VerbosityMode } from './report.js';
 import { runPipeline, initProject, getStatus, runBaseline, buildDesiredAndActual, getPlan } from './pipeline.js';
 import { resolveConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
-import { testConnection, closePool, getPool } from '../core/db.js';
+import { testConnection, closePool, acquireClient } from '../core/db.js';
 import { detectDrift } from '../drift/index.js';
 import { buildPlan } from '../planner/index.js';
 import { execute } from '../executor/index.js';
@@ -266,8 +266,7 @@ async function main(): Promise<void> {
           return;
         }
 
-        const pool = getPool(config.connectionString);
-        const client = await pool.connect();
+        const client = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
         try {
           const {
             getExistingTables,
@@ -395,8 +394,7 @@ async function main(): Promise<void> {
         }
 
         // Find the latest expanded migration and contract it
-        const contractPool = getPool(config.connectionString);
-        const contractClient = await contractPool.connect();
+        const contractClient = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
         try {
           const states = await getExpandStatus(contractClient);
           const expanded = states.filter((s) => s.status === 'expanded');
@@ -464,8 +462,7 @@ async function main(): Promise<void> {
           return;
         }
 
-        const pool = getPool(config.connectionString);
-        const client = await pool.connect();
+        const client = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
         try {
           const states = await getExpandStatus(client);
 

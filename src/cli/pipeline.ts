@@ -32,7 +32,7 @@ import {
 import { filterUnchangedSeeds } from '../planner/filter-seeds.js';
 import { execute } from '../executor/index.js';
 import type { ExecuteResult } from '../executor/index.js';
-import { getPool } from '../core/db.js';
+import { acquireClient } from '../core/db.js';
 import { hydrateActualSeeds } from '../drift/index.js';
 import { ensureHistoryTable, getHistory, recordFile } from '../core/tracker.js';
 import type {
@@ -86,8 +86,7 @@ export async function runPipeline(
     //    table CHECK constraints, and partial-index WHERE clauses. Without
     //    this, every migrate would emit drop+recreate ops for objects whose
     //    source text differs only in PG's added casts and parens (issue #26).
-    const pool = getPool(config.connectionString);
-    const normClient = await pool.connect();
+    const normClient = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
     try {
       await normalizePolicyExpressions(normClient, desired.tables);
       await normalizeCheckExpressions(normClient, desired.tables);
@@ -153,12 +152,11 @@ export async function runPipeline(
 
   // 7. Record schema files in history after successful migration
   if (!config.dryRun && !validateOnly && shouldMigrate && discovered.schema.length > 0) {
-    const pool = getPool(config.connectionString);
-    const client = await pool.connect();
+    const client = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
     try {
       await ensureHistoryTable(client);
       for (const file of discovered.schema) {
-        await recordFile(client, file.relativePath, file.hash, file.phase);
+        await recordFile(client, file.relativePath, file.hash, file.phase, config.pgSchema);
       }
     } finally {
       client.release();
@@ -236,8 +234,7 @@ async function parseDesiredState(
  * Introspect the live database to get the ActualState.
  */
 async function introspectDatabase(config: SimplicitySchemaConfig, logger: Logger): Promise<ActualState> {
-  const pool = getPool(config.connectionString);
-  const client = await pool.connect();
+  const client = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
 
   try {
     const tableNames = await getExistingTables(client, config.pgSchema);
@@ -303,8 +300,7 @@ export async function buildDesiredAndActual(
   const desired = await parseDesiredState(discovered.schema, config.baseDir, logger);
 
   // Normalize policy expressions via PG round-trip + hydrate actual seeds
-  const pool = getPool(config.connectionString);
-  const normClient = await pool.connect();
+  const normClient = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
   try {
     await normalizePolicyExpressions(normClient, desired.tables);
   } finally {
@@ -314,7 +310,7 @@ export async function buildDesiredAndActual(
   const actual = await introspectDatabase(config, logger);
 
   // Hydrate actual seed data from the database for drift comparison
-  const seedClient = await pool.connect();
+  const seedClient = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
   try {
     await hydrateActualSeeds(seedClient, desired.tables, actual.tables, config.pgSchema);
   } finally {
@@ -357,8 +353,7 @@ export interface BaselineResult {
  * in the history table without running any migrations.
  */
 export async function runBaseline(config: SimplicitySchemaConfig, logger: Logger): Promise<BaselineResult> {
-  const pool = getPool(config.connectionString);
-  const client = await pool.connect();
+  const client = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
 
   try {
     await ensureHistoryTable(client);
@@ -368,7 +363,7 @@ export async function runBaseline(config: SimplicitySchemaConfig, logger: Logger
 
     let recorded = 0;
     for (const file of allFiles) {
-      await recordFile(client, file.relativePath, file.hash, file.phase);
+      await recordFile(client, file.relativePath, file.hash, file.phase, config.pgSchema);
       recorded++;
       logger.debug(`Recorded: ${file.relativePath} (${file.phase})`);
     }
@@ -425,13 +420,12 @@ export async function runValidate(config: SimplicitySchemaConfig, logger: Logger
 }
 
 export async function getStatus(config: SimplicitySchemaConfig, _logger: Logger): Promise<StatusResult> {
-  const pool = getPool(config.connectionString);
-  const client = await pool.connect();
+  const client = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
 
   try {
     // Ensure history table exists (won't error on fresh DBs)
     await ensureHistoryTable(client);
-    const history = await getHistory(client);
+    const history = await getHistory(client, config.pgSchema);
 
     // Discover current files
     const discovered = await discoverSchemaFiles(config.baseDir);

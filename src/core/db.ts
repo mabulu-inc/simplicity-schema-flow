@@ -22,6 +22,13 @@ export interface ClientOptions {
   lockTimeout?: number;
   statementTimeout?: number;
   maxRetries?: number;
+  /**
+   * Postgres schema this session should operate in. When set, the connection's
+   * `search_path` is configured to `"<pgSchema>", "$user", public` so that
+   * unqualified references in user-provided SQL (view bodies, RLS predicates,
+   * function bodies, etc.) resolve to the managed schema.
+   */
+  pgSchema?: string;
 }
 
 // Pool cache keyed by connection string
@@ -60,16 +67,33 @@ function isTransientError(err: unknown): boolean {
   return false;
 }
 
-async function setTimeouts(client: PoolClient, opts: ClientOptions): Promise<void> {
-  const statements: string[] = [];
+async function applySessionDefaults(client: PoolClient, opts: ClientOptions): Promise<void> {
+  if (opts.pgSchema) {
+    const safe = opts.pgSchema.replace(/"/g, '""');
+    await client.query(`SET search_path = "${safe}", "$user", public`);
+  }
   if (opts.lockTimeout !== undefined) {
-    statements.push(`SET lock_timeout = ${opts.lockTimeout}`);
+    await client.query(`SET lock_timeout = ${opts.lockTimeout}`);
   }
   if (opts.statementTimeout !== undefined) {
-    statements.push(`SET statement_timeout = ${opts.statementTimeout}`);
+    await client.query(`SET statement_timeout = ${opts.statementTimeout}`);
   }
-  for (const stmt of statements) {
-    await client.query(stmt);
+}
+
+/**
+ * Check out a pool client and prime its session (`search_path`, timeouts).
+ * Always prefer this over a bare `pool.connect()` so user SQL resolves names
+ * inside the managed schema.
+ */
+export async function acquireClient(connectionString: string, opts: ClientOptions = {}): Promise<PoolClient> {
+  const pool = getPool(connectionString);
+  const client = await pool.connect();
+  try {
+    await applySessionDefaults(client, opts);
+    return client;
+  } catch (err) {
+    client.release();
+    throw err;
   }
 }
 
@@ -90,7 +114,7 @@ export async function withClient<T>(
     const pool = getPool(connectionString);
     const client = await pool.connect();
     try {
-      await setTimeouts(client, opts);
+      await applySessionDefaults(client, opts);
       const result = await fn(client);
       return result;
     } catch (err) {
@@ -125,7 +149,7 @@ export async function withTransaction<T>(
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await setTimeouts(client, opts);
+      await applySessionDefaults(client, opts);
       const result = await fn(client);
       await client.query('COMMIT');
       return result;

@@ -109,12 +109,13 @@ describe('generate command writes files to --dir when --output is not set', () =
   beforeAll(async () => {
     project = await useTestProject(DATABASE_URL);
 
-    // Create a table in the test database so generate has something to introspect
+    // Create a table inside the test's schema so generate has something to
+    // introspect — and so DROP SCHEMA CASCADE will dispose of it on cleanup.
     const pool = getPool(project.connectionString);
     const client = await pool.connect();
     try {
       await client.query(`
-        CREATE TABLE test_gen_table (
+        CREATE TABLE "${project.schema}".test_gen_table (
           id serial PRIMARY KEY,
           name text NOT NULL
         )

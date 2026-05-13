@@ -11,24 +11,25 @@ All tool state lives in a dedicated `_smplcty_schema_flow` PostgreSQL schema, co
 
 ### `_smplcty_schema_flow.history`
 
-File tracking table. Records which schema files have been applied.
+File tracking table. Records which schema files have been applied **per managed pgSchema** — a single database can manage multiple pgSchemas independently without their file-hash entries clobbering each other.
 
-| Column       | Type          | Description                      |
-| ------------ | ------------- | -------------------------------- |
-| `file_path`  | `text` (PK)   | Relative path to the schema file |
-| `file_hash`  | `text`        | SHA-256 hash of file contents    |
-| `phase`      | `text`        | `pre`, `schema`, or `post`       |
-| `applied_at` | `timestamptz` | When the file was last applied   |
+| Column       | Type          | Description                                                       |
+| ------------ | ------------- | ----------------------------------------------------------------- |
+| `file_path`  | `text`        | Relative path to the schema file (part of composite PK)           |
+| `pg_schema`  | `text`        | The managed pgSchema this entry applies to (part of composite PK) |
+| `file_hash`  | `text`        | SHA-256 hash of file contents                                     |
+| `phase`      | `text`        | `pre`, `schema`, or `post`                                        |
+| `applied_at` | `timestamptz` | When the file was last applied                                    |
 
-A file is re-run only when its hash changes. There is no one-shot vs. repeatable distinction.
+A file is re-run only when its hash changes for the same pgSchema. There is no one-shot vs. repeatable distinction. On first run after upgrading from a pre-pgSchema-aware version, the column is added in place and existing rows back-fill to `pg_schema = 'public'`.
 
 ### `_smplcty_schema_flow.expand_state`
 
-Tracks in-progress expand/contract column migrations.
+Tracks in-progress expand/contract column migrations. Carries a `pg_schema` column so backfills scoped to one managed schema don't pick up state belonging to another.
 
 ### `_smplcty_schema_flow.snapshots`
 
-Stores migration snapshots for rollback. Each snapshot captures the operations that were applied.
+Stores migration snapshots for rollback. Each snapshot is keyed on its `pg_schema` value, so `runDown` only sees snapshots that belong to the schema it was invoked against.
 
 ## Why a separate schema?
 

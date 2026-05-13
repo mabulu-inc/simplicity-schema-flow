@@ -7,7 +7,9 @@ Import from `@smplcty/schema-flow/testing`.
 
 ## useTestProject
 
-Creates an isolated PostgreSQL database for a test. Each call creates a unique database, so tests don't interfere with each other.
+Provisions an isolated PostgreSQL **schema** inside the connection you hand it, plus a temp directory for YAML files. Each call gets a unique schema name (`test_<hex>`), and cleanup drops it with `CASCADE` — so two tests sharing the same database don't see each other's tables, and there is no admin connection, no `DROP DATABASE`, and no `pg_terminate_backend` dance.
+
+Cluster-scoped objects (roles, extensions) are shared across schemas inside one Postgres instance. Tests that introduce roles should use unique names, and can call `registerRole` so they're dropped during cleanup.
 
 ```typescript
 import { useTestProject, writeSchema } from '@smplcty/schema-flow/testing';
@@ -32,16 +34,16 @@ values: [active, inactive]
 `,
 });
 
-// Run migration
+// Run migration — operates inside project.schema
 const result = await project.migrate({ allowDestructive: false });
 
 // Run drift detection
 const drift = await project.drift();
 
-// Register roles for cleanup (roles are cluster-wide)
+// Register cluster-scoped roles for cleanup
 project.registerRole('test_role');
 
-// Clean up: drops the test database, registered roles, and temp directory
+// Clean up: DROP SCHEMA "<project.schema>" CASCADE + drop registered roles + remove temp dir
 await project.cleanup();
 ```
 
@@ -49,21 +51,21 @@ await project.cleanup();
 
 ```typescript
 interface TestProject {
-  /** Unique PostgreSQL schema name */
+  /** Unique PostgreSQL schema name for this test (`test_<hex>`) */
   schema: string;
   /** Temp directory for YAML files */
   dir: string;
-  /** Pre-configured config */
+  /** Pre-configured config with `pgSchema` set to `schema` */
   config: SimplicitySchemaConfig;
-  /** Connection string for isolated database */
+  /** Connection string the harness was handed (shared across tests) */
   connectionString: string;
-  /** Run migration pipeline */
+  /** Run migration pipeline against this schema */
   migrate: (opts?: { allowDestructive?: boolean }) => Promise<ExecuteResult>;
   /** Run drift detection */
   drift: () => Promise<DriftReport>;
-  /** Register a role for cleanup */
+  /** Register a cluster-scoped role for cleanup */
   registerRole: (name: string) => void;
-  /** Drop database, roles, and temp dir */
+  /** Drop the schema, drop registered roles, remove the temp dir */
   cleanup: () => Promise<void>;
 }
 ```
@@ -120,9 +122,13 @@ columns:
     const result = await project.migrate();
     expect(result.success).toBe(true);
 
+    // Always scope queries to project.schema — other tests share the database.
     await withClient(project.connectionString, async (client) => {
       const res = await client.query(
-        "SELECT column_name FROM information_schema.columns WHERE table_name = 'users' ORDER BY ordinal_position",
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = 'users'
+         ORDER BY ordinal_position`,
+        [project.schema],
       );
       expect(res.rows.map((r) => r.column_name)).toEqual(['id', 'email']);
     });

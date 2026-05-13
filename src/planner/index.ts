@@ -116,7 +116,16 @@ export interface Operation {
   /** Seed rows for seed_table operations */
   seedRows?: Record<string, unknown>[];
   /** Column metadata for seed_table operations */
-  seedColumns?: { name: string; type: string; isPk: boolean }[];
+  seedColumns?: { name: string; type: string }[];
+  /**
+   * Columns used to match existing rows during seed upsert. Resolved from the
+   * table's primary key, or — if the PK isn't fully present in every seed row
+   * — from the first unique constraint whose columns are. Empty when no such
+   * key exists: the executor then skips the UPDATE step and INSERTs only when
+   * no row already matches the seed-provided columns. Columns the YAML didn't
+   * mention are not consulted.
+   */
+  seedMatchColumns?: string[];
   /** Conflict strategy for seed_table operations */
   seedOnConflict?: SeedOnConflict;
   /** Result counts filled by executor after seed_table execution */
@@ -260,19 +269,21 @@ function diffExtensions(desired: ExtensionsSchema | null, actual: string[]): Ope
 
 // ─── Enums ─────────────────────────────────────────────────────
 
-function diffEnums(desired: EnumSchema[], actual: Map<string, EnumSchema>, _pgSchema: string): Operation[] {
+function diffEnums(desired: EnumSchema[], actual: Map<string, EnumSchema>, pgSchema: string): Operation[] {
   const ops: Operation[] = [];
 
   for (const desiredEnum of desired) {
     const existing = actual.get(desiredEnum.name);
     if (!existing) {
-      // Create new enum (idempotent — PostgreSQL lacks CREATE TYPE IF NOT EXISTS)
+      // Create new enum (idempotent — PostgreSQL lacks CREATE TYPE IF NOT EXISTS).
+      // Schema-qualify the existence check so two pgSchemas in the same
+      // database don't shadow each other's enum types.
       const values = desiredEnum.values.map((v) => `'${v}'`).join(', ');
       ops.push({
         type: 'create_enum',
         phase: 3,
         objectName: desiredEnum.name,
-        sql: `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '${desiredEnum.name}') THEN CREATE TYPE "${desiredEnum.name}" AS ENUM (${values}); END IF; END $$`,
+        sql: `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid WHERE t.typname = '${desiredEnum.name}' AND n.nspname = '${pgSchema}') THEN CREATE TYPE "${pgSchema}"."${desiredEnum.name}" AS ENUM (${values}); END IF; END $$`,
         destructive: false,
       });
       if (desiredEnum.comment) {
@@ -280,7 +291,7 @@ function diffEnums(desired: EnumSchema[], actual: Map<string, EnumSchema>, _pgSc
           type: 'set_comment',
           phase: 14,
           objectName: desiredEnum.name,
-          sql: `COMMENT ON TYPE "${desiredEnum.name}" IS '${escapeQuote(desiredEnum.comment)}'`,
+          sql: `COMMENT ON TYPE "${pgSchema}"."${desiredEnum.name}" IS '${escapeQuote(desiredEnum.comment)}'`,
           destructive: false,
         });
       }
@@ -292,7 +303,7 @@ function diffEnums(desired: EnumSchema[], actual: Map<string, EnumSchema>, _pgSc
             type: 'add_enum_value',
             phase: 3,
             objectName: desiredEnum.name,
-            sql: `ALTER TYPE "${desiredEnum.name}" ADD VALUE IF NOT EXISTS '${val}'`,
+            sql: `ALTER TYPE "${pgSchema}"."${desiredEnum.name}" ADD VALUE IF NOT EXISTS '${val}'`,
             destructive: false,
           });
         }
@@ -854,7 +865,7 @@ function createTableOps(
 
   // Seeds (phase 15)
   if (table.seeds && table.seeds.length > 0) {
-    ops.push(createSeedTableOp(table.table, table.seeds, table.columns, pgSchema, table.seeds_on_conflict));
+    ops.push(createSeedTableOp(table, table.seeds, pgSchema, table.seeds_on_conflict));
   }
 
   return ops;
@@ -1043,7 +1054,7 @@ function alterTableOps(
 
   // Seeds
   if (desired.seeds && desired.seeds.length > 0) {
-    ops.push(createSeedTableOp(desired.table, desired.seeds, desired.columns, pgSchema, desired.seeds_on_conflict));
+    ops.push(createSeedTableOp(desired, desired.seeds, pgSchema, desired.seeds_on_conflict));
   }
 
   return ops;
@@ -2227,13 +2238,14 @@ function diffMaterializedViews(
 // ─── Seeds ─────────────────────────────────────────────────────
 
 function createSeedTableOp(
-  table: string,
+  table: TableSchema,
   seeds: Record<string, unknown>[],
-  columns: ColumnDef[],
   pgSchema: string,
   onConflict?: SeedOnConflict,
 ): Operation {
-  // Collect all column names used across seed rows
+  const columns = table.columns;
+
+  // Collect column names used across seed rows (preserve first-seen order)
   const seedKeySet = new Set<string>();
   for (const seed of seeds) {
     for (const key of Object.keys(seed)) seedKeySet.add(key);
@@ -2244,27 +2256,65 @@ function createSeedTableOp(
     return {
       name,
       type: normalizeTypeName(colDef?.type || 'text'),
-      isPk: colDef?.primary_key === true,
     };
   });
 
-  // If no explicit PK columns found among seed keys, default to 'id'
-  const hasPk = seedColumns.some((c) => c.isPk);
-  if (!hasPk) {
-    const idCol = seedColumns.find((c) => c.name === 'id');
-    if (idCol) idCol.isPk = true;
-  }
+  const seedMatchColumns = resolveSeedMatchColumns(table, seeds, seedKeySet);
 
   return {
     type: 'seed_table',
     phase: 15,
-    objectName: table,
-    sql: `-- Seed "${pgSchema}"."${table}" (${seeds.length} rows)`,
+    objectName: table.table,
+    sql: `-- Seed "${pgSchema}"."${table.table}" (${seeds.length} rows)`,
     destructive: false,
     seedRows: seeds,
     seedColumns,
+    seedMatchColumns,
     seedOnConflict: onConflict,
   };
+}
+
+/**
+ * Pick the columns used to match existing rows during seed upsert.
+ *
+ * Priority:
+ *   1. Primary key (column-level `primary_key: true` or table-level
+ *      `primary_key: [...]`), if every PK column is present in every seed row.
+ *   2. The first unique constraint — declaration order, column-level
+ *      `unique: true` first, then table-level `unique_constraints` — whose
+ *      columns are all present in every seed row.
+ *   3. Empty array. The executor then skips UPDATE and only INSERTs rows
+ *      whose values don't already exist in the table.
+ *
+ * "Present in every seed row" means the key is literally present, not just
+ * defaulted away by the column's `default`. A null-valued key is fine for
+ * unique constraints (they're treated as distinct unless
+ * `nulls_not_distinct`), so we don't filter those out here.
+ */
+function resolveSeedMatchColumns(
+  table: TableSchema,
+  seeds: Record<string, unknown>[],
+  seedKeySet: Set<string>,
+): string[] {
+  const presentInAll = (cols: string[]): boolean =>
+    cols.length > 0 && cols.every((c) => seedKeySet.has(c)) && seeds.every((row) => cols.every((c) => c in row));
+
+  // 1. Primary key
+  const pkFromColumns = table.columns.filter((c) => c.primary_key).map((c) => c.name);
+  const pkCols = pkFromColumns.length > 0 ? pkFromColumns : (table.primary_key ?? []);
+  if (presentInAll(pkCols)) return pkCols;
+
+  // 2. Column-level unique constraints
+  for (const col of table.columns) {
+    if (col.unique && presentInAll([col.name])) return [col.name];
+  }
+
+  // 3. Table-level unique constraints
+  for (const uc of table.unique_constraints ?? []) {
+    if (presentInAll(uc.columns)) return uc.columns;
+  }
+
+  return [];
 }
 
 // ─── Helpers ───────────────────────────────────────────────────

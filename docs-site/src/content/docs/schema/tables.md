@@ -377,13 +377,25 @@ seeds:
     email: 'admin@example.com'
     name: 'Admin'
     created_at: !sql now() # SQL expression
-seeds_on_conflict: 'DO NOTHING' # omit for upsert
+seeds_on_conflict: 'DO NOTHING' # optional — see below
 ```
 
-- Default behavior (no `seeds_on_conflict`): `INSERT ... ON CONFLICT (pk) DO UPDATE SET ...` (upsert)
-- `seeds_on_conflict: 'DO NOTHING'`: skip existing rows
+### Match-key resolution
 
-Use `!sql` YAML tag for SQL expressions in values.
+To re-apply seeds idempotently, schema-flow needs a way to identify which existing row a seed row corresponds to. The match key is resolved per table, in this order:
+
+1. **Primary key**, if every PK column is present in every seed row.
+2. **The first unique constraint** whose columns are all present in every seed row — column-level `unique: true` first, then table-level `unique_constraints`.
+3. **No match key.** UPDATE is skipped entirely, and rows are INSERTed only when no existing row in the table already has the same values for every seed-provided column (null-safe via `IS NOT DISTINCT FROM`). Table columns the YAML didn't mention are never consulted.
+
+There is no implicit "treat `id` as the key" behaviour — if your PK is `code` and your seed only supplies `id`, the planner will fall through to (2) or (3).
+
+### Conflict behaviour
+
+- **Default (no `seeds_on_conflict`)** — upsert via the resolved match key: rows whose non-key columns differ are UPDATEd, rows that don't yet exist are INSERTed.
+- **`seeds_on_conflict: 'DO NOTHING'`** — skips the UPDATE step even when a match key exists, so existing rows are never overwritten. New rows are still INSERTed.
+
+Use the `!sql` YAML tag for SQL expressions in values. Seeds whose existing values already match the YAML are detected via an `EXCEPT` round-trip and produce no operation in the plan.
 
 ## Description alias
 

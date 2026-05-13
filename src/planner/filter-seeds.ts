@@ -5,14 +5,13 @@
  *
  * Strategy: load the YAML seeds into a temp table and EXCEPT-compare
  * against the real table over the seed-declared columns. If the result
- * is empty, every seed row has a matching row in the real table.
+ * is empty, every seed row has a matching row in the real table — which
+ * is exactly the executor's no-op condition (whether it would match by
+ * a key column or via full-row dedup), so emitting nothing is safe.
  *
  * Skipped (seeds left intact, planner emits the op as before):
  *  - tables with seed values that are SQL expressions (`{ __sql: '…' }`)
  *    — those evaluate at apply time and can't be compared statically;
- *  - tables whose primary key isn't present in every seed row — without
- *    a stable identity column we can't tell "row exists with same data"
- *    from "row exists with different data";
  *  - first-apply against a fresh DB where the real table doesn't exist
  *    yet — the EXCEPT throws, the catch leaves seeds intact.
  */
@@ -39,10 +38,6 @@ async function processCandidates(client: PoolClient, candidates: TableSchema[], 
     if (seeds.some((row) => Object.values(row).some(isSqlExpression))) continue;
 
     const seedColumns = collectSeedColumns(seeds);
-    const pkCols = (table.columns ?? []).filter((c) => c.primary_key).map((c) => c.name);
-    if (pkCols.length === 0) continue;
-    if (!pkCols.every((c) => seedColumns.includes(c))) continue;
-
     const colDefMap = new Map((table.columns ?? []).map((c) => [c.name, mapColumnType(c.type)]));
     if (!seedColumns.every((c) => colDefMap.has(c))) continue;
 

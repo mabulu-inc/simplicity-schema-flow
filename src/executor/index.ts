@@ -10,7 +10,7 @@ import { readFile } from 'node:fs/promises';
 import type { Operation } from '../planner/index.js';
 import type { SchemaFile } from '../core/files.js';
 import type { Logger } from '../core/logger.js';
-import { getPool } from '../core/db.js';
+import { acquireClient } from '../core/db.js';
 import { ensureHistoryTable, fileNeedsApply, recordFile } from '../core/tracker.js';
 import { ensureSnapshotsTable, saveSnapshot } from '../rollback/index.js';
 import { recordExpandState } from '../expand/index.js';
@@ -143,17 +143,25 @@ function isSqlExpression(val: unknown): val is { __sql: string } {
 
 /**
  * Execute a seed_table operation using bulk JSONB upsert.
- * Two round-trips per table: UPDATE changed rows, INSERT new rows.
+ *
+ * With a resolvable match key (PK or unique constraint, in `seedMatchColumns`):
+ * two round-trips per table — UPDATE rows whose non-key columns differ, then
+ * INSERT rows that don't match the key. With no match key, the UPDATE is
+ * skipped entirely and the INSERT only fires for rows where at least one of
+ * the seed-provided columns already differs (null-safe via
+ * `IS NOT DISTINCT FROM`). Columns the YAML didn't mention are ignored.
  */
 async function executeSeedTable(client: pg.PoolClient, op: Operation, pgSchema: string): Promise<SeedResult> {
-  const { seedRows, seedColumns, seedOnConflict } = op;
+  const { seedRows, seedColumns, seedMatchColumns, seedOnConflict } = op;
   if (!seedRows || !seedColumns || seedRows.length === 0) {
     return { inserted: 0, updated: 0, unchanged: 0 };
   }
 
   const table = op.objectName;
-  const pkCols = seedColumns.filter((c) => c.isPk);
-  const nonPkCols = seedColumns.filter((c) => !c.isPk);
+  const matchCols = seedMatchColumns ?? [];
+  const matchColSet = new Set(matchCols);
+  const keyCols = seedColumns.filter((c) => matchColSet.has(c.name));
+  const nonKeyCols = seedColumns.filter((c) => !matchColSet.has(c.name));
 
   // Check if any values contain SQL expressions
   const sqlExpressions = new Map<string, Map<number, string>>(); // col -> (rowIdx -> sql)
@@ -206,27 +214,33 @@ async function executeSeedTable(client: pg.PoolClient, op: Operation, pgSchema: 
 
   let updated = 0;
 
-  // UPDATE changed rows (skip if DO NOTHING or no non-PK columns)
-  if (seedOnConflict !== 'DO NOTHING' && nonPkCols.length > 0) {
-    const setClauses = nonPkCols.map((c) => `"${c.name}" = d."${c.name}"`).join(', ');
-    const pkJoin = pkCols.map((c) => `t."${c.name}" = d."${c.name}"`).join(' AND ');
-    const distinctChecks = nonPkCols.map((c) => `t."${c.name}" IS DISTINCT FROM d."${c.name}"`).join(' OR ');
+  // UPDATE changed rows. Skipped when there's nothing to key on (no idempotent
+  // update is possible without a stable identity), when seeds_on_conflict says
+  // DO NOTHING, or when every seed column is part of the match key.
+  if (matchCols.length > 0 && seedOnConflict !== 'DO NOTHING' && nonKeyCols.length > 0) {
+    const setClauses = nonKeyCols.map((c) => `"${c.name}" = d."${c.name}"`).join(', ');
+    const keyJoin = keyCols.map((c) => `t."${c.name}" IS NOT DISTINCT FROM d."${c.name}"`).join(' AND ');
+    const distinctChecks = nonKeyCols.map((c) => `t."${c.name}" IS DISTINCT FROM d."${c.name}"`).join(' OR ');
 
     const updateSql = `${dataCte}
 UPDATE "${pgSchema}"."${table}" t
 SET ${setClauses}
 FROM data d
-WHERE ${pkJoin}
+WHERE ${keyJoin}
 AND (${distinctChecks})`;
 
     const updateRes = await client.query(updateSql, [JSON.stringify(jsonbData)]);
     updated = updateRes.rowCount ?? 0;
   }
 
-  // INSERT new rows
+  // INSERT new rows. With a match key, "new" means no row shares the key.
+  // Without one, "new" means no row already has every seed-provided column
+  // equal to the seed values — table columns the YAML didn't mention are
+  // never read.
   const allColNames = seedColumns.map((c) => `"${c.name}"`).join(', ');
   const selectCols = seedColumns.map((c) => `d."${c.name}"`).join(', ');
-  const existsJoin = pkCols.map((c) => `t."${c.name}" = d."${c.name}"`).join(' AND ');
+  const existsCols = matchCols.length > 0 ? keyCols : seedColumns;
+  const existsJoin = existsCols.map((c) => `t."${c.name}" IS NOT DISTINCT FROM d."${c.name}"`).join(' AND ');
 
   const insertSql = `${dataCte}
 INSERT INTO "${pgSchema}"."${table}" (${allColNames})
@@ -288,8 +302,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     return result;
   }
 
-  const pool = getPool(connectionString);
-  const lockClient = await pool.connect();
+  const lockClient = await acquireClient(connectionString, { pgSchema });
 
   try {
     // Acquire advisory lock
@@ -304,7 +317,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
 
       // Run pre-scripts (each in its own transaction, tracked by hash)
       for (const script of preScripts) {
-        const changed = await fileNeedsApply(lockClient, script.relativePath, script.hash);
+        const changed = await fileNeedsApply(lockClient, script.relativePath, script.hash, pgSchema);
         if (!changed) {
           result.skippedScripts++;
           logger?.debug(`Skipping unchanged pre-script: ${script.relativePath}`);
@@ -312,11 +325,9 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
         }
 
         const sql = await readFile(script.absolutePath, 'utf-8');
-        const scriptClient = await pool.connect();
+        const scriptClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
         try {
           await scriptClient.query('BEGIN');
-          if (lockTimeout !== undefined) await scriptClient.query(`SET lock_timeout = ${lockTimeout}`);
-          if (statementTimeout !== undefined) await scriptClient.query(`SET statement_timeout = ${statementTimeout}`);
           await scriptClient.query(sql);
           await scriptClient.query('COMMIT');
         } catch (err) {
@@ -326,7 +337,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           scriptClient.release();
         }
 
-        await recordFile(lockClient, script.relativePath, script.hash, 'pre');
+        await recordFile(lockClient, script.relativePath, script.hash, 'pre', pgSchema);
         result.preScriptsRun++;
         logger?.info(`Executed pre-script: ${script.relativePath}`);
       }
@@ -358,7 +369,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
       // Run prechecks before any operations
       for (const op of precheckOps) {
         logger?.debug(`Running precheck: ${op.objectName}`);
-        const precheckClient = await pool.connect();
+        const precheckClient = await acquireClient(connectionString, { pgSchema });
         try {
           const res = await precheckClient.query(op.sql);
           const row = res.rows[0];
@@ -377,11 +388,9 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
 
       // Run transactional operations in a transaction
       if (transactionalOps.length > 0) {
-        const opClient = await pool.connect();
+        const opClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
         try {
           await opClient.query('BEGIN');
-          if (lockTimeout !== undefined) await opClient.query(`SET lock_timeout = ${lockTimeout}`);
-          if (statementTimeout !== undefined) await opClient.query(`SET statement_timeout = ${statementTimeout}`);
 
           for (const op of transactionalOps) {
             logger?.debug(`Executing: ${op.type} ${op.objectName}`);
@@ -420,7 +429,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
       // Run concurrent operations outside of transactions (e.g. CREATE INDEX CONCURRENTLY)
       if (concurrentOps.length > 0 && !validateOnly) {
         for (const op of concurrentOps) {
-          const concClient = await pool.connect();
+          const concClient = await acquireClient(connectionString, { pgSchema });
           try {
             logger?.debug(`Executing (concurrent): ${op.type} ${op.objectName}`);
             await withOpContext(op, () => concClient.query(op.sql));
@@ -435,7 +444,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
       // Run post-scripts (each in its own transaction, tracked by hash)
       if (!validateOnly) {
         for (const script of postScripts) {
-          const changed = await fileNeedsApply(lockClient, script.relativePath, script.hash);
+          const changed = await fileNeedsApply(lockClient, script.relativePath, script.hash, pgSchema);
           if (!changed) {
             result.skippedScripts++;
             logger?.debug(`Skipping unchanged post-script: ${script.relativePath}`);
@@ -443,11 +452,9 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           }
 
           const sql = await readFile(script.absolutePath, 'utf-8');
-          const scriptClient = await pool.connect();
+          const scriptClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
           try {
             await scriptClient.query('BEGIN');
-            if (lockTimeout !== undefined) await scriptClient.query(`SET lock_timeout = ${lockTimeout}`);
-            if (statementTimeout !== undefined) await scriptClient.query(`SET statement_timeout = ${statementTimeout}`);
             await scriptClient.query(sql);
             await scriptClient.query('COMMIT');
           } catch (err) {
@@ -457,7 +464,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
             scriptClient.release();
           }
 
-          await recordFile(lockClient, script.relativePath, script.hash, 'post');
+          await recordFile(lockClient, script.relativePath, script.hash, 'post', pgSchema);
           result.postScriptsRun++;
           logger?.info(`Executed post-script: ${script.relativePath}`);
         }

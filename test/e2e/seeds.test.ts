@@ -244,6 +244,110 @@ seeds:
     expect(result.rows[0].created_at instanceof Date).toBe(true);
   });
 
+  it('(8) seeds match by a non-PK unique column when the PK is absent', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/tags.yaml': `
+table: tags
+columns:
+  - name: id
+    type: serial
+    primary_key: true
+  - name: slug
+    type: text
+    nullable: false
+    unique: true
+  - name: label
+    type: text
+    nullable: false
+seeds:
+  - slug: 'a'
+    label: 'Alpha'
+  - slug: 'b'
+    label: 'Bravo'
+`,
+    });
+
+    await runMigration(ctx);
+
+    const r1 = await queryDb(ctx, `SELECT slug, label FROM "${ctx.schema}".tags ORDER BY slug`);
+    expect(r1.rows).toEqual([
+      { slug: 'a', label: 'Alpha' },
+      { slug: 'b', label: 'Bravo' },
+    ]);
+
+    // Update label for 'a' through the seed — should be applied via slug match,
+    // not duplicated.
+    writeSchema(ctx.dir, {
+      'tables/tags.yaml': `
+table: tags
+columns:
+  - name: id
+    type: serial
+    primary_key: true
+  - name: slug
+    type: text
+    nullable: false
+    unique: true
+  - name: label
+    type: text
+    nullable: false
+seeds:
+  - slug: 'a'
+    label: 'Alpha Prime'
+  - slug: 'b'
+    label: 'Bravo'
+`,
+    });
+
+    await runMigration(ctx);
+
+    const r2 = await queryDb(ctx, `SELECT slug, label FROM "${ctx.schema}".tags ORDER BY slug`);
+    expect(r2.rows).toEqual([
+      { slug: 'a', label: 'Alpha Prime' },
+      { slug: 'b', label: 'Bravo' },
+    ]);
+  });
+
+  it('(9) seeds with no PK/unique match insert once and are idempotent on re-apply', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/log_entries.yaml': `
+table: log_entries
+columns:
+  - name: id
+    type: serial
+    primary_key: true
+  - name: message
+    type: text
+    nullable: false
+  - name: level
+    type: text
+    nullable: false
+    default: "'info'"
+seeds:
+  - message: 'startup'
+  - message: 'ready'
+`,
+    });
+
+    await runMigration(ctx);
+
+    const r1 = await queryDb(ctx, `SELECT message, level FROM "${ctx.schema}".log_entries ORDER BY id`);
+    expect(r1.rows).toEqual([
+      { message: 'startup', level: 'info' },
+      { message: 'ready', level: 'info' },
+    ]);
+
+    // Re-applying the same YAML must NOT insert duplicates.
+    await runMigration(ctx);
+
+    const r2 = await queryDb(ctx, `SELECT message FROM "${ctx.schema}".log_entries ORDER BY id`);
+    expect(r2.rows.length).toBe(2);
+  });
+
   it('(7) multiple seed rows', async () => {
     ctx = await useTestProject(DATABASE_URL);
 

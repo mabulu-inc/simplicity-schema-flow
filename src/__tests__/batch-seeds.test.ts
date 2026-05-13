@@ -66,7 +66,7 @@ describe('Batch seeds — planner', () => {
     expect(seedOps[0].seedRows).toHaveLength(3);
   });
 
-  it('carries seed column metadata with types and PK info', () => {
+  it('carries seed column metadata and resolves match columns from the primary key', () => {
     const desired = emptyDesired();
     desired.tables = [
       {
@@ -83,8 +83,85 @@ describe('Batch seeds — planner', () => {
     expect(seedOps).toHaveLength(1);
     const op = seedOps[0];
     expect(op.seedColumns).toBeDefined();
-    expect(op.seedColumns!.find((c) => c.name === 'id')?.isPk).toBe(true);
-    expect(op.seedColumns!.find((c) => c.name === 'email')?.isPk).toBeFalsy();
+    expect(op.seedColumns!.map((c) => c.name).sort()).toEqual(['email', 'id']);
+    expect(op.seedMatchColumns).toEqual(['id']);
+  });
+
+  it('resolves match columns from a unique constraint when the PK is absent from seeds', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'tags',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'slug', type: 'text', unique: true },
+          { name: 'label', type: 'text' },
+        ],
+        seeds: [{ slug: 'a', label: 'Alpha' }],
+      },
+    ];
+    const result = buildPlan(desired, emptyActual());
+    const seedOps = result.operations.filter((o) => o.type === 'seed_table');
+    expect(seedOps).toHaveLength(1);
+    expect(seedOps[0].seedMatchColumns).toEqual(['slug']);
+  });
+
+  it('resolves match columns from a table-level composite unique constraint', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'memberships',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'tenant_id', type: 'integer' },
+          { name: 'user_id', type: 'integer' },
+          { name: 'role', type: 'text' },
+        ],
+        unique_constraints: [{ columns: ['tenant_id', 'user_id'] }],
+        seeds: [{ tenant_id: 1, user_id: 1, role: 'admin' }],
+      },
+    ];
+    const result = buildPlan(desired, emptyActual());
+    const seedOps = result.operations.filter((o) => o.type === 'seed_table');
+    expect(seedOps).toHaveLength(1);
+    expect(seedOps[0].seedMatchColumns).toEqual(['tenant_id', 'user_id']);
+  });
+
+  it('leaves match columns empty when no PK or unique constraint is covered by the seed', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'log_entries',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'message', type: 'text' },
+        ],
+        seeds: [{ message: 'hello' }],
+      },
+    ];
+    const result = buildPlan(desired, emptyActual());
+    const seedOps = result.operations.filter((o) => o.type === 'seed_table');
+    expect(seedOps).toHaveLength(1);
+    expect(seedOps[0].seedMatchColumns).toEqual([]);
+  });
+
+  it('does not silently treat a seed column named "id" as the primary key', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'codes',
+        columns: [
+          { name: 'code', type: 'text', primary_key: true },
+          { name: 'id', type: 'integer' },
+          { name: 'label', type: 'text' },
+        ],
+        seeds: [{ id: 1, label: 'one' }],
+      },
+    ];
+    const result = buildPlan(desired, emptyActual());
+    const seedOps = result.operations.filter((o) => o.type === 'seed_table');
+    expect(seedOps).toHaveLength(1);
+    expect(seedOps[0].seedMatchColumns).toEqual([]);
   });
 
   it('propagates seeds_on_conflict DO NOTHING', () => {
@@ -187,9 +264,10 @@ describe('Batch seeds — executor', () => {
           { id: 3, name: 'pending' },
         ],
         seedColumns: [
-          { name: 'id', type: 'integer', isPk: true },
-          { name: 'name', type: 'text', isPk: false },
+          { name: 'id', type: 'integer' },
+          { name: 'name', type: 'text' },
         ],
+        seedMatchColumns: ['id'],
       },
     ];
 
@@ -243,9 +321,10 @@ describe('Batch seeds — executor', () => {
           { id: 3, name: 'pending' }, // inserted
         ],
         seedColumns: [
-          { name: 'id', type: 'integer', isPk: true },
-          { name: 'name', type: 'text', isPk: false },
+          { name: 'id', type: 'integer' },
+          { name: 'name', type: 'text' },
         ],
+        seedMatchColumns: ['id'],
       },
     ];
 
@@ -297,9 +376,10 @@ describe('Batch seeds — executor', () => {
           { id: 2, name: 'new' }, // should be inserted
         ],
         seedColumns: [
-          { name: 'id', type: 'integer', isPk: true },
-          { name: 'name', type: 'text', isPk: false },
+          { name: 'id', type: 'integer' },
+          { name: 'name', type: 'text' },
         ],
+        seedMatchColumns: ['id'],
         seedOnConflict: 'DO NOTHING',
       },
     ];
@@ -346,9 +426,10 @@ describe('Batch seeds — executor', () => {
           { id: 2, created_at: { __sql: 'now()' } },
         ],
         seedColumns: [
-          { name: 'id', type: 'integer', isPk: true },
-          { name: 'created_at', type: 'timestamptz', isPk: false },
+          { name: 'id', type: 'integer' },
+          { name: 'created_at', type: 'timestamptz' },
         ],
+        seedMatchColumns: ['id'],
       },
     ];
 
@@ -393,9 +474,10 @@ describe('Batch seeds — executor', () => {
           { id: '00000000-0000-0000-0000-000000000002', email: 'user@example.com' },
         ],
         seedColumns: [
-          { name: 'id', type: 'uuid', isPk: true },
-          { name: 'email', type: 'text', isPk: false },
+          { name: 'id', type: 'uuid' },
+          { name: 'email', type: 'text' },
         ],
+        seedMatchColumns: ['id'],
       },
     ];
 
@@ -440,10 +522,11 @@ describe('Batch seeds — executor', () => {
           { key: 'notifications', value: 'email', enabled: true },
         ],
         seedColumns: [
-          { name: 'key', type: 'text', isPk: true },
-          { name: 'value', type: 'text', isPk: false },
-          { name: 'enabled', type: 'boolean', isPk: false },
+          { name: 'key', type: 'text' },
+          { name: 'value', type: 'text' },
+          { name: 'enabled', type: 'boolean' },
         ],
+        seedMatchColumns: ['key'],
       },
     ];
 
@@ -464,6 +547,116 @@ describe('Batch seeds — executor', () => {
     } finally {
       client.release();
     }
+  });
+
+  it('matches by a non-PK unique column when the PK is absent from seeds', async () => {
+    const pool = getPool(DATABASE_URL);
+    const client = await pool.connect();
+    try {
+      await client.query(
+        `CREATE TABLE "${testSchema}"."tags" ("id" serial PRIMARY KEY, "slug" text UNIQUE NOT NULL, "label" text NOT NULL)`,
+      );
+      await client.query(`INSERT INTO "${testSchema}"."tags" ("slug", "label") VALUES ('a', 'old-alpha')`);
+    } finally {
+      client.release();
+    }
+
+    const ops: Operation[] = [
+      {
+        type: 'seed_table',
+        phase: 15,
+        objectName: 'tags',
+        sql: '',
+        destructive: false,
+        seedRows: [
+          { slug: 'a', label: 'Alpha' },
+          { slug: 'b', label: 'Bravo' },
+        ],
+        seedColumns: [
+          { name: 'slug', type: 'text' },
+          { name: 'label', type: 'text' },
+        ],
+        seedMatchColumns: ['slug'],
+      },
+    ];
+
+    const result = await execute({
+      connectionString: DATABASE_URL,
+      operations: ops,
+      pgSchema: testSchema,
+      logger,
+    });
+
+    const seedOp = result.executedOperations.find((o) => o.type === 'seed_table')!;
+    expect(seedOp.seedResult).toEqual({ inserted: 1, updated: 1, unchanged: 0 });
+
+    const client2 = await pool.connect();
+    try {
+      const res = await client2.query(`SELECT slug, label FROM "${testSchema}"."tags" ORDER BY slug`);
+      expect(res.rows).toEqual([
+        { slug: 'a', label: 'Alpha' },
+        { slug: 'b', label: 'Bravo' },
+      ]);
+    } finally {
+      client2.release();
+    }
+  });
+
+  it('with no match key, skips UPDATE and inserts only rows whose seed columns are not already present', async () => {
+    const pool = getPool(DATABASE_URL);
+    const client = await pool.connect();
+    try {
+      await client.query(
+        `CREATE TABLE "${testSchema}"."log_entries" ("id" serial PRIMARY KEY, "message" text NOT NULL, "level" text NOT NULL DEFAULT 'info')`,
+      );
+      await client.query(`INSERT INTO "${testSchema}"."log_entries" ("message", "level") VALUES ('hello', 'info')`);
+    } finally {
+      client.release();
+    }
+
+    const ops: Operation[] = [
+      {
+        type: 'seed_table',
+        phase: 15,
+        objectName: 'log_entries',
+        sql: '',
+        destructive: false,
+        seedRows: [{ message: 'hello' }, { message: 'world' }],
+        seedColumns: [{ name: 'message', type: 'text' }],
+        seedMatchColumns: [],
+      },
+    ];
+
+    const result = await execute({
+      connectionString: DATABASE_URL,
+      operations: ops,
+      pgSchema: testSchema,
+      logger,
+    });
+
+    const seedOp = result.executedOperations.find((o) => o.type === 'seed_table')!;
+    expect(seedOp.seedResult).toEqual({ inserted: 1, updated: 0, unchanged: 1 });
+
+    const client2 = await pool.connect();
+    try {
+      const res = await client2.query(`SELECT message, level FROM "${testSchema}"."log_entries" ORDER BY id`);
+      expect(res.rows).toEqual([
+        { message: 'hello', level: 'info' },
+        { message: 'world', level: 'info' },
+      ]);
+    } finally {
+      client2.release();
+    }
+
+    // Re-running with the same seeds should be a no-op.
+    const result2 = await execute({
+      connectionString: DATABASE_URL,
+      operations: ops,
+      pgSchema: testSchema,
+      logger,
+    });
+    const seedOp2 = result2.executedOperations.find((o) => o.type === 'seed_table')!;
+    expect(seedOp2.seedResult).toEqual({ inserted: 0, updated: 0, unchanged: 2 });
   });
 });
 

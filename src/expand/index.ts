@@ -21,7 +21,7 @@
 import type pg from 'pg';
 import type { ExpandDef } from '../schema/types.js';
 import type { Logger } from '../core/logger.js';
-import { getPool } from '../core/db.js';
+import { acquireClient } from '../core/db.js';
 import { acquireAdvisoryLock, releaseAdvisoryLock } from '../executor/index.js';
 
 // ─── Operation types for expand/contract ────────────────────────
@@ -64,6 +64,8 @@ export interface ExpandState {
   old_column: string;
   transform: string;
   trigger_name: string;
+  /** Managed pgSchema this expand state belongs to. */
+  pg_schema: string;
   status: 'expanded' | 'contracted';
   created_at: Date;
 }
@@ -85,10 +87,30 @@ export async function ensureExpandStateTable(client: pg.PoolClient): Promise<voi
       old_column TEXT NOT NULL,
       transform TEXT NOT NULL,
       trigger_name TEXT NOT NULL,
+      pg_schema TEXT NOT NULL DEFAULT 'public',
       status TEXT NOT NULL DEFAULT 'expanded',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
+
+  // Upgrade pre-pgSchema-aware expand_state in place. The `table_name`
+  // column historically encodes the schema as a `"schema.table"` string;
+  // preserve that as the fallback default while making it explicit.
+  const hasColumn = await client.query(
+    `SELECT 1 FROM information_schema.columns
+     WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'expand_state' AND column_name = 'pg_schema'`,
+  );
+  if (hasColumn.rowCount === 0) {
+    await client.query(
+      "ALTER TABLE _smplcty_schema_flow.expand_state ADD COLUMN pg_schema TEXT NOT NULL DEFAULT 'public'",
+    );
+    await client.query(`
+      UPDATE _smplcty_schema_flow.expand_state
+      SET pg_schema = split_part(table_name, '.', 1)
+      WHERE position('.' in table_name) > 0
+    `);
+  }
+
   await client.query(`
     DO $$
     BEGIN
@@ -239,12 +261,13 @@ export async function recordExpandState(client: pg.PoolClient, meta: ExpandMeta)
   await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
   await ensureExpandStateTable(client);
   const qualifiedTableName = meta.pgSchema ? `${meta.pgSchema}.${meta.tableName}` : meta.tableName;
+  const pgSchema = meta.pgSchema ?? 'public';
   await client.query(
     `INSERT INTO _smplcty_schema_flow.expand_state
-       (table_name, new_column, old_column, transform, trigger_name, status)
-     VALUES ($1, $2, $3, $4, $5, 'expanded')
+       (table_name, new_column, old_column, transform, trigger_name, pg_schema, status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'expanded')
      ON CONFLICT (table_name, new_column) DO NOTHING`,
-    [qualifiedTableName, meta.newColumn, meta.oldColumn, meta.transform, meta.triggerName],
+    [qualifiedTableName, meta.newColumn, meta.oldColumn, meta.transform, meta.triggerName, pgSchema],
   );
 }
 
@@ -278,11 +301,10 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   const { connectionString, tableName, newColumn, transform, batchSize = 1000, pgSchema, logger } = options;
 
   const qualifiedTable = pgSchema ? `${pgSchema}.${tableName}` : tableName;
-  const pool = getPool(connectionString);
   let totalUpdated = 0;
 
   while (true) {
-    const client = await pool.connect();
+    const client = await acquireClient(connectionString, { pgSchema });
     try {
       const res = await client.query(
         `UPDATE ${qualifiedTable} SET ${newColumn} = ${transform}
@@ -333,18 +355,27 @@ export interface BackfillAllResult {
  */
 export async function runBackfillAll(options: BackfillAllOptions): Promise<BackfillAllResult> {
   const { connectionString, pgSchema, table, column, concurrency = 1, batchSize, logger } = options;
-  const pool = getPool(connectionString);
 
   const states: ExpandState[] = [];
-  const client = await pool.connect();
+  const client = await acquireClient(connectionString, { pgSchema });
   try {
     await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
     await ensureExpandStateTable(client);
-    const res = await client.query(
-      `SELECT * FROM _smplcty_schema_flow.expand_state
-       WHERE status = 'expanded'
-       ORDER BY created_at ASC`,
-    );
+    // Restrict to the caller's pgSchema so backfills from other managed
+    // schemas in the same database don't bleed in. When no pgSchema is
+    // given, fall back to all rows (preserves the older API shape).
+    const res = pgSchema
+      ? await client.query(
+          `SELECT * FROM _smplcty_schema_flow.expand_state
+           WHERE status = 'expanded' AND pg_schema = $1
+           ORDER BY created_at ASC`,
+          [pgSchema],
+        )
+      : await client.query(
+          `SELECT * FROM _smplcty_schema_flow.expand_state
+           WHERE status = 'expanded'
+           ORDER BY created_at ASC`,
+        );
     states.push(...(res.rows as ExpandState[]));
   } finally {
     client.release();
@@ -445,8 +476,7 @@ export async function runContract(options: ContractOptions): Promise<ContractRes
   const { connectionString, tableName, newColumn, pgSchema, force, logger } = options;
 
   const qualifiedTableName = pgSchema ? `${pgSchema}.${tableName}` : tableName;
-  const pool = getPool(connectionString);
-  const client = await pool.connect();
+  const client = await acquireClient(connectionString, { pgSchema });
 
   try {
     await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');

@@ -117,11 +117,13 @@ describe('Planner', () => {
       const ops = findOps(result.operations, 'create_enum');
       expect(ops).toHaveLength(1);
       const sql = ops[0].sql;
-      // Must use a DO block with pg_type existence check
+      // Must use a DO block with pg_type existence check, and create the
+      // type qualified with the target pgSchema so two managed schemas in
+      // the same database can each carry their own copy.
       expect(sql).toContain('DO $$');
       expect(sql).toContain('pg_type');
       expect(sql).toContain('IF NOT EXISTS');
-      expect(sql).toContain('CREATE TYPE "status" AS ENUM');
+      expect(sql).toContain('CREATE TYPE "public"."status" AS ENUM');
       expect(sql).toContain("'active'");
       expect(sql).toContain("'inactive'");
       expect(sql).toContain('END $$');

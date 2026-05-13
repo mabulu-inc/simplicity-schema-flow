@@ -1458,7 +1458,7 @@ describe('Executor', () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        const snapshot = await getLatestSnapshot(client);
+        const snapshot = await getLatestSnapshot(client, testSchema);
         expect(snapshot).not.toBeNull();
         expect(snapshot!.operations).toHaveLength(1);
         expect(snapshot!.operations[0].type).toBe('create_table');
@@ -1492,7 +1492,7 @@ describe('Executor', () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        const snapshot = await getLatestSnapshot(client);
+        const snapshot = await getLatestSnapshot(client, testSchema);
         expect(snapshot).toBeNull();
       } finally {
         client.release();
@@ -1511,7 +1511,7 @@ describe('Executor', () => {
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        const snapshot = await getLatestSnapshot(client);
+        const snapshot = await getLatestSnapshot(client, testSchema);
         expect(snapshot).toBeNull();
       } finally {
         client.release();
@@ -1552,7 +1552,7 @@ describe('Executor', () => {
 
       // Run down — should use auto-captured snapshot
       const { runDown } = await import('../../rollback/index.js');
-      const result = await runDown(DATABASE_URL, { logger });
+      const result = await runDown(DATABASE_URL, { logger, pgSchema: testSchema });
       expect(result.executed).toBeGreaterThan(0);
 
       // Verify table is gone
@@ -2705,19 +2705,20 @@ describe('Executor', () => {
         expect(check.rows[0].exists).toBe(true);
 
         // Now let's verify the file tracker: manually insert a history entry and confirm it's skipped
-        await client.query(`
-          INSERT INTO _smplcty_schema_flow.history (file_path, file_hash, phase, applied_at)
-          VALUES ('pre/001_setup.sql', 'abc123hash', 'pre', now())
-          ON CONFLICT (file_path) DO NOTHING
-        `);
+        await client.query(
+          `INSERT INTO _smplcty_schema_flow.history (file_path, file_hash, phase, pg_schema, applied_at)
+           VALUES ('pre/001_setup.sql', 'abc123hash', 'pre', $1, now())
+           ON CONFLICT (file_path, pg_schema) DO NOTHING`,
+          [testSchema],
+        );
 
         // The fileNeedsApply check with same hash should return false (skip)
         const { fileNeedsApply } = await import('../../core/tracker.js');
-        const needsApply = await fileNeedsApply(client, 'pre/001_setup.sql', 'abc123hash');
+        const needsApply = await fileNeedsApply(client, 'pre/001_setup.sql', 'abc123hash', testSchema);
         expect(needsApply).toBe(false);
 
         // Changed hash should return true (re-run)
-        const needsRerun = await fileNeedsApply(client, 'pre/001_setup.sql', 'different_hash');
+        const needsRerun = await fileNeedsApply(client, 'pre/001_setup.sql', 'different_hash', testSchema);
         expect(needsRerun).toBe(true);
       } finally {
         await client.query(`DROP SCHEMA "${testSchema}" CASCADE`);
