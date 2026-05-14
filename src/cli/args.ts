@@ -197,6 +197,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case '--i-understand-data-loss':
         iUnderstandDataLoss = true;
         break;
+      case '--per-tx-sql':
+        overrides.perTxSqlPath = args[++i];
+        break;
       case '--help':
       case '-h':
         helpRequested = true;
@@ -241,5 +244,6 @@ function flagTakesValue(flag: string): boolean {
     '--table',
     '--column',
     '--concurrency',
+    '--per-tx-sql',
   ].includes(flag);
 }

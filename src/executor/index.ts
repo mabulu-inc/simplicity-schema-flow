@@ -38,6 +38,20 @@ export interface ExecuteOptions {
    * already established. (Issue #28.)
    */
   replanAfterPreScripts?: () => Promise<Operation[]>;
+  /**
+   * Optional path to a SQL file injected at the **start of every executor
+   * transaction** — each pre-script tx, the main migrate+seeds tx, each
+   * post-script tx, and each tighten tx. Reads the file once at executor
+   * startup and runs the same SQL on each fresh client right after `BEGIN`.
+   *
+   * Intended for per-transaction session settings that audit triggers or RLS
+   * policies depend on, e.g. `SET LOCAL "app.user_id" = '...'`. PostgreSQL
+   * isolates session state across connections, and the executor uses a fresh
+   * client per phase, so a one-shot setup (like --pre-seed-sql) can't carry
+   * those settings into the seed/migration transaction — this option closes
+   * that gap.
+   */
+  perTxSqlPath?: string;
 }
 
 export interface ExecuteResult {
@@ -275,7 +289,11 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     statementTimeout,
     logger,
     replanAfterPreScripts,
+    perTxSqlPath,
   } = options;
+
+  // Read once; injected after BEGIN in every executor transaction below.
+  const perTxSql = perTxSqlPath ? await readFile(perTxSqlPath, 'utf-8') : null;
   let operations = options.operations;
 
   const result: ExecuteResult = {
@@ -290,6 +308,9 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
 
   // Dry-run: just log what would happen
   if (dryRun) {
+    if (perTxSqlPath) {
+      logger?.info(`[dry-run] Would inject per-tx SQL into every transaction: ${perTxSqlPath}`);
+    }
     for (const script of preScripts) {
       logger?.info(`[dry-run] Would run pre-script: ${script.relativePath}`);
     }
@@ -333,6 +354,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
         const scriptClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
         try {
           await scriptClient.query('BEGIN');
+          if (perTxSql) await scriptClient.query(perTxSql);
           await scriptClient.query(sql);
           await scriptClient.query('COMMIT');
         } catch (err) {
@@ -401,6 +423,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
         const opClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
         try {
           await opClient.query('BEGIN');
+          if (perTxSql) await opClient.query(perTxSql);
 
           for (const op of transactionalOps) {
             logger?.debug(`Executing: ${op.type} ${op.objectName}`);
@@ -465,6 +488,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           const scriptClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
           try {
             await scriptClient.query('BEGIN');
+            if (perTxSql) await scriptClient.query(perTxSql);
             await scriptClient.query(sql);
             await scriptClient.query('COMMIT');
           } catch (err) {
@@ -490,6 +514,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           const tClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
           try {
             await tClient.query('BEGIN');
+            if (perTxSql) await tClient.query(perTxSql);
             await withOpContext(op, () => tClient.query(op.sql));
             await tClient.query('COMMIT');
           } catch (err) {

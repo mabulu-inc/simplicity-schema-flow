@@ -49,6 +49,7 @@ environments:
 | `lockTimeout`      | `--lock-timeout`              | `5000` (ms)  | Lock acquisition timeout                                    |
 | `statementTimeout` | `--statement-timeout`         | `30000` (ms) | Statement execution timeout                                 |
 | `maxRetries`       | `--max-retries`               | `3`          | Max retries on transient errors                             |
+| `perTxSqlPath`     | `--per-tx-sql`                | unset        | SQL injected at the start of every executor transaction     |
 | `historyTable`     | --                            | `history`    | Migration tracking table (in `_smplcty_schema_flow` schema) |
 | `verbose`          | `--verbose`                   | `false`      | Verbose output                                              |
 | `quiet`            | `--quiet`                     | `false`      | Suppress non-error output                                   |

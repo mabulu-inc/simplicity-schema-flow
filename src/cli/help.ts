@@ -36,6 +36,7 @@ Options:
   --lock-timeout       Lock acquisition timeout in ms (default: 5000)
   --statement-timeout  Statement execution timeout in ms (default: 30000)
   --max-retries        Max retries on transient errors (default: 3)
+  --per-tx-sql         SQL file injected at the start of every executor transaction (e.g. SET LOCAL for audit triggers)
   --verbose            Verbose output
   --quiet              Suppress non-error output
   --json               Output in JSON format
@@ -55,7 +56,8 @@ const COMMON_DB_FLAGS = `  --connection-string  PostgreSQL connection string
 
 const EXECUTION_FLAGS = `  --lock-timeout       Lock acquisition timeout in ms (default: 5000)
   --statement-timeout  Statement execution timeout in ms (default: 30000)
-  --max-retries        Max retries on transient errors (default: 3)`;
+  --max-retries        Max retries on transient errors (default: 3)
+  --per-tx-sql         SQL file injected at the start of every executor transaction (e.g. SET LOCAL for audit triggers)`;
 
 const commandHelp: Record<string, string> = {
   run: `schema-flow run — Run full migration pipeline

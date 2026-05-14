@@ -146,6 +146,7 @@ schema/
 --lock-timeout              Lock timeout in ms (default: 5000)
 --statement-timeout         Statement timeout in ms (default: 30000)
 --max-retries               Retries on transient errors (default: 3)
+--per-tx-sql                SQL file injected at the start of every executor transaction (e.g. SET LOCAL for audit triggers)
 --verbose                   Verbose output
 --quiet                     Suppress non-error output
 --json                      JSON output

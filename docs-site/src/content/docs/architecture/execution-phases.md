@@ -31,6 +31,7 @@ Operations execute in strict dependency order. This ensures PostgreSQL dependenc
 - Phases 0-6 and 8-16 run within a transaction (atomic commit or rollback)
 - Phase 7 (indexes) runs outside the transaction because `CREATE INDEX CONCURRENTLY` cannot run inside a transaction
 - If any transactional phase fails, all changes in that transaction roll back
+- `--per-tx-sql <path>` (if set) is injected as the first statement after `BEGIN` in every executor transaction — pre-scripts, the main migrate+seeds tx, post-scripts, and tighten — so `SET LOCAL` values are visible to everything that runs in the same tx
 
 ## Operation types
 

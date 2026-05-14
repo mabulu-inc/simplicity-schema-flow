@@ -24,6 +24,7 @@ export interface FileConfigValues {
   verbose?: boolean;
   quiet?: boolean;
   json?: boolean;
+  perTxSqlPath?: string;
 }
 
 interface RawConfigFile {
@@ -72,6 +73,7 @@ function toFileConfigValues(raw: Record<string, unknown>): FileConfigValues {
   if (typeof raw.verbose === 'boolean') result.verbose = raw.verbose;
   if (typeof raw.quiet === 'boolean') result.quiet = raw.quiet;
   if (typeof raw.json === 'boolean') result.json = raw.json;
+  if (typeof raw.perTxSqlPath === 'string') result.perTxSqlPath = raw.perTxSqlPath;
 
   return result;
 }

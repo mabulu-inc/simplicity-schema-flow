@@ -24,6 +24,13 @@ export interface SimplicitySchemaConfig {
   verbose: boolean;
   quiet: boolean;
   json: boolean;
+  /**
+   * Optional SQL file injected at the start of every executor transaction
+   * (pre-scripts, the main migrate+seeds tx, post-scripts, tighten). Intended
+   * for per-tx session settings — e.g. `SET LOCAL "app.user_id" = '...'` so
+   * audit triggers see a stable actor across the whole pipeline.
+   */
+  perTxSqlPath?: string;
 }
 
 export interface ConfigOverrides {
@@ -41,6 +48,7 @@ export interface ConfigOverrides {
   json?: boolean;
   env?: string;
   configPath?: string;
+  perTxSqlPath?: string;
 }
 
 const DEFAULTS: SimplicitySchemaConfig = {
@@ -88,6 +96,7 @@ export function resolveConfig(overrides: ConfigOverrides = {}): SimplicitySchema
     if (fileConfig.verbose !== undefined) config.verbose = fileConfig.verbose;
     if (fileConfig.quiet !== undefined) config.quiet = fileConfig.quiet;
     if (fileConfig.json !== undefined) config.json = fileConfig.json;
+    if (fileConfig.perTxSqlPath !== undefined) config.perTxSqlPath = fileConfig.perTxSqlPath;
   }
 
   // Layer 1: CLI overrides
@@ -103,6 +112,7 @@ export function resolveConfig(overrides: ConfigOverrides = {}): SimplicitySchema
   if (overrides.verbose !== undefined) config.verbose = overrides.verbose;
   if (overrides.quiet !== undefined) config.quiet = overrides.quiet;
   if (overrides.json !== undefined) config.json = overrides.json;
+  if (overrides.perTxSqlPath !== undefined) config.perTxSqlPath = overrides.perTxSqlPath;
 
   return config;
 }
