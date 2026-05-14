@@ -67,7 +67,9 @@ describe('Public API surface', () => {
     expect(typeof api.ensureExpandStateTable).toBe('function');
     expect(typeof api.planExpandColumn).toBe('function');
     expect(typeof api.runBackfill).toBe('function');
+    expect(typeof api.runBackfillAll).toBe('function');
     expect(typeof api.runContract).toBe('function');
+    expect(typeof api.runContractAll).toBe('function');
     expect(typeof api.getExpandStatus).toBe('function');
   });
 

@@ -5,6 +5,7 @@ import {
   runBackfill,
   runBackfillAll,
   runContract,
+  runContractAll,
   recordExpandState,
   checkBackfillComplete,
   getExpandStatus,
@@ -493,6 +494,220 @@ describe('Expand/Contract', () => {
           logger,
         }),
       ).rejects.toThrow('No expand state found');
+    });
+
+    it('runContractAll drops every backfilled column in one invocation', async () => {
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`
+          CREATE TABLE ${testSchema}.items (
+            id serial PRIMARY KEY,
+            name text NOT NULL
+          )
+        `);
+        await client.query(`INSERT INTO ${testSchema}.items (name) VALUES ('A'), ('B')`);
+
+        const usersOps = planExpandColumn(
+          'users',
+          'email_lower',
+          'text',
+          { from: 'email', transform: 'lower(email)' },
+          testSchema,
+        );
+        for (const op of usersOps) await client.query(op.sql);
+        await recordExpandState(client, usersOps[1].expandMeta!);
+
+        const itemsOps = planExpandColumn(
+          'items',
+          'name_lower',
+          'text',
+          { from: 'name', transform: 'lower(name)' },
+          testSchema,
+        );
+        for (const op of itemsOps) await client.query(op.sql);
+        await recordExpandState(client, itemsOps[1].expandMeta!);
+      } finally {
+        client.release();
+      }
+
+      // Drain both via the bulk backfill, then contract both via the bulk path.
+      await runBackfillAll({ connectionString: DATABASE_URL, pgSchema: testSchema, logger });
+
+      const result = await runContractAll({
+        connectionString: DATABASE_URL,
+        pgSchema: testSchema,
+        logger,
+      });
+
+      expect(result.contracted.length).toBe(2);
+      expect(result.skipped.length).toBe(0);
+      expect(result.contracted.every((c) => c.rowsDiverged === 0)).toBe(true);
+
+      // Both expand_state rows ended up contracted, and the old columns are gone.
+      const verify = await pool.connect();
+      try {
+        const stateRes = await verify.query(
+          `SELECT new_column, status FROM _smplcty_schema_flow.expand_state
+           WHERE pg_schema = $1 ORDER BY new_column`,
+          [testSchema],
+        );
+        expect(stateRes.rows.map((r) => r.status)).toEqual(['email_lower', 'name_lower'].map(() => 'contracted'));
+
+        const colRes = await verify.query(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_schema = $1 AND column_name IN ('email', 'name')
+           ORDER BY column_name`,
+          [testSchema],
+        );
+        expect(colRes.rows.length).toBe(0);
+      } finally {
+        verify.release();
+      }
+    });
+
+    it('runContractAll skips divergent rows and contracts ready ones', async () => {
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`
+          CREATE TABLE ${testSchema}.items (
+            id serial PRIMARY KEY,
+            name text NOT NULL
+          )
+        `);
+        await client.query(`INSERT INTO ${testSchema}.items (name) VALUES ('A'), ('B')`);
+
+        const usersOps = planExpandColumn(
+          'users',
+          'email_lower',
+          'text',
+          { from: 'email', transform: 'lower(email)' },
+          testSchema,
+        );
+        for (const op of usersOps) await client.query(op.sql);
+        await recordExpandState(client, usersOps[1].expandMeta!);
+
+        const itemsOps = planExpandColumn(
+          'items',
+          'name_lower',
+          'text',
+          { from: 'name', transform: 'lower(name)' },
+          testSchema,
+        );
+        for (const op of itemsOps) await client.query(op.sql);
+        await recordExpandState(client, itemsOps[1].expandMeta!);
+
+        // Backfill only the items table — users still has divergent rows.
+        await client.query(`UPDATE ${testSchema}.items SET name_lower = lower(name)`);
+      } finally {
+        client.release();
+      }
+
+      const result = await runContractAll({
+        connectionString: DATABASE_URL,
+        pgSchema: testSchema,
+        logger,
+      });
+
+      expect(result.contracted.length).toBe(1);
+      expect(result.contracted[0].column).toBe('name_lower');
+      expect(result.skipped.length).toBe(1);
+      expect(result.skipped[0].column).toBe('email_lower');
+      expect(result.skipped[0].rowsDiverged).toBeGreaterThan(0);
+    });
+
+    it('runContractAll --force drops divergent rows when explicitly asked', async () => {
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const ops = planExpandColumn(
+          'users',
+          'email_lower',
+          'text',
+          { from: 'email', transform: 'lower(email)' },
+          testSchema,
+        );
+        for (const op of ops) await client.query(op.sql);
+        await recordExpandState(client, ops[1].expandMeta!);
+        // Don't backfill: pre-existing rows still diverge.
+      } finally {
+        client.release();
+      }
+
+      const result = await runContractAll({
+        connectionString: DATABASE_URL,
+        pgSchema: testSchema,
+        force: true,
+        logger,
+      });
+
+      expect(result.contracted.length).toBe(1);
+      expect(result.skipped.length).toBe(0);
+      expect(result.contracted[0].forced).toBe(true);
+      expect(result.contracted[0].rowsDiverged).toBeGreaterThan(0);
+    });
+
+    it('runContractAll respects --table / --column filters', async () => {
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        await client.query(`
+          CREATE TABLE ${testSchema}.items (
+            id serial PRIMARY KEY,
+            name text NOT NULL
+          )
+        `);
+        await client.query(`INSERT INTO ${testSchema}.items (name) VALUES ('A')`);
+
+        const usersOps = planExpandColumn(
+          'users',
+          'email_lower',
+          'text',
+          { from: 'email', transform: 'lower(email)' },
+          testSchema,
+        );
+        for (const op of usersOps) await client.query(op.sql);
+        await recordExpandState(client, usersOps[1].expandMeta!);
+
+        const itemsOps = planExpandColumn(
+          'items',
+          'name_lower',
+          'text',
+          { from: 'name', transform: 'lower(name)' },
+          testSchema,
+        );
+        for (const op of itemsOps) await client.query(op.sql);
+        await recordExpandState(client, itemsOps[1].expandMeta!);
+      } finally {
+        client.release();
+      }
+
+      await runBackfillAll({ connectionString: DATABASE_URL, pgSchema: testSchema, logger });
+
+      const result = await runContractAll({
+        connectionString: DATABASE_URL,
+        pgSchema: testSchema,
+        table: 'items',
+        logger,
+      });
+
+      expect(result.contracted.length).toBe(1);
+      expect(result.contracted[0].column).toBe('name_lower');
+      expect(result.skipped.length).toBe(0);
+
+      // The users expand_state row should remain in 'expanded' status.
+      const verify = await pool.connect();
+      try {
+        const stateRes = await verify.query(
+          `SELECT new_column, status FROM _smplcty_schema_flow.expand_state
+           WHERE pg_schema = $1 AND new_column = $2`,
+          [testSchema, 'email_lower'],
+        );
+        expect(stateRes.rows[0].status).toBe('expanded');
+      } finally {
+        verify.release();
+      }
     });
 
     it('rejects contract when already contracted', async () => {

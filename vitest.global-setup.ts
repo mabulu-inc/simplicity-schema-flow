@@ -9,9 +9,16 @@ import { execSync } from 'node:child_process';
  * parallel tool. Watch mode benefits from the same logic: the container
  * starts when watch begins and goes away when watch exits.
  *
- * Hard kills of the vitest process (SIGKILL) bypass teardown — nothing in
- * Node can prevent that. For the normal exit paths (clean run, failing
- * tests, Ctrl+C, vitest exiting watch) this fires reliably.
+ * Two teardown paths are wired up. Vitest invokes the returned function on
+ * its normal exit path, but its own SIGINT/SIGTERM handler calls
+ * `process.exit()` ~1ms after the signal — bypassing globalSetup teardown.
+ * To keep Ctrl+C from leaking the container we also register `exit` /
+ * `SIGINT` / `SIGTERM` listeners on the Node process that run docker-down
+ * synchronously. Both paths converge on a single idempotent helper so we
+ * never `docker compose down` twice.
+ *
+ * Hard kills (SIGKILL) still bypass everything — nothing in Node can
+ * prevent that.
  */
 function isContainerRunning(): boolean {
   try {
@@ -31,7 +38,10 @@ export default function globalSetup(): () => void {
   // doesn't quietly send tests at a backend that isn't accepting queries yet.
   execSync('docker compose up -d --wait', { stdio: 'inherit' });
 
-  return () => {
+  let tornDown = false;
+  const teardown = (): void => {
+    if (tornDown) return;
+    tornDown = true;
     if (wasRunningBeforeTests) return;
     try {
       execSync('docker compose down', { stdio: 'inherit' });
@@ -39,4 +49,25 @@ export default function globalSetup(): () => void {
       console.error('[globalTeardown] docker compose down failed:', err);
     }
   };
+
+  // Signal handlers cover the Ctrl+C path. Vitest registers its own SIGINT
+  // handler that fires `process.exit()` ~1ms later — we run synchronously
+  // first so docker-down completes before the event loop gets cut.
+  // execSync blocks the event loop, so vitest's setTimeout can't preempt it.
+  const onSignal = (signal: NodeJS.Signals): void => {
+    teardown();
+    // 128 + signal number matches Node's default-exit semantics for caught
+    // signals (e.g. SIGINT → 130). Without this, hanging on a signal we
+    // caught would leak the process if vitest's handler hasn't registered.
+    const code = signal === 'SIGINT' ? 130 : signal === 'SIGTERM' ? 143 : 1;
+    process.exit(process.exitCode ?? code);
+  };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+  // `exit` covers the clean-run path and any code path that reaches
+  // process.exit without going through a signal. Synchronous execSync runs
+  // before the process actually terminates.
+  process.once('exit', teardown);
+
+  return teardown;
 }

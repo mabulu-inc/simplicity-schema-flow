@@ -268,7 +268,10 @@ schema-flow expand-status
 # the old column stays in sync via the trigger.
 
 # Once the app is fully cut over and backfill has completed, contract.
-# `contract` refuses unless the divergence-count invariant is zero.
+# By default, `contract` drops every expanded column whose backfill is
+# complete; columns that still have divergent rows are skipped.
+# Use `--table` / `--column` to target a single migration during a careful
+# rollout, or `--force --i-understand-data-loss` to bypass the gate.
 schema-flow contract --allow-destructive
 
 # Cleanup: remove the `expand:` block (and the old column entry) from YAML.

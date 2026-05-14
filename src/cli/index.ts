@@ -20,7 +20,7 @@ import { generateErd } from '../erd/index.js';
 import { generateFromDb } from '../scaffold/index.js';
 import { scaffoldPre, scaffoldPost, scaffoldMixin } from '../scaffold/index.js';
 import { runDown } from '../rollback/index.js';
-import { runContract, getExpandStatus, runBackfillAll, checkBackfillComplete } from '../expand/index.js';
+import { runContractAll, getExpandStatus, runBackfillAll, checkBackfillComplete } from '../expand/index.js';
 import * as fs from 'node:fs';
 
 async function main(): Promise<void> {
@@ -393,34 +393,30 @@ async function main(): Promise<void> {
           return;
         }
 
-        // Find the latest expanded migration and contract it
-        const contractClient = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
-        try {
-          const states = await getExpandStatus(contractClient);
-          const expanded = states.filter((s) => s.status === 'expanded');
-          if (expanded.length === 0) {
+        // `--column <table.col>` (with or without `--table`) is single-row
+        // mode. Without those filters, every expanded row whose backfill is
+        // complete is contracted; divergent rows are skipped unless --force.
+        const contractResult = await runContractAll({
+          connectionString: config.connectionString,
+          pgSchema: config.pgSchema,
+          table: parsed.table,
+          column: parsed.column,
+          force: parsed.force,
+          logger,
+        });
+
+        if (config.json) {
+          console.log(JSON.stringify(contractResult, null, 2));
+        } else {
+          const total = contractResult.contracted.length + contractResult.skipped.length;
+          if (total === 0) {
             logger.info('No expanded migrations to contract');
-            break;
-          }
-          const latest = expanded[expanded.length - 1];
-          // table_name is stored as "schema.table" — split for runContract.
-          const tableOnly = latest.table_name.includes('.') ? latest.table_name.split('.').pop()! : latest.table_name;
-          const schemaPrefix = latest.table_name.includes('.') ? latest.table_name.split('.')[0] : config.pgSchema;
-          const contractResult = await runContract({
-            connectionString: config.connectionString,
-            tableName: tableOnly,
-            newColumn: latest.new_column,
-            pgSchema: schemaPrefix,
-            force: parsed.force,
-            logger,
-          });
-          if (config.json) {
-            console.log(JSON.stringify(contractResult, null, 2));
           } else {
-            logger.info('Contract phase complete');
+            logger.info(
+              `Contract phase complete: ${contractResult.contracted.length} contracted, ` +
+                `${contractResult.skipped.length} skipped (divergence remaining)`,
+            );
           }
-        } finally {
-          contractClient.release();
         }
         break;
       }

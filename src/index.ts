@@ -126,15 +126,29 @@ export {
 export type { MigrationSnapshot, RollbackResult, RunDownOptions, RunDownResult } from './rollback/index.js';
 
 // Expand/contract
-export { ensureExpandStateTable, planExpandColumn, runBackfill, runContract, getExpandStatus } from './expand/index.js';
+export {
+  ensureExpandStateTable,
+  planExpandColumn,
+  runBackfill,
+  runBackfillAll,
+  runContract,
+  runContractAll,
+  getExpandStatus,
+} from './expand/index.js';
 export type {
   ExpandOperationType,
   ExpandOperation,
   ExpandState,
   BackfillOptions,
   BackfillResult,
+  BackfillAllOptions,
+  BackfillAllResult,
   ContractOptions,
   ContractResult,
+  ContractAllOptions,
+  ContractAllResult,
+  ContractedRow,
+  SkippedRow,
 } from './expand/index.js';
 
 // Scaffold / generate

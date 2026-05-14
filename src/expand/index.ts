@@ -566,6 +566,131 @@ export async function runContract(options: ContractOptions): Promise<ContractRes
   }
 }
 
+// ─── Contract (all pending) ────────────────────────────────────
+
+export interface ContractAllOptions {
+  connectionString: string;
+  pgSchema?: string;
+  /** Restrict to a single table (matches expand_state.table_name suffix). */
+  table?: string;
+  /** Restrict to a single column ("table.column"). */
+  column?: string;
+  /** Bypass divergence check for every row. Requires explicit operator intent. */
+  force?: boolean;
+  logger?: Logger;
+}
+
+export interface ContractedRow {
+  table: string;
+  column: string;
+  oldColumn: string;
+  rowsDiverged: number;
+  forced: boolean;
+}
+
+export interface SkippedRow {
+  table: string;
+  column: string;
+  rowsDiverged: number;
+}
+
+export interface ContractAllResult {
+  contracted: ContractedRow[];
+  skipped: SkippedRow[];
+}
+
+/**
+ * Contract every expanded migration whose backfill is complete (divergence
+ * count = 0). Rows that still have divergence are skipped with a log line
+ * unless `force` is set, in which case they are contracted regardless (with
+ * the same DATA LOSS warning the single-row API emits).
+ *
+ * Operators running a careful one-column-at-a-time rollout can scope down
+ * via `table` / `column`. When neither is set, every pending row in the
+ * caller's pgSchema is processed.
+ */
+export async function runContractAll(options: ContractAllOptions): Promise<ContractAllResult> {
+  const { connectionString, pgSchema, table, column, force, logger } = options;
+
+  const states: ExpandState[] = [];
+  const listClient = await acquireClient(connectionString, { pgSchema });
+  try {
+    await listClient.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
+    await ensureExpandStateTable(listClient);
+    const res = pgSchema
+      ? await listClient.query(
+          `SELECT * FROM _smplcty_schema_flow.expand_state
+           WHERE status = 'expanded' AND pg_schema = $1
+           ORDER BY created_at ASC`,
+          [pgSchema],
+        )
+      : await listClient.query(
+          `SELECT * FROM _smplcty_schema_flow.expand_state
+           WHERE status = 'expanded'
+           ORDER BY created_at ASC`,
+        );
+    states.push(...(res.rows as ExpandState[]));
+  } finally {
+    listClient.release();
+  }
+
+  const filtered = states.filter((s) => {
+    const tableOnly = s.table_name.includes('.') ? s.table_name.split('.').pop()! : s.table_name;
+    if (table && tableOnly !== table) return false;
+    if (column) {
+      const [colTable, colName] = column.split('.');
+      if (colTable !== tableOnly || colName !== s.new_column) return false;
+    }
+    return true;
+  });
+
+  const contracted: ContractedRow[] = [];
+  const skipped: SkippedRow[] = [];
+
+  for (const state of filtered) {
+    const tableOnly = state.table_name.includes('.') ? state.table_name.split('.').pop()! : state.table_name;
+    const schemaPrefix = state.table_name.includes('.') ? state.table_name.split('.')[0] : pgSchema;
+
+    // Pre-check divergence so we can skip without consuming the contract
+    // path's heavier lock acquisition / transaction. `runContract` re-checks
+    // under the advisory lock, which is the source of truth.
+    const probeClient = await acquireClient(connectionString, { pgSchema: schemaPrefix });
+    let rowsDiverged: number;
+    try {
+      rowsDiverged = await checkBackfillComplete(probeClient, state);
+    } finally {
+      probeClient.release();
+    }
+
+    if (rowsDiverged > 0 && !force) {
+      logger?.info(
+        `Skipping ${state.table_name}.${state.new_column}: ${rowsDiverged} row(s) still diverge ` +
+          `from \`${state.transform}\` — run \`schema-flow backfill\` then re-run contract`,
+      );
+      skipped.push({ table: state.table_name, column: state.new_column, rowsDiverged });
+      continue;
+    }
+
+    const result = await runContract({
+      connectionString,
+      tableName: tableOnly,
+      newColumn: state.new_column,
+      pgSchema: schemaPrefix,
+      force,
+      logger,
+    });
+    contracted.push({
+      table: state.table_name,
+      column: state.new_column,
+      oldColumn: result.oldColumn,
+      rowsDiverged: result.rowsDiverged,
+      forced: result.forced,
+    });
+  }
+
+  return { contracted, skipped };
+}
+
 // ─── Status ─────────────────────────────────────────────────────
 
 /**

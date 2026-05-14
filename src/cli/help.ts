@@ -267,19 +267,26 @@ Examples:
 
   contract: `schema-flow contract — Run contract phase of expand/contract migration
 
-Completes the contract phase for the latest expanded column migration. Verifies
-that backfill is complete (no rows where new_col IS DISTINCT FROM transform(old))
-before dropping the old column and dual-write trigger.
+By default, contracts every expanded column whose backfill is complete
+(no rows where new_col IS DISTINCT FROM transform(old)). Rows that still
+have divergence are skipped with a log line and reported in the summary —
+run \`schema-flow backfill\` to drain them, then re-run contract.
+
+To contract a single column during a careful rollout, pass --table and
+--column. The same divergence gate applies.
 
 Usage: schema-flow contract [options]
 
 Options:
-  --force                       Drop the old column even if rows still diverge
+  --table <name>                Restrict to migrations on this table
+  --column <tbl.col>            Restrict to this specific column
+  --force                       Drop old columns even when rows still diverge
   --i-understand-data-loss      Required alongside --force (data-loss confirmation)
 ${COMMON_DB_FLAGS}
 
 Examples:
   schema-flow contract --db postgres://localhost/mydb
+  schema-flow contract --table users --column users.email_lower
   schema-flow contract --force --i-understand-data-loss
   schema-flow contract --json`,
 
