@@ -145,6 +145,7 @@ export async function getExistingFunctions(client: Client, schema: string): Prom
      JOIN pg_catalog.pg_language l ON l.oid = p.prolang
      WHERE n.nspname = $1
        AND p.prokind = 'f'
+       AND p.proname NOT LIKE '_smplcty_sf_%'
        AND NOT EXISTS (
          SELECT 1 FROM pg_catalog.pg_depend d
          JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid
@@ -927,6 +928,7 @@ async function getTriggers(client: Client, table: string, schema: string): Promi
      WHERE cls.relname = $1
        AND ns.nspname = $2
        AND NOT t.tgisinternal
+       AND t.tgname NOT LIKE '_smplcty_sf_%'
      ORDER BY t.tgname`,
     [table, schema],
   );

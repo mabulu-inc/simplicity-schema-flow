@@ -307,6 +307,30 @@ describe('introspectTable', () => {
     expect(trigger!.for_each).toBe('ROW');
   });
 
+  it('excludes schema-flow-internal dual-write triggers and functions', async () => {
+    // expand creates these `_smplcty_sf_*` artifacts to dual-write a column
+    // during a zero-downtime migration. The planner must not see them — if it
+    // did, every re-run after an expand would emit drop_trigger ops for them.
+    await exec(`
+      CREATE FUNCTION _smplcty_sf_dw_fn_${TEST_SCHEMA}_products_x() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$
+    `);
+    await exec(`
+      CREATE TRIGGER _smplcty_sf_dw_${TEST_SCHEMA}_products_x
+      BEFORE INSERT OR UPDATE ON products
+      FOR EACH ROW
+      EXECUTE FUNCTION _smplcty_sf_dw_fn_${TEST_SCHEMA}_products_x()
+    `);
+
+    const table = await introspectTable(client, 'products', TEST_SCHEMA);
+    const internalTrg = (table.triggers || []).find((t) => t.name.startsWith('_smplcty_sf_'));
+    expect(internalTrg).toBeUndefined();
+
+    const fns = await getExistingFunctions(client, TEST_SCHEMA);
+    const internalFn = fns.find((f) => f.name.startsWith('_smplcty_sf_'));
+    expect(internalFn).toBeUndefined();
+  });
+
   it('returns RLS policies', async () => {
     const table = await introspectTable(client, 'products', TEST_SCHEMA);
     expect(table.policies).toBeDefined();
