@@ -182,10 +182,14 @@ export function planExpandColumn(
 
   const ops: ExpandOperation[] = [];
 
-  // 1. Add the new column.
+  // 1. Add the new column. Phase 6 keeps it grouped with `create_table` and
+  //    `add_column` ops so the column exists by the time user-declared
+  //    triggers and seed inserts (phases 11/15) fire — without it, a seed
+  //    INSERT that triggers a user audit-stamp on the expand column raises
+  //    `record "new" has no field`.
   ops.push({
     type: 'expand_column',
-    phase: 100,
+    phase: 6,
     objectName: `${tableName}.${newColumn}`,
     sql: `ALTER TABLE ${qualifiedTable} ADD COLUMN IF NOT EXISTS ${newColumn} ${columnType}`,
     destructive: false,
@@ -241,9 +245,15 @@ CREATE OR REPLACE TRIGGER ${trgName}
   FOR EACH ROW
   EXECUTE FUNCTION ${qualifiedFn}()`;
 
+  // Phase 11 puts the dual-write trigger alongside user-declared triggers so
+  // it is in place before seeds (phase 15). The `_smplcty_sf_dw_*` name sorts
+  // lexicographically before user trigger names, so on a seed INSERT the
+  // dual-write trigger fires first and synchronizes the expand pair; any
+  // user BEFORE INSERT trigger that writes to either column still runs
+  // afterward and wins, preserving user intent.
   ops.push({
     type: 'create_dual_write_trigger',
-    phase: 101,
+    phase: 11,
     objectName: `${tableName}.${trgName}`,
     sql: triggerSql,
     destructive: false,

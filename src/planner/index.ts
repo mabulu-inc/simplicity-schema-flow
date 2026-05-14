@@ -676,7 +676,10 @@ function createTableOps(
     destructive: false,
   });
 
-  // Expand columns — generate expand operations (phase 100+)
+  // Expand columns — generate expand operations. Phases are interleaved with
+  // the rest of the table plan (column at phase 6, dual-write trigger at
+  // phase 11) so the column and trigger are both in place before seeds run
+  // at phase 15.
   for (const col of expandColumns) {
     const expandOps = planExpandColumn(table.table, col.name, col.type, col.expand!, pgSchema);
     for (const eop of expandOps) {

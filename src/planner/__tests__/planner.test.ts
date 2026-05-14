@@ -3285,7 +3285,7 @@ describe('Planner', () => {
       expect(triggerOps).toHaveLength(1);
     });
 
-    it('expand operations have higher phase than table creation', () => {
+    it('expand operations are ordered: table → column → trigger, all before seeds', () => {
       const desired = emptyDesired();
       desired.tables = [
         {
@@ -3295,6 +3295,7 @@ describe('Planner', () => {
             { name: 'email', type: 'text' },
             { name: 'email_lower', type: 'text', expand: { from: 'email', transform: 'lower(email)' } },
           ],
+          seeds: [{ id: '00000000-0000-0000-0000-000000000001', email: 'A@B.com' }],
         },
       ];
       const result = buildPlan(desired, emptyActual());
@@ -3302,10 +3303,18 @@ describe('Planner', () => {
       const createOps = findOps(result.operations, 'create_table');
       const expandOps = findOps(result.operations, 'expand_column');
       const triggerOps = findOps(result.operations, 'create_dual_write_trigger');
+      const seedOps = findOps(result.operations, 'seed_table');
 
-      // Expand ops should come after table creation; trigger after column add.
-      expect(expandOps[0].phase).toBeGreaterThan(createOps[0].phase);
+      // create_table runs first; the expand column ADD shares phase 6 with
+      // it (insertion order keeps it after create_table) so user triggers
+      // and seeds can reference the column.
+      expect(expandOps[0].phase).toBeGreaterThanOrEqual(createOps[0].phase);
+      // Dual-write trigger runs alongside user triggers, after the column
+      // exists.
       expect(triggerOps[0].phase).toBeGreaterThan(expandOps[0].phase);
+      // Both must be in place before seeds run — that's the fix for the
+      // declared-trigger-on-expand-column phase bug.
+      expect(triggerOps[0].phase).toBeLessThan(seedOps[0].phase);
     });
 
     it('uses identity transform for simple rename expand', () => {
