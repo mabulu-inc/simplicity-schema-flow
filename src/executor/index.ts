@@ -293,11 +293,16 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     for (const script of preScripts) {
       logger?.info(`[dry-run] Would run pre-script: ${script.relativePath}`);
     }
-    for (const op of operations) {
+    const dryRunMain = operations.filter((op) => op.type !== 'tighten_not_null');
+    const dryRunTighten = operations.filter((op) => op.type === 'tighten_not_null');
+    for (const op of dryRunMain) {
       logger?.info(`[dry-run] ${op.type} ${op.objectName}: ${op.sql}`);
     }
     for (const script of postScripts) {
       logger?.info(`[dry-run] Would run post-script: ${script.relativePath}`);
+    }
+    for (const op of dryRunTighten) {
+      logger?.info(`[dry-run] ${op.type} ${op.objectName}: ${op.sql}`);
     }
     return result;
   }
@@ -360,10 +365,15 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
       }
 
       // Execute operations (sorted by phase)
-      // Split prechecks, concurrent, and transactional operations
+      // Split prechecks, concurrent, transactional, and tighten operations.
+      // tighten_not_null ops are deferred until after post-scripts so any
+      // backfill the consumer wrote gets to land before NOT NULL is enforced.
       const sorted = [...operations].sort((a, b) => a.phase - b.phase);
       const precheckOps = sorted.filter((op) => op.type === 'run_precheck');
-      const transactionalOps = sorted.filter((op) => !op.concurrent && op.type !== 'run_precheck');
+      const tightenOps = sorted.filter((op) => op.type === 'tighten_not_null');
+      const transactionalOps = sorted.filter(
+        (op) => !op.concurrent && op.type !== 'run_precheck' && op.type !== 'tighten_not_null',
+      );
       const concurrentOps = sorted.filter((op) => op.concurrent);
 
       // Run prechecks before any operations
@@ -467,6 +477,29 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           await recordFile(lockClient, script.relativePath, script.hash, 'post', pgSchema);
           result.postScriptsRun++;
           logger?.info(`Executed post-script: ${script.relativePath}`);
+        }
+      }
+
+      // Tighten phase — runs AFTER post-scripts so backfills land first.
+      // Each column-tighten gets its own tx; a failure on one column (e.g.
+      // VALIDATE finds NULLs) won't roll back tightens already committed for
+      // other columns.
+      if (tightenOps.length > 0 && !validateOnly) {
+        for (const op of tightenOps) {
+          logger?.debug(`Tightening: ${op.objectName}`);
+          const tClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
+          try {
+            await tClient.query('BEGIN');
+            await withOpContext(op, () => tClient.query(op.sql));
+            await tClient.query('COMMIT');
+          } catch (err) {
+            await tClient.query('ROLLBACK').catch(() => {});
+            throw err;
+          } finally {
+            tClient.release();
+          }
+          result.executed++;
+          result.executedOperations.push(op);
         }
       }
     } finally {

@@ -279,11 +279,13 @@ columns:
     });
 
     const plan = buildPlan(desiredState, actual, { pgSchema: TEST_SCHEMA });
-    const notNullCheckOp = plan.operations.find((op) => op.type === 'add_check_not_valid');
-    expect(notNullCheckOp).toBeDefined();
-    expect(notNullCheckOp!.sql).toContain('DO $$ BEGIN');
-    expect(notNullCheckOp!.sql).toContain('pg_constraint');
-    expect(notNullCheckOp!.sql).toContain('NOT VALID');
-    expect(notNullCheckOp!.sql).toContain('END $$');
+    // The 4-step pattern is now bundled into a tighten_not_null op; the
+    // ADD CHECK statement inside still uses the DO-block idempotency guard.
+    const tightenOp = plan.operations.find((op) => op.type === 'tighten_not_null');
+    expect(tightenOp).toBeDefined();
+    expect(tightenOp!.sql).toContain('DO $$ BEGIN');
+    expect(tightenOp!.sql).toContain('pg_constraint');
+    expect(tightenOp!.sql).toContain('NOT VALID');
+    expect(tightenOp!.sql).toContain('END $$');
   });
 });

@@ -73,6 +73,7 @@ const DESCRIPTIONS: Record<OperationType, string> = {
   set_comment: 'Set comment',
   add_seed: 'Seeded',
   seed_table: 'Seeded',
+  tighten_not_null: 'Tightened NOT NULL',
 };
 
 const GRANT_REVOKE_TYPES = new Set<OperationType>([

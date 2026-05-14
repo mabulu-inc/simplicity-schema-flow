@@ -151,9 +151,10 @@ columns:
 
     const plan = await getPlan(ctx.config, logger);
 
-    // Verify the plan uses the safe pattern (add_check_not_valid + validate + alter_column)
-    const checkOps = plan.operations.filter((o) => o.type === 'add_check_not_valid' && /IS\s+NOT\s+NULL/i.test(o.sql));
-    expect(checkOps.length).toBeGreaterThanOrEqual(1);
+    // Verify the plan defers NOT NULL enforcement to a tighten_not_null op
+    // (the multi-statement SQL still contains the IS NOT NULL CHECK).
+    const tightenOps = plan.operations.filter((o) => o.type === 'tighten_not_null' && /IS\s+NOT\s+NULL/i.test(o.sql));
+    expect(tightenOps.length).toBeGreaterThanOrEqual(1);
 
     const result = lintPlan(plan);
 

@@ -486,7 +486,16 @@ describe('Planner', () => {
       expect(ops[0].sql).toContain('CREATE TABLE');
       expect(ops[0].sql).toContain('"users"');
       expect(ops[0].sql).toContain('"id" uuid PRIMARY KEY');
-      expect(ops[0].sql).toContain('"email" text NOT NULL');
+      // NOT NULL is no longer inline — it lands in the tighten phase.
+      expect(ops[0].sql).not.toContain('"email" text NOT NULL');
+
+      const tighten = findOps(result.operations, 'tighten_not_null');
+      expect(tighten).toHaveLength(1);
+      expect(tighten[0].objectName).toBe('users.email');
+      expect(tighten[0].sql).toContain('CHECK ("email" IS NOT NULL) NOT VALID');
+      expect(tighten[0].sql).toContain('VALIDATE CONSTRAINT');
+      expect(tighten[0].sql).toContain('SET NOT NULL');
+      expect(tighten[0].sql).toContain('DROP CONSTRAINT');
     });
 
     it('adds column to existing table', () => {
@@ -512,7 +521,13 @@ describe('Planner', () => {
       const result = buildPlan(desired, actual);
       const ops = findOps(result.operations, 'add_column');
       expect(ops).toHaveLength(1);
-      expect(ops[0].sql).toContain('"name" text NOT NULL');
+      // ADD COLUMN no longer emits inline NOT NULL — it's deferred to tighten.
+      expect(ops[0].sql).not.toContain('NOT NULL');
+      expect(ops[0].sql).toContain('"name" text');
+
+      const tighten = findOps(result.operations, 'tighten_not_null');
+      expect(tighten).toHaveLength(1);
+      expect(tighten[0].objectName).toBe('users.name');
     });
 
     it('drops column (destructive)', () => {
@@ -555,7 +570,7 @@ describe('Planner', () => {
       expect(ops[0].sql).toContain('TYPE varchar(255)');
     });
 
-    it('alters column nullability using safe NOT NULL pattern', () => {
+    it('alters column nullability using safe NOT NULL pattern in the tighten phase', () => {
       const desired = emptyDesired();
       desired.tables = [
         {
@@ -570,26 +585,36 @@ describe('Planner', () => {
       });
       const result = buildPlan(desired, actual);
 
-      // Step 1: ADD CHECK NOT VALID
-      const checkOps = findOps(result.operations, 'add_check_not_valid');
-      expect(checkOps).toHaveLength(1);
-      expect(checkOps[0].sql).toContain('CHECK ("name" IS NOT NULL) NOT VALID');
-      expect(checkOps[0].sql).toContain('chk_users_name_not_null');
+      // The four-step pattern lives inside one tighten_not_null op.
+      const tighten = findOps(result.operations, 'tighten_not_null');
+      expect(tighten).toHaveLength(1);
+      expect(tighten[0].objectName).toBe('users.name');
+      expect(tighten[0].sql).toContain('CHECK ("name" IS NOT NULL) NOT VALID');
+      expect(tighten[0].sql).toContain('chk_users_name_not_null');
+      expect(tighten[0].sql).toContain('VALIDATE CONSTRAINT "chk_users_name_not_null"');
+      expect(tighten[0].sql).toContain('ALTER COLUMN "name" SET NOT NULL');
+      expect(tighten[0].sql).toContain('DROP CONSTRAINT "chk_users_name_not_null"');
 
-      // Step 2: VALIDATE CONSTRAINT
-      const valOps = findOps(result.operations, 'validate_constraint');
-      expect(valOps).toHaveLength(1);
-      expect(valOps[0].sql).toContain('VALIDATE CONSTRAINT "chk_users_name_not_null"');
+      // No inline 4-op variant any more.
+      expect(findOps(result.operations, 'add_check_not_valid')).toHaveLength(0);
+      expect(findOps(result.operations, 'drop_check')).toHaveLength(0);
+    });
 
-      // Step 3: SET NOT NULL
-      const alterOps = findOps(result.operations, 'alter_column');
-      expect(alterOps).toHaveLength(1);
-      expect(alterOps[0].sql).toContain('SET NOT NULL');
-
-      // Step 4: DROP redundant check
-      const dropOps = findOps(result.operations, 'drop_check');
-      expect(dropOps).toHaveLength(1);
-      expect(dropOps[0].sql).toContain('DROP CONSTRAINT "chk_users_name_not_null"');
+    it('does not emit a tighten op when DB column is already NOT NULL', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          columns: [{ name: 'name', type: 'text', nullable: false }],
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('users', {
+        table: 'users',
+        columns: [{ name: 'name', type: 'text', nullable: false }],
+      });
+      const result = buildPlan(desired, actual);
+      expect(findOps(result.operations, 'tighten_not_null')).toHaveLength(0);
     });
 
     it('alters column default', () => {
@@ -1871,8 +1896,8 @@ describe('Planner', () => {
     });
   });
 
-  describe('safe NOT NULL pattern', () => {
-    it('produces 4 operations in correct order for nullable → non-nullable', () => {
+  describe('NOT NULL tighten phase', () => {
+    it('emits one tighten_not_null op containing the 4-step safe pattern for nullable → non-nullable', () => {
       const desired = emptyDesired();
       desired.tables = [
         {
@@ -1887,19 +1912,14 @@ describe('Planner', () => {
       });
       const result = buildPlan(desired, actual);
 
-      // Filter to just the NOT NULL-related operations
-      const notNullOps = result.operations.filter(
-        (o) =>
-          o.type === 'add_check_not_valid' ||
-          o.type === 'validate_constraint' ||
-          (o.type === 'alter_column' && o.sql.includes('SET NOT NULL')) ||
-          o.type === 'drop_check',
-      );
-      expect(notNullOps).toHaveLength(4);
-      expect(notNullOps[0].type).toBe('add_check_not_valid');
-      expect(notNullOps[1].type).toBe('validate_constraint');
-      expect(notNullOps[2].type).toBe('alter_column');
-      expect(notNullOps[3].type).toBe('drop_check');
+      const tighten = findOps(result.operations, 'tighten_not_null');
+      expect(tighten).toHaveLength(1);
+      expect(tighten[0].objectName).toBe('orders.total');
+      // All four steps live in one multi-statement SQL blob.
+      expect(tighten[0].sql).toContain('CHECK ("total" IS NOT NULL) NOT VALID');
+      expect(tighten[0].sql).toContain('VALIDATE CONSTRAINT');
+      expect(tighten[0].sql).toContain('SET NOT NULL');
+      expect(tighten[0].sql).toContain('DROP CONSTRAINT');
     });
 
     it('does NOT use safe pattern for non-nullable → nullable (just DROP NOT NULL)', () => {
@@ -1919,7 +1939,7 @@ describe('Planner', () => {
       const ops = findOps(result.operations, 'alter_column');
       expect(ops).toHaveLength(1);
       expect(ops[0].sql).toContain('DROP NOT NULL');
-      expect(findOps(result.operations, 'add_check_not_valid')).toHaveLength(0);
+      expect(findOps(result.operations, 'tighten_not_null')).toHaveLength(0);
     });
 
     it('handles multiple columns going non-nullable in same table', () => {
@@ -1942,12 +1962,12 @@ describe('Planner', () => {
         ],
       });
       const result = buildPlan(desired, actual);
-      expect(findOps(result.operations, 'add_check_not_valid')).toHaveLength(2);
-      expect(findOps(result.operations, 'validate_constraint')).toHaveLength(2);
-      expect(findOps(result.operations, 'drop_check')).toHaveLength(2);
+      const tighten = findOps(result.operations, 'tighten_not_null');
+      expect(tighten).toHaveLength(2);
+      expect(tighten.map((o) => o.objectName).sort()).toEqual(['users.email', 'users.name']);
     });
 
-    it('does not trigger safe pattern on CREATE TABLE (direct NOT NULL is fine)', () => {
+    it('CREATE TABLE emits a tighten op for each NOT NULL column (deferred enforcement)', () => {
       const desired = emptyDesired();
       desired.tables = [
         {
@@ -1959,10 +1979,13 @@ describe('Planner', () => {
         },
       ];
       const result = buildPlan(desired, emptyActual());
-      // CREATE TABLE uses inline NOT NULL — no safe pattern needed
-      expect(findOps(result.operations, 'add_check_not_valid')).toHaveLength(0);
+      // CREATE TABLE no longer inlines NOT NULL — the tighten phase enforces it.
       const createOps = findOps(result.operations, 'create_table');
-      expect(createOps[0].sql).toContain('"email" text NOT NULL');
+      expect(createOps[0].sql).not.toContain('"email" text NOT NULL');
+      // PK column is skipped (already NOT NULL via PRIMARY KEY).
+      const tighten = findOps(result.operations, 'tighten_not_null');
+      expect(tighten).toHaveLength(1);
+      expect(tighten[0].objectName).toBe('users.email');
     });
   });
 

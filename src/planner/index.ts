@@ -97,7 +97,8 @@ export type OperationType =
   // Other
   | 'set_comment'
   | 'add_seed'
-  | 'seed_table';
+  | 'seed_table'
+  | 'tighten_not_null';
 
 export interface Operation {
   type: OperationType;
@@ -579,6 +580,38 @@ function wrapConstraintIdempotent(constraintName: string, alterSql: string): str
   return `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${constraintName}') THEN ${alterSql}; END IF; END $$`;
 }
 
+/**
+ * Build a `tighten_not_null` op that runs the safe 4-step NOT NULL pattern
+ * (ADD CHECK NOT VALID → VALIDATE CONSTRAINT → SET NOT NULL → DROP CHECK) as
+ * a single multi-statement SQL string. Routed by the executor to run AFTER
+ * post-scripts in its own transaction, so seed/post-script backfills get a
+ * chance to populate the column before NOT NULL is enforced.
+ *
+ * If a NULL row remains at validate time, VALIDATE fails loudly and the
+ * whole tighten op rolls back — the column stays nullable and the planner
+ * will re-emit the same op on the next run.
+ */
+function buildTightenNotNullOp(table: string, column: string, pgSchema: string): Operation {
+  const checkName = `chk_${table}_${column}_not_null`;
+  const sql = [
+    wrapConstraintIdempotent(
+      checkName,
+      `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${checkName}" CHECK ("${column}" IS NOT NULL) NOT VALID`,
+    ),
+    `ALTER TABLE "${pgSchema}"."${table}" VALIDATE CONSTRAINT "${checkName}"`,
+    `ALTER TABLE "${pgSchema}"."${table}" ALTER COLUMN "${column}" SET NOT NULL`,
+    `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT "${checkName}"`,
+  ].join(';\n');
+
+  return {
+    type: 'tighten_not_null',
+    phase: 30,
+    objectName: `${table}.${column}`,
+    sql,
+    destructive: false,
+  };
+}
+
 function createTableOps(
   table: TableSchema,
   pgSchema: string,
@@ -614,7 +647,8 @@ function createTableOps(
 
     let def = `"${col.name}" ${col.type}`;
     if (col.primary_key) def += ' PRIMARY KEY';
-    if (col.nullable === false && !col.primary_key) def += ' NOT NULL';
+    // NOT NULL is enforced in the post-script tighten phase, not inline —
+    // see buildTightenNotNullOp().
     if (col.default !== undefined) def += ` DEFAULT ${col.default}`;
     if (col.unique && col.unique_name) {
       // Named unique constraint — separate table-level constraint
@@ -871,6 +905,16 @@ function createTableOps(
     ops.push(createSeedTableOp(table, table.seeds, pgSchema, table.seeds_on_conflict));
   }
 
+  // Tighten NOT NULL on declared non-null columns. Runs in its own phase
+  // (post-scripts have to land first so backfills get to populate the
+  // column). PK columns are implicitly NOT NULL; expand columns manage
+  // their own lifecycle.
+  for (const col of table.columns) {
+    if (col.nullable === false && !col.primary_key && !col.expand) {
+      ops.push(buildTightenNotNullOp(table.table, col.name, pgSchema));
+    }
+  }
+
   return ops;
 }
 
@@ -920,7 +964,8 @@ function alterTableOps(
       }
 
       let def = `"${col.name}" ${col.type}`;
-      if (col.nullable === false) def += ' NOT NULL';
+      // NOT NULL is enforced in the post-script tighten phase, not inline —
+      // see buildTightenNotNullOp().
       if (col.default !== undefined) def += ` DEFAULT ${col.default}`;
       if (col.generated) def += ` GENERATED ALWAYS AS (${col.generated}) STORED`;
       ops.push({
@@ -930,6 +975,9 @@ function alterTableOps(
         sql: `ALTER TABLE "${pgSchema}"."${desired.table}" ADD COLUMN ${def}`,
         destructive: false,
       });
+      if (col.nullable === false && !col.primary_key) {
+        ops.push(buildTightenNotNullOp(desired.table, col.name, pgSchema));
+      }
 
       // FK for new column
       if (col.references) {
@@ -1091,43 +1139,11 @@ function diffColumn(table: string, desired: ColumnDef, existing: ColumnDef, pgSc
         destructive: false,
       });
     } else {
-      // Safe NOT NULL pattern (PRD §8.3):
-      // 1. ADD CHECK (col IS NOT NULL) NOT VALID
-      // 2. VALIDATE CONSTRAINT (scans without ACCESS EXCLUSIVE lock)
-      // 3. ALTER COLUMN SET NOT NULL (instant — PG trusts validated check)
-      // 4. DROP the redundant check constraint
-      const checkName = `chk_${table}_${desired.name}_not_null`;
-      ops.push({
-        type: 'add_check_not_valid',
-        phase: 6,
-        objectName: `${table}.${desired.name}`,
-        sql: wrapConstraintIdempotent(
-          checkName,
-          `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${checkName}" CHECK ("${desired.name}" IS NOT NULL) NOT VALID`,
-        ),
-        destructive: false,
-      });
-      ops.push({
-        type: 'validate_constraint',
-        phase: 6,
-        objectName: `${table}.${checkName}`,
-        sql: `ALTER TABLE "${pgSchema}"."${table}" VALIDATE CONSTRAINT "${checkName}"`,
-        destructive: false,
-      });
-      ops.push({
-        type: 'alter_column',
-        phase: 6,
-        objectName: `${table}.${desired.name}`,
-        sql: `ALTER TABLE "${pgSchema}"."${table}" ALTER COLUMN "${desired.name}" SET NOT NULL`,
-        destructive: false,
-      });
-      ops.push({
-        type: 'drop_check',
-        phase: 6,
-        objectName: `${table}.${checkName}`,
-        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT "${checkName}"`,
-        destructive: false,
-      });
+      // Safe NOT NULL pattern (PRD §8.3) — deferred to the tighten phase so
+      // any post-script backfill gets to land before enforcement. The op
+      // bundles the four steps (ADD CHECK NOT VALID → VALIDATE → SET NOT
+      // NULL → DROP CHECK) into a single tx per column.
+      ops.push(buildTightenNotNullOp(table, desired.name, pgSchema));
     }
   }
 
