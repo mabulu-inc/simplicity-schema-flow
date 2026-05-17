@@ -66,9 +66,14 @@ checks:
   - name: email_not_empty
     expression: 'length(email) > 0'
 
-unique_constraints:
+# Table-level unique constraints are declared under `indexes:` with
+# `as_constraint: true`. That's also the only place `deferrable:` is legal
+# (Postgres requires a constraint, not a bare unique index, for deferral).
+indexes:
   - columns: [email, tenant_id]
     name: uq_users_email_tenant
+    unique: true
+    as_constraint: true
     nulls_not_distinct: true
 
 triggers:
@@ -237,10 +242,44 @@ indexes:
     where: 'deleted_at IS NULL' # partial index
     include: [name] # covering index (INCLUDE)
     opclass: text_pattern_ops # operator class
+    nulls_not_distinct: true # unique only; treat NULLs as equal (PG 15+)
+    as_constraint: true # unique only; also wrap in a pg_constraint row
+    deferrable: initially_deferred # requires as_constraint; or initially_immediate
     comment: 'description'
 ```
 
 Indexes are created using `CONCURRENTLY` outside of a transaction where possible.
+
+### `as_constraint` (table-level unique constraints)
+
+Set `as_constraint: true` on a unique index to also wrap it in a
+`pg_constraint` row. The planner emits the safe two-step pattern —
+`CREATE UNIQUE INDEX CONCURRENTLY` followed by `ALTER TABLE ADD CONSTRAINT
+… USING INDEX`. You want this whenever you need:
+
+- **FK-target canonicality** — `REFERENCES table(col)` resolves cleanly
+  to a named constraint
+- **Catalog visibility** — the constraint appears in `pg_constraint`,
+  which some ORMs and downstream tooling rely on for introspection
+- **Deferred constraint checking** — `deferrable:` is only legal with
+  `as_constraint: true`. Postgres won't let you defer a bare unique index.
+
+PG restricts constraint-backed indexes to bare columns, default ordering
+(`ASC NULLS LAST`), btree, no partial `where:`, no `opclass`. The parser
+rejects any of those at load time so you don't get a Postgres error mid-apply.
+
+### `deferrable`
+
+Defers the unique-check from per-statement to commit-time. Two modes:
+
+- `initially_immediate` — deferrable but checked immediately by default; a
+  transaction can opt in with `SET CONSTRAINTS … DEFERRED`
+- `initially_deferred` — checked at commit by default; a transaction can
+  re-enable immediate checking with `SET CONSTRAINTS … IMMEDIATE`
+
+Useful for swapping unique values within a single transaction
+(`UPDATE positions SET rank = …` where the intermediate state would
+otherwise violate uniqueness) or for circular FK inserts.
 
 ### Column ordering (ASC/DESC, NULLS FIRST/LAST)
 
@@ -269,10 +308,17 @@ checks:
 
 ## Unique constraints
 
+Declared under [`indexes:`](#indexes) with `unique: true` and
+`as_constraint: true`. See the [`as_constraint` section](#as_constraint-table-level-unique-constraints)
+above for the trade-off between a bare unique index and a
+constraint-backed one.
+
 ```yaml
-unique_constraints:
+indexes:
   - columns: [email, tenant_id] # required
     name: uq_users_email_tenant # optional
+    unique: true # required for constraints
+    as_constraint: true # wrap in pg_constraint
     nulls_not_distinct: true # optional — treat NULLs as equal (PostgreSQL 15+)
     comment: 'description'
 ```
@@ -280,6 +326,13 @@ unique_constraints:
 Created safely: `CREATE UNIQUE INDEX CONCURRENTLY` then `ADD CONSTRAINT ... USING INDEX`.
 
 Set `nulls_not_distinct: true` to treat NULL values as equal within the unique constraint. By default, PostgreSQL considers each NULL distinct, allowing multiple rows with NULL in unique columns. With this option, only one NULL per unique group is permitted. Requires PostgreSQL 15 or later.
+
+:::note[Migration from `unique_constraints:` (0.7.x → 0.8.0)]
+The separate `unique_constraints:` section was removed in 0.8.0. Rename
+the section to `indexes:` and add `unique: true` + `as_constraint: true`
+to each entry. The parser throws a hard error with this exact instruction
+if it sees the old section name.
+:::
 
 ## Exclusion constraints
 
@@ -385,7 +438,7 @@ seeds_on_conflict: 'DO NOTHING' # optional — see below
 To re-apply seeds idempotently, schema-flow needs a way to identify which existing row a seed row corresponds to. The match key is resolved per table, in this order:
 
 1. **Primary key**, if every PK column is present in every seed row.
-2. **The first unique constraint** whose columns are all present in every seed row — column-level `unique: true` first, then table-level `unique_constraints`.
+2. **The first unique constraint** whose columns are all present in every seed row — column-level `unique: true` first, then table-level `indexes:` entries with `as_constraint: true`.
 3. **No match key.** UPDATE is skipped entirely, and rows are INSERTed only when no existing row in the table already has the same values for every seed-provided column (null-safe via `IS NOT DISTINCT FROM`). Table columns the YAML didn't mention are never consulted.
 
 There is no implicit "treat `id` as the key" behaviour — if your PK is `code` and your seed only supplies `id`, the planner will fall through to (2) or (3).
