@@ -30,6 +30,42 @@ columns:
   });
 });
 
+// ─── parseMixin — `comment:` field (regression for 0.8.0 over-strict keys) ─
+//
+// 0.8.0 introduced strict YAML key validation across every parser. The
+// initial MIXIN_KEYS allow-list omitted `comment` (and the `description`
+// alias), even though documenting a mixin is a common authoring pattern —
+// any real-world mixin file with a `comment:` field would hard-error at
+// parse time, blocking the entire plan. Fixed in 0.8.1.
+
+describe('parseMixin — comment field', () => {
+  it('accepts `comment:` on a mixin and propagates it to the parsed schema', () => {
+    const mixin = parseMixin(`
+mixin: audit
+comment: Attaches the audit-stamp trigger pair to a table.
+triggers:
+  - name: audit_stamp
+    timing: BEFORE
+    events: [INSERT, UPDATE]
+    function: audit_stamp
+`);
+    expect(mixin.mixin).toBe('audit');
+    expect(mixin.comment).toBe('Attaches the audit-stamp trigger pair to a table.');
+    expect(mixin.triggers).toHaveLength(1);
+  });
+
+  it('accepts the `description:` alias for `comment:`', () => {
+    const mixin = parseMixin(`
+mixin: timestamps
+description: created_at / updated_at scaffolding
+columns:
+  - name: created_at
+    type: timestamptz
+`);
+    expect(mixin.comment).toBe('created_at / updated_at scaffolding');
+  });
+});
+
 // ─── applyMixins — column merging ──────────────────────────────
 
 describe('applyMixins — columns', () => {

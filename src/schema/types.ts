@@ -330,4 +330,5 @@ export interface MixinSchema {
   grants?: GrantDef[];
   rls?: boolean;
   force_rls?: boolean;
+  comment?: string;
 }

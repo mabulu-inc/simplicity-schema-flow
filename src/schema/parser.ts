@@ -750,6 +750,8 @@ const MIXIN_KEYS = [
   'grants',
   'rls',
   'force_rls',
+  'comment',
+  'description',
 ] as const;
 
 export function parseMixin(yamlStr: string): MixinSchema {
@@ -760,6 +762,8 @@ export function parseMixin(yamlStr: string): MixinSchema {
   const mixin: MixinSchema = {
     mixin: requireString(raw, 'mixin', ctx),
   };
+  const mixinComment = resolveComment(raw);
+  if (mixinComment !== undefined) mixin.comment = mixinComment;
 
   if (raw.columns !== undefined)
     mixin.columns = (raw.columns as Record<string, unknown>[]).map((c, i) => parseColumnDef(c, `${ctx}.columns[${i}]`));

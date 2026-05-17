@@ -4,3 +4,4 @@ coverage/
 .ralph-logs/
 *.tsbuildinfo
 .env
+scratch/
