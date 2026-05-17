@@ -135,8 +135,10 @@ columns:
     type: text
   - name: tenant_id
     type: uuid
-unique_constraints:
+indexes:
   - columns: [email, tenant_id]
+    unique: true
+    as_constraint: true
 `,
     });
 
@@ -173,9 +175,11 @@ columns:
     default: gen_random_uuid()
   - name: code
     type: text
-unique_constraints:
+indexes:
   - columns: [code]
     name: uq_custom_code
+    unique: true
+    as_constraint: true
 `,
     });
 
@@ -210,9 +214,11 @@ columns:
     type: text
   - name: tenant_id
     type: uuid
-unique_constraints:
+indexes:
   - columns: [email, tenant_id]
     name: uq_email_tenant
+    unique: true
+    as_constraint: true
     comment: "One email per tenant"
 `,
     });
@@ -321,9 +327,11 @@ columns:
   - name: code
     type: text
     nullable: false
-unique_constraints:
+indexes:
   - columns: [code]
     name: uq_drop_code
+    unique: true
+    as_constraint: true
 `,
     });
 

@@ -39,7 +39,7 @@ function emptyActual(): ActualState {
 // ─── Parser ──────────────────────────────────────────────────────
 
 describe('parser: nulls_not_distinct', () => {
-  it('parses nulls_not_distinct: true on a unique constraint', () => {
+  it('parses nulls_not_distinct: true on a constraint-backed unique index', () => {
     const table = parseTable(`
 table: test_nnd
 columns:
@@ -48,14 +48,17 @@ columns:
     primary_key: true
   - name: email
     type: text
-unique_constraints:
+indexes:
   - name: uq_test_nnd_email
     columns: [email]
+    unique: true
+    as_constraint: true
     nulls_not_distinct: true
 `);
 
-    expect(table.unique_constraints).toHaveLength(1);
-    expect(table.unique_constraints![0].nulls_not_distinct).toBe(true);
+    expect(table.indexes).toHaveLength(1);
+    expect(table.indexes![0].nulls_not_distinct).toBe(true);
+    expect(table.indexes![0].as_constraint).toBe(true);
   });
 
   it('defaults nulls_not_distinct to undefined when not specified', () => {
@@ -67,12 +70,14 @@ columns:
     primary_key: true
   - name: email
     type: text
-unique_constraints:
+indexes:
   - name: uq_test_nnd2_email
     columns: [email]
+    unique: true
+    as_constraint: true
 `);
 
-    expect(table.unique_constraints![0].nulls_not_distinct).toBeUndefined();
+    expect(table.indexes![0].nulls_not_distinct).toBeUndefined();
   });
 });
 
@@ -88,9 +93,11 @@ columns:
     primary_key: true
   - name: email
     type: text
-unique_constraints:
+indexes:
   - name: uq_nnd_create_email
     columns: [email]
+    unique: true
+    as_constraint: true
     nulls_not_distinct: true
 `);
 
@@ -119,9 +126,11 @@ columns:
     primary_key: true
   - name: email
     type: text
-unique_constraints:
+indexes:
   - name: uq_nnd_no_flag_email
     columns: [email]
+    unique: true
+    as_constraint: true
 `);
 
     const desiredState: DesiredState = {
@@ -149,9 +158,11 @@ columns:
     primary_key: true
   - name: email
     type: text
-unique_constraints:
+indexes:
   - name: uq_nnd_existing_email
     columns: [email]
+    unique: true
+    as_constraint: true
     nulls_not_distinct: true
 `);
 
@@ -199,13 +210,15 @@ describe('introspection: nulls_not_distinct', () => {
 
     const table = await introspectTable(client, 'introspect_nnd', TEST_SCHEMA);
 
-    expect(table.unique_constraints).toBeDefined();
-    const uc = table.unique_constraints!.find((u) => u.name === 'uq_introspect_nnd_email');
-    expect(uc).toBeDefined();
-    expect(uc!.nulls_not_distinct).toBe(true);
+    // Single-column unique with nulls_not_distinct can't be folded into
+    // col.unique=true (that loses the flag), so it stays in indexes[].
+    const idx = (table.indexes || []).find((i) => i.name === 'uq_introspect_nnd_email');
+    expect(idx).toBeDefined();
+    expect(idx!.as_constraint).toBe(true);
+    expect(idx!.nulls_not_distinct).toBe(true);
   });
 
-  it('returns nulls_not_distinct as false for a regular unique constraint', async () => {
+  it('folds a regular single-column unique constraint into col.unique=true', async () => {
     await client.query(`
       CREATE TABLE "${TEST_SCHEMA}".introspect_regular (
         id uuid PRIMARY KEY,
@@ -216,10 +229,15 @@ describe('introspection: nulls_not_distinct', () => {
 
     const table = await introspectTable(client, 'introspect_regular', TEST_SCHEMA);
 
-    const uc = table.unique_constraints!.find((u) => u.name === 'uq_introspect_regular_email');
-    expect(uc).toBeDefined();
-    // Regular unique constraints should not have nulls_not_distinct set (or false)
-    expect(uc!.nulls_not_distinct).toBeFalsy();
+    // Vanilla single-column uniques (no nulls_not_distinct, no deferrable,
+    // no INCLUDE, no comment) are surfaced column-level. The custom name
+    // is preserved via col.unique_name.
+    const emailCol = table.columns.find((c) => c.name === 'email');
+    expect(emailCol).toBeDefined();
+    expect(emailCol!.unique).toBe(true);
+    expect(emailCol!.unique_name).toBe('uq_introspect_regular_email');
+    // And it shouldn't double up in indexes[]:
+    expect((table.indexes || []).find((i) => i.name === 'uq_introspect_regular_email')).toBeUndefined();
   });
 });
 
@@ -235,9 +253,11 @@ columns:
     primary_key: true
   - name: email
     type: text
-unique_constraints:
+indexes:
   - name: uq_nnd_diff_email
     columns: [email]
+    unique: true
+    as_constraint: true
     nulls_not_distinct: true
 `);
 
@@ -247,7 +267,7 @@ unique_constraints:
         { name: 'id', type: 'uuid', primary_key: true },
         { name: 'email', type: 'text' },
       ],
-      unique_constraints: [{ columns: ['email'], name: 'uq_nnd_diff_email' }],
+      indexes: [{ columns: ['email'], name: 'uq_nnd_diff_email', unique: true, as_constraint: true }],
     };
 
     const desiredState: DesiredState = {
@@ -286,9 +306,11 @@ columns:
     primary_key: true
   - name: email
     type: text
-unique_constraints:
+indexes:
   - name: uq_nnd_diff2_email
     columns: [email]
+    unique: true
+    as_constraint: true
 `);
 
     const existing: TableSchema = {
@@ -297,7 +319,9 @@ unique_constraints:
         { name: 'id', type: 'uuid', primary_key: true },
         { name: 'email', type: 'text' },
       ],
-      unique_constraints: [{ columns: ['email'], name: 'uq_nnd_diff2_email', nulls_not_distinct: true }],
+      indexes: [
+        { columns: ['email'], name: 'uq_nnd_diff2_email', unique: true, as_constraint: true, nulls_not_distinct: true },
+      ],
     };
 
     const desiredState: DesiredState = {
@@ -335,9 +359,11 @@ columns:
     primary_key: true
   - name: email
     type: text
-unique_constraints:
+indexes:
   - name: uq_nnd_match_email
     columns: [email]
+    unique: true
+    as_constraint: true
     nulls_not_distinct: true
 `);
 
@@ -347,7 +373,9 @@ unique_constraints:
         { name: 'id', type: 'uuid', primary_key: true },
         { name: 'email', type: 'text' },
       ],
-      unique_constraints: [{ columns: ['email'], name: 'uq_nnd_match_email', nulls_not_distinct: true }],
+      indexes: [
+        { columns: ['email'], name: 'uq_nnd_match_email', unique: true, as_constraint: true, nulls_not_distinct: true },
+      ],
     };
 
     const desiredState: DesiredState = {
@@ -449,9 +477,11 @@ describe('E2E: nulls_not_distinct migration', () => {
     // Introspect
     const table = await introspectTable(client, 'e2e_nnd', TEST_SCHEMA);
 
-    // Verify introspected result
-    const uc = table.unique_constraints!.find((u) => u.name === 'uq_e2e_nnd_tenant_code');
+    // Verify introspected result — multi-column constraint stays in indexes[]
+    // with as_constraint:true.
+    const uc = (table.indexes || []).find((i) => i.name === 'uq_e2e_nnd_tenant_code');
     expect(uc).toBeDefined();
+    expect(uc!.as_constraint).toBe(true);
     expect(uc!.nulls_not_distinct).toBe(true);
     expect(uc!.columns).toEqual(['tenant_id', 'code']);
 
@@ -466,9 +496,11 @@ columns:
     type: uuid
   - name: code
     type: text
-unique_constraints:
+indexes:
   - name: uq_e2e_nnd_tenant_code
     columns: [tenant_id, code]
+    unique: true
+    as_constraint: true
     nulls_not_distinct: true
 `);
 
@@ -497,5 +529,325 @@ unique_constraints:
         op.type === 'drop_index',
     );
     expect(relevantOps).toHaveLength(0);
+  });
+});
+
+// ─── indexes: section (parallel coverage to unique_constraints) ──
+// Regression: `nulls_not_distinct: true` on an `indexes:` entry used to be
+// silently dropped on the floor — the parser accepted it but the emitted
+// CREATE INDEX omitted the clause, so the underlying pg_index.indnullsnotdistinct
+// stayed false and NULLs were treated as distinct. Fixed by honoring the field
+// in createIndexOp and round-tripping it through introspection.
+
+describe('parser: indexes: nulls_not_distinct', () => {
+  it('parses nulls_not_distinct: true on a unique index', () => {
+    const table = parseTable(`
+table: idx_nnd
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+  - name: a
+    type: integer
+  - name: b
+    type: integer
+indexes:
+  - name: uq_idx_nnd_a_b
+    columns: [a, b]
+    unique: true
+    nulls_not_distinct: true
+`);
+    expect(table.indexes).toHaveLength(1);
+    expect(table.indexes![0].nulls_not_distinct).toBe(true);
+    expect(table.indexes![0].unique).toBe(true);
+  });
+
+  it('rejects nulls_not_distinct: true on a non-unique index', () => {
+    expect(() =>
+      parseTable(`
+table: idx_nnd_bad
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+  - name: a
+    type: integer
+indexes:
+  - name: ix_idx_nnd_bad_a
+    columns: [a]
+    nulls_not_distinct: true
+`),
+    ).toThrow(/nulls_not_distinct.*unique/i);
+  });
+});
+
+describe('planner: indexes: nulls_not_distinct SQL generation', () => {
+  it('emits NULLS NOT DISTINCT in CREATE UNIQUE INDEX CONCURRENTLY', () => {
+    const desired = parseTable(`
+table: idx_nnd_emit
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+  - name: a
+    type: integer
+  - name: b
+    type: integer
+indexes:
+  - name: uq_idx_nnd_emit_a_b
+    columns: [a, b]
+    unique: true
+    nulls_not_distinct: true
+`);
+    const desiredState: DesiredState = {
+      tables: [desired],
+      enums: [],
+      functions: [],
+      views: [],
+      materializedViews: [],
+      roles: [],
+      extensions: null,
+    };
+    const plan = buildPlan(desiredState, emptyActual(), { pgSchema: TEST_SCHEMA });
+    const indexOp = plan.operations.find((op) => op.type === 'add_index' && op.objectName === 'uq_idx_nnd_emit_a_b');
+    expect(indexOp).toBeDefined();
+    expect(indexOp!.sql).toContain('CREATE UNIQUE INDEX CONCURRENTLY');
+    expect(indexOp!.sql).toContain('NULLS NOT DISTINCT');
+  });
+
+  it('does not emit NULLS NOT DISTINCT when the flag is absent', () => {
+    const desired = parseTable(`
+table: idx_nnd_noflag
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+  - name: a
+    type: integer
+indexes:
+  - name: uq_idx_nnd_noflag_a
+    columns: [a]
+    unique: true
+`);
+    const desiredState: DesiredState = {
+      tables: [desired],
+      enums: [],
+      functions: [],
+      views: [],
+      materializedViews: [],
+      roles: [],
+      extensions: null,
+    };
+    const plan = buildPlan(desiredState, emptyActual(), { pgSchema: TEST_SCHEMA });
+    const indexOp = plan.operations.find((op) => op.type === 'add_index' && op.objectName === 'uq_idx_nnd_noflag_a');
+    expect(indexOp).toBeDefined();
+    expect(indexOp!.sql).not.toContain('NULLS NOT DISTINCT');
+  });
+});
+
+describe('diff: indexes: nulls_not_distinct changes', () => {
+  it('plans drop+recreate when an existing unique index flips false → true', () => {
+    const desired = parseTable(`
+table: idx_nnd_diff
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+  - name: a
+    type: integer
+indexes:
+  - name: uq_idx_nnd_diff_a
+    columns: [a]
+    unique: true
+    nulls_not_distinct: true
+`);
+    const existing: TableSchema = {
+      table: 'idx_nnd_diff',
+      columns: [
+        { name: 'id', type: 'uuid', primary_key: true },
+        { name: 'a', type: 'integer' },
+      ],
+      indexes: [{ name: 'uq_idx_nnd_diff_a', columns: ['a'], unique: true }],
+    };
+
+    const desiredState: DesiredState = {
+      tables: [desired],
+      enums: [],
+      functions: [],
+      views: [],
+      materializedViews: [],
+      roles: [],
+      extensions: null,
+    };
+    const actualState: ActualState = {
+      ...emptyActual(),
+      tables: new Map([['idx_nnd_diff', existing]]),
+    };
+
+    const plan = buildPlan(desiredState, actualState, { pgSchema: TEST_SCHEMA, allowDestructive: true });
+    const dropIdx = plan.operations.find((op) => op.type === 'drop_index' && op.objectName === 'uq_idx_nnd_diff_a');
+    const addIdx = plan.operations.find((op) => op.type === 'add_index' && op.objectName === 'uq_idx_nnd_diff_a');
+    expect(dropIdx).toBeDefined();
+    expect(addIdx).toBeDefined();
+    expect(addIdx!.sql).toContain('NULLS NOT DISTINCT');
+  });
+
+  it('produces 0 index ops when nulls_not_distinct matches', () => {
+    const desired = parseTable(`
+table: idx_nnd_match
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+  - name: a
+    type: integer
+indexes:
+  - name: uq_idx_nnd_match_a
+    columns: [a]
+    unique: true
+    nulls_not_distinct: true
+`);
+    const existing: TableSchema = {
+      table: 'idx_nnd_match',
+      columns: [
+        { name: 'id', type: 'uuid', primary_key: true },
+        { name: 'a', type: 'integer' },
+      ],
+      indexes: [{ name: 'uq_idx_nnd_match_a', columns: ['a'], unique: true, nulls_not_distinct: true }],
+    };
+
+    const desiredState: DesiredState = {
+      tables: [desired],
+      enums: [],
+      functions: [],
+      views: [],
+      materializedViews: [],
+      roles: [],
+      extensions: null,
+    };
+    const actualState: ActualState = {
+      ...emptyActual(),
+      tables: new Map([['idx_nnd_match', existing]]),
+    };
+
+    const plan = buildPlan(desiredState, actualState, { pgSchema: TEST_SCHEMA });
+    const idxOps = plan.operations.filter((op) => op.type === 'add_index' || op.type === 'drop_index');
+    expect(idxOps).toHaveLength(0);
+  });
+});
+
+describe('introspection: indexes: nulls_not_distinct', () => {
+  it('reads indnullsnotdistinct from a plain unique index (no constraint)', async () => {
+    // Create a unique index directly — no CONSTRAINT wrapper, so this goes
+    // through getIndexes (not getUniqueConstraints).
+    await client.query(`
+      CREATE TABLE "${TEST_SCHEMA}".introspect_idx_nnd (
+        id uuid PRIMARY KEY,
+        a integer,
+        b integer
+      )
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX uq_introspect_idx_nnd_a_b
+        ON "${TEST_SCHEMA}".introspect_idx_nnd (a, b)
+        NULLS NOT DISTINCT
+    `);
+
+    const table = await introspectTable(client, 'introspect_idx_nnd', TEST_SCHEMA);
+
+    const idx = (table.indexes || []).find((i) => i.name === 'uq_introspect_idx_nnd_a_b');
+    expect(idx).toBeDefined();
+    expect(idx!.unique).toBe(true);
+    expect(idx!.nulls_not_distinct).toBe(true);
+  });
+
+  it('returns nulls_not_distinct undefined for a regular unique index', async () => {
+    await client.query(`
+      CREATE TABLE "${TEST_SCHEMA}".introspect_idx_regular (
+        id uuid PRIMARY KEY,
+        a integer
+      )
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX uq_introspect_idx_regular_a
+        ON "${TEST_SCHEMA}".introspect_idx_regular (a)
+    `);
+
+    const table = await introspectTable(client, 'introspect_idx_regular', TEST_SCHEMA);
+    const idx = (table.indexes || []).find((i) => i.name === 'uq_introspect_idx_regular_a');
+    expect(idx).toBeDefined();
+    expect(idx!.nulls_not_distinct).toBeFalsy();
+  });
+});
+
+describe('E2E: indexes: nulls_not_distinct enforcement', () => {
+  it('plan + apply produces an index where NULLs collide (duplicate (NULL, NULL) rejected)', async () => {
+    // Drive a real apply by executing the planner SQL ourselves — mirrors what
+    // the CLI does and proves the emitted SQL actually flips
+    // pg_index.indnullsnotdistinct.
+    const desired = parseTable(`
+table: e2e_idx_nnd
+columns:
+  - name: id
+    type: serial
+    primary_key: true
+    nullable: false
+  - name: a
+    type: integer
+    nullable: true
+  - name: b
+    type: integer
+    nullable: true
+indexes:
+  - name: uq_e2e_idx_nnd_a_b
+    columns: [a, b]
+    unique: true
+    nulls_not_distinct: true
+`);
+    const desiredState: DesiredState = {
+      tables: [desired],
+      enums: [],
+      functions: [],
+      views: [],
+      materializedViews: [],
+      roles: [],
+      extensions: null,
+    };
+    const plan = buildPlan(desiredState, emptyActual(), { pgSchema: TEST_SCHEMA });
+
+    // Apply phases in order. CREATE INDEX CONCURRENTLY can't run inside a
+    // transaction block, so just fire each op directly on the connection.
+    for (const op of [...plan.operations].sort((a, b) => a.phase - b.phase)) {
+      await client.query(op.sql);
+    }
+
+    // Sanity: the index now has indnullsnotdistinct = true.
+    const idxCheck = await client.query(
+      `SELECT ix.indnullsnotdistinct
+         FROM pg_catalog.pg_index ix
+         JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
+        WHERE i.relname = 'uq_e2e_idx_nnd_a_b'`,
+    );
+    expect(idxCheck.rows[0].indnullsnotdistinct).toBe(true);
+
+    // First (NULL, NULL) insert is accepted.
+    await client.query(`INSERT INTO "${TEST_SCHEMA}".e2e_idx_nnd (a, b) VALUES (NULL, NULL)`);
+    // Second is rejected — that's the whole point of NULLS NOT DISTINCT.
+    await expect(client.query(`INSERT INTO "${TEST_SCHEMA}".e2e_idx_nnd (a, b) VALUES (NULL, NULL)`)).rejects.toThrow(
+      /duplicate key|unique/i,
+    );
+
+    // Re-introspect and re-plan: zero churn.
+    const introspected = await introspectTable(client, 'e2e_idx_nnd', TEST_SCHEMA);
+    const replan = buildPlan(
+      desiredState,
+      {
+        ...emptyActual(),
+        tables: new Map([['e2e_idx_nnd', introspected]]),
+      },
+      { pgSchema: TEST_SCHEMA },
+    );
+    const idxOps = replan.operations.filter((op) => op.type === 'add_index' || op.type === 'drop_index');
+    expect(idxOps).toHaveLength(0);
   });
 });

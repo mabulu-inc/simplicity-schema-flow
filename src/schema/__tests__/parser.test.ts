@@ -67,13 +67,14 @@ indexes:
     where: "total > 0"
     include: [user_id]
     opclass: numeric_ops
+  - columns: [user_id, id]
+    name: uq_orders_user
+    unique: true
+    as_constraint: true
 checks:
   - name: positive_total
     expression: "total >= 0"
     comment: "Total must be non-negative"
-unique_constraints:
-  - columns: [user_id, id]
-    name: uq_orders_user
 triggers:
   - name: set_updated_at
     timing: BEFORE
@@ -118,7 +119,7 @@ comment: "Order records"
     expect(result.columns[2].generated).toBe('price * quantity');
     expect(result.columns[3].expand).toEqual({ from: 'email', transform: 'lower(email)' });
     expect(result.primary_key).toEqual(['id']);
-    expect(result.indexes).toHaveLength(2);
+    expect(result.indexes).toHaveLength(3);
     expect(result.indexes![1]).toEqual({
       name: 'idx_orders_total',
       columns: ['total'],
@@ -128,8 +129,13 @@ comment: "Order records"
       include: ['user_id'],
       opclass: 'numeric_ops',
     });
+    expect(result.indexes![2]).toEqual({
+      name: 'uq_orders_user',
+      columns: ['user_id', 'id'],
+      unique: true,
+      as_constraint: true,
+    });
     expect(result.checks).toHaveLength(1);
-    expect(result.unique_constraints).toHaveLength(1);
     expect(result.triggers).toHaveLength(1);
     expect(result.policies).toHaveLength(1);
     expect(result.grants).toHaveLength(1);
@@ -1034,18 +1040,20 @@ checks:
     expect(result.checks![0].comment).toBe('From comment');
   });
 
-  it('unique_constraint: description maps to comment', () => {
+  it('constraint-backed index: description maps to comment', () => {
     const yaml = `
 table: t
 columns:
   - name: id
     type: uuid
-unique_constraints:
+indexes:
   - columns: [id]
+    unique: true
+    as_constraint: true
     description: "UC desc"
 `;
     const result = parseTable(yaml);
-    expect(result.unique_constraints![0].comment).toBe('UC desc');
+    expect(result.indexes![0].comment).toBe('UC desc');
   });
 
   it('trigger: description maps to comment', () => {

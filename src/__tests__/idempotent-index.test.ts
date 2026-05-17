@@ -87,16 +87,18 @@ columns:
     primary_key: true
   - name: email
     type: text
-unique_constraints:
+indexes:
   - name: uq_users_email
     columns: [email]
+    unique: true
+    as_constraint: true
 `;
     const table = parseTable(yaml);
     const desired: DesiredState = {
       ...emptyDesired(),
       tables: [table],
     };
-    // Provide existing table so it goes through diffTable → diffUniqueConstraints
+    // Provide existing table so it goes through diffTable → diffIndexes → as_constraint 2-step
     const actual: ActualState = {
       ...emptyActual(),
       tables: new Map([

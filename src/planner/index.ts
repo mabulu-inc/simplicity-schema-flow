@@ -11,7 +11,7 @@ import type {
   IndexDef,
   IndexKey,
   CheckDef,
-  UniqueConstraintDef,
+  DeferrableMode,
   ExclusionConstraintDef,
   TriggerDef,
   PolicyDef,
@@ -685,13 +685,14 @@ function createTableOps(
     }
   }
 
-  // Unique constraints
-  if (table.unique_constraints) {
-    for (const uc of table.unique_constraints) {
-      const ucCols = uc.columns.map((c) => `"${c}"`).join(', ');
-      const ucName = uc.name || `uq_${table.table}_${uc.columns.join('_')}`;
-      const nnd = uc.nulls_not_distinct ? ' NULLS NOT DISTINCT' : '';
-      colDefs.push(`CONSTRAINT "${ucName}" UNIQUE${nnd} (${ucCols})`);
+  // Constraint-backed unique indexes: emit inline as CONSTRAINT here. PG
+  // cascades them like other table-level constraints when underlying columns
+  // are dropped, so they belong inside CREATE TABLE rather than as separate
+  // CONCURRENT ops. Plain unique indexes (no `as_constraint`) are still added
+  // post-creation in phase 7.
+  for (const idx of table.indexes ?? []) {
+    if (idx.unique && idx.as_constraint) {
+      colDefs.push(inlineConstraintIndexClause(table.table, idx));
     }
   }
 
@@ -728,19 +729,26 @@ function createTableOps(
     }
   }
 
-  // Indexes (phase 7)
+  // Indexes (phase 7). Constraint-backed entries (`as_constraint: true`)
+  // were already emitted inline above — but we still need to push their
+  // comment ops, which target the CONSTRAINT rather than the INDEX.
   if (table.indexes) {
     for (const idx of table.indexes) {
-      ops.push(createIndexOp(table.table, idx, pgSchema));
+      const isInlinedConstraint = idx.unique && idx.as_constraint;
+      if (!isInlinedConstraint) {
+        ops.push(...createIndexOps(table.table, idx, pgSchema));
+      }
       if (idx.comment) {
         const idxName = idx.name || defaultIndexName(table.table, idx);
         ops.push({
           type: 'set_comment',
-          phase: 7,
-          objectName: idxName,
-          sql: `COMMENT ON INDEX "${pgSchema}"."${idxName}" IS '${escapeQuote(idx.comment)}'`,
+          phase: isInlinedConstraint ? 14 : 7,
+          objectName: isInlinedConstraint ? `${table.table}.${idxName}` : idxName,
+          sql: isInlinedConstraint
+            ? `COMMENT ON CONSTRAINT "${idxName}" ON "${pgSchema}"."${table.table}" IS '${escapeQuote(idx.comment)}'`
+            : `COMMENT ON INDEX "${pgSchema}"."${idxName}" IS '${escapeQuote(idx.comment)}'`,
           destructive: false,
-          concurrent: true,
+          concurrent: !isInlinedConstraint,
         });
       }
     }
@@ -864,21 +872,6 @@ function createTableOps(
           phase: 14,
           objectName: `${table.table}.${check.name}`,
           sql: `COMMENT ON CONSTRAINT "${check.name}" ON "${pgSchema}"."${table.table}" IS '${escapeQuote(check.comment)}'`,
-          destructive: false,
-        });
-      }
-    }
-  }
-
-  if (table.unique_constraints) {
-    for (const uc of table.unique_constraints) {
-      if (uc.comment) {
-        const ucName = uc.name || `uq_${table.table}_${uc.columns.join('_')}`;
-        ops.push({
-          type: 'set_comment',
-          phase: 14,
-          objectName: `${table.table}.${ucName}`,
-          sql: `COMMENT ON CONSTRAINT "${ucName}" ON "${pgSchema}"."${table.table}" IS '${escapeQuote(uc.comment)}'`,
           destructive: false,
         });
       }
@@ -1040,18 +1033,6 @@ function alterTableOps(
     }
   }
 
-  // Diff unique constraints (safe 2-step pattern: CONCURRENTLY index + USING INDEX)
-  ops.push(
-    ...diffUniqueConstraints(
-      desired.table,
-      desired.unique_constraints || [],
-      existing.unique_constraints || [],
-      desired.columns,
-      pgSchema,
-      droppedColNames,
-    ),
-  );
-
   // Diff exclusion constraints
   ops.push(
     ...diffExclusionConstraints(
@@ -1062,8 +1043,19 @@ function alterTableOps(
     ),
   );
 
-  // Diff indexes
-  ops.push(...diffIndexes(desired.table, desired.indexes || [], existing.indexes || [], pgSchema));
+  // Diff indexes (handles both plain unique indexes and constraint-backed
+  // unique indexes via `as_constraint: true`; safe 2-step pattern for the
+  // latter — see createIndexOps).
+  ops.push(
+    ...diffIndexes(
+      desired.table,
+      desired.indexes || [],
+      existing.indexes || [],
+      pgSchema,
+      droppedColNames,
+      existing.columns,
+    ),
+  );
 
   // Diff checks
   ops.push(...diffChecks(desired.table, desired.checks || [], existing.checks || [], pgSchema));
@@ -1209,7 +1201,8 @@ function indexKeySlug(key: IndexKey): string {
 /** Default generated name for an index missing `name` in YAML. Exported so
  *  drift can compute the same name. */
 export function defaultIndexName(table: string, idx: IndexDef): string {
-  return `idx_${table}_${idx.columns.map(indexKeySlug).join('_')}`;
+  const prefix = idx.unique && idx.as_constraint ? 'uq' : 'idx';
+  return `${prefix}_${table}_${idx.columns.map(indexKeySlug).join('_')}`;
 }
 
 /**
@@ -1273,54 +1266,83 @@ export function indexKeysIdentity(idx: IndexDef): string {
   return idx.columns.map((k) => indexKeyIdentity(k)).join('|') + (idx.opclass ? `|opclass:${idx.opclass}` : '');
 }
 
-function diffIndexes(table: string, desired: IndexDef[], existing: IndexDef[], pgSchema: string): Operation[] {
+function diffIndexes(
+  table: string,
+  desired: IndexDef[],
+  existing: IndexDef[],
+  pgSchema: string,
+  droppedColNames: Set<string> = new Set(),
+  existingColumns: ColumnDef[] = [],
+): Operation[] {
   const ops: Operation[] = [];
   const existingByName = new Map<string, IndexDef>();
   for (const idx of existing) {
     if (idx.name) existingByName.set(idx.name, idx);
   }
 
+  // Vanilla single-column unique constraints are folded into `col.unique`
+  // by introspection (they don't appear in existing.indexes). A desired
+  // `indexes:{as_constraint:true, columns:[x]}` entry whose name matches
+  // an existing column-level unique is already satisfied — skip the create.
+  const columnLevelUniqueNames = new Set<string>();
+  for (const col of existingColumns) {
+    if (col.unique) {
+      columnLevelUniqueNames.add(col.unique_name || `${table}_${col.name}_key`);
+    }
+  }
+
   for (const idx of desired) {
     const name = idx.name || defaultIndexName(table, idx);
+    if (
+      idx.unique &&
+      idx.as_constraint &&
+      idx.columns.length === 1 &&
+      !idx.nulls_not_distinct &&
+      !idx.deferrable &&
+      !idx.comment &&
+      !idx.include &&
+      columnLevelUniqueNames.has(name)
+    ) {
+      continue;
+    }
     const existingIdx = existingByName.get(name);
     if (!existingIdx) {
-      ops.push(createIndexOp(table, { ...idx, name }, pgSchema));
+      ops.push(...createIndexOps(table, { ...idx, name }, pgSchema));
     } else if (indexNeedsRecreate(idx, existingIdx)) {
-      // Keys, where-clause, include-list, or uniqueness changed. PG has no
-      // ALTER INDEX for these; drop and recreate.
-      ops.push({
-        type: 'drop_index',
-        phase: 7,
-        objectName: name,
-        sql: `DROP INDEX IF EXISTS "${pgSchema}"."${name}"`,
-        destructive: true,
-      });
-      ops.push(createIndexOp(table, { ...idx, name }, pgSchema));
+      // Keys, where-clause, include-list, uniqueness, nulls-not-distinct,
+      // constraint-wrapper, or deferrable changed. PG has no ALTER INDEX
+      // for these; drop and recreate. Drop SQL must use DROP CONSTRAINT for
+      // constraint-backed entries (DROP INDEX errors out — the index is
+      // owned by the constraint).
+      ops.push(buildDropIndexOp(table, existingIdx, name, pgSchema));
+      ops.push(...createIndexOps(table, { ...idx, name }, pgSchema));
     }
     if (idx.comment && idx.comment !== existingIdx?.comment) {
+      const isConstraint = idx.unique && idx.as_constraint;
       ops.push({
         type: 'set_comment',
-        phase: 7,
-        objectName: name,
-        sql: `COMMENT ON INDEX "${pgSchema}"."${name}" IS '${escapeQuote(idx.comment)}'`,
+        phase: isConstraint ? 14 : 7,
+        objectName: isConstraint ? `${table}.${name}` : name,
+        sql: isConstraint
+          ? `COMMENT ON CONSTRAINT "${name}" ON "${pgSchema}"."${table}" IS '${escapeQuote(idx.comment)}'`
+          : `COMMENT ON INDEX "${pgSchema}"."${name}" IS '${escapeQuote(idx.comment)}'`,
         destructive: false,
-        concurrent: true,
+        concurrent: !isConstraint,
       });
     }
   }
 
-  // Drop indexes not in desired
+  // Drop indexes not in desired. Skip constraint-backed entries whose columns
+  // are also being dropped — PG auto-cascades these (per ALTER TABLE docs:
+  // "Indexes and table constraints involving the column will be automatically
+  // dropped"), and emitting a separate DROP would fail with "does not exist".
   const desiredNames = new Set(desired.map((idx) => idx.name || defaultIndexName(table, idx)));
-  for (const idx of existing) {
-    if (idx.name && !desiredNames.has(idx.name)) {
-      ops.push({
-        type: 'drop_index',
-        phase: 7,
-        objectName: idx.name,
-        sql: `DROP INDEX IF EXISTS "${pgSchema}"."${idx.name}"`,
-        destructive: true,
-      });
+  for (const [name, idx] of existingByName) {
+    if (desiredNames.has(name)) continue;
+    if (idx.unique && idx.as_constraint && constraintColumnNames(idx).some((c) => droppedColNames.has(c))) {
+      continue;
     }
+    ops.push(buildDropIndexOp(table, idx, name, pgSchema));
   }
 
   return ops;
@@ -1336,7 +1358,29 @@ function indexNeedsRecreate(desired: IndexDef, existing: IndexDef): boolean {
   const desiredInclude = (desired.include || []).slice().sort().join(',');
   const existingInclude = (existing.include || []).slice().sort().join(',');
   if (desiredInclude !== existingInclude) return true;
+  if (Boolean(desired.nulls_not_distinct) !== Boolean(existing.nulls_not_distinct)) return true;
+  if (Boolean(desired.as_constraint) !== Boolean(existing.as_constraint)) return true;
+  if ((desired.deferrable || null) !== (existing.deferrable || null)) return true;
   return false;
+}
+
+function buildDropIndexOp(table: string, idx: IndexDef, name: string, pgSchema: string): Operation {
+  if (idx.unique && idx.as_constraint) {
+    return {
+      type: 'drop_unique_constraint',
+      phase: 6,
+      objectName: `${table}.${name}`,
+      sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${name}"`,
+      destructive: true,
+    };
+  }
+  return {
+    type: 'drop_index',
+    phase: 7,
+    objectName: name,
+    sql: `DROP INDEX IF EXISTS "${pgSchema}"."${name}"`,
+    destructive: true,
+  };
 }
 
 export function normalizeIndexClause(clause: string | undefined): string {
@@ -1344,7 +1388,15 @@ export function normalizeIndexClause(clause: string | undefined): string {
   return clause.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-function createIndexOp(table: string, idx: IndexDef, pgSchema: string): Operation {
+/**
+ * Generate the ops needed to create an index. Plain indexes (no
+ * `as_constraint`) produce a single CREATE INDEX CONCURRENTLY op. Indexes
+ * with `as_constraint: true` produce two: the CONCURRENTLY index build at
+ * phase 7, and ALTER TABLE ADD CONSTRAINT … USING INDEX (with optional
+ * DEFERRABLE) at phase 8. PG's safe two-step pattern — the index build is
+ * non-blocking, the constraint attachment is instant.
+ */
+function createIndexOps(table: string, idx: IndexDef, pgSchema: string): Operation[] {
   const name = idx.name || defaultIndexName(table, idx);
   const method = idx.method || 'btree';
   const unique = idx.unique ? 'UNIQUE ' : '';
@@ -1353,10 +1405,13 @@ function createIndexOp(table: string, idx: IndexDef, pgSchema: string): Operatio
   if (idx.include && idx.include.length > 0) {
     sql += ` INCLUDE (${idx.include.map((c) => `"${c}"`).join(', ')})`;
   }
+  if (idx.unique && idx.nulls_not_distinct) {
+    sql += ' NULLS NOT DISTINCT';
+  }
   if (idx.where) {
     sql += ` WHERE ${idx.where}`;
   }
-  return {
+  const indexOp: Operation = {
     type: 'add_index',
     phase: 7,
     objectName: name,
@@ -1364,6 +1419,50 @@ function createIndexOp(table: string, idx: IndexDef, pgSchema: string): Operatio
     destructive: false,
     concurrent: true,
   };
+  if (!(idx.unique && idx.as_constraint)) return [indexOp];
+
+  const def = formatDeferrableClause(idx.deferrable);
+  const constraintOp: Operation = {
+    type: 'add_unique_constraint',
+    phase: 8,
+    objectName: `${table}.${name}`,
+    sql: `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${name}') THEN ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${name}" UNIQUE USING INDEX "${name}"${def}; END IF; END $$`,
+    destructive: false,
+    concurrent: true,
+  };
+  return [indexOp, constraintOp];
+}
+
+function formatDeferrableClause(mode: DeferrableMode | undefined): string {
+  if (!mode) return '';
+  return mode === 'initially_deferred' ? ' DEFERRABLE INITIALLY DEFERRED' : ' DEFERRABLE INITIALLY IMMEDIATE';
+}
+
+/**
+ * SQL for an `as_constraint` unique index emitted inline in CREATE TABLE.
+ * PG restricts constraint-backed indexes: bare columns only (no expression
+ * keys), no partial `where:`, btree only, default ordering. Parser enforces
+ * these invariants; here we trust them and just format.
+ */
+function inlineConstraintIndexClause(table: string, idx: IndexDef): string {
+  const name = idx.name || defaultIndexName(table, idx);
+  const cols = constraintColumnNames(idx)
+    .map((c) => `"${c}"`)
+    .join(', ');
+  const nnd = idx.nulls_not_distinct ? ' NULLS NOT DISTINCT' : '';
+  const incl = idx.include && idx.include.length > 0 ? ` INCLUDE (${idx.include.map((c) => `"${c}"`).join(', ')})` : '';
+  const def = formatDeferrableClause(idx.deferrable);
+  return `CONSTRAINT "${name}" UNIQUE${nnd} (${cols})${incl}${def}`;
+}
+
+/** Extract bare column names from an `as_constraint` index's keys. Parser
+ *  rejects expression keys on these, so this is a safe cast in practice. */
+function constraintColumnNames(idx: IndexDef): string[] {
+  return idx.columns.map((k) => {
+    if (typeof k === 'string') return k;
+    if ('column' in k) return k.column;
+    throw new Error(`expression keys are not allowed on constraint-backed indexes (index name: ${idx.name})`);
+  });
 }
 
 // ─── Checks ────────────────────────────────────────────────────
@@ -1435,98 +1534,11 @@ function diffChecks(table: string, desired: CheckDef[], existing: CheckDef[], pg
   return ops;
 }
 
-// ─── Unique Constraints (safe 2-step pattern for existing tables) ──
-
-function diffUniqueConstraints(
-  table: string,
-  desired: UniqueConstraintDef[],
-  existing: UniqueConstraintDef[],
-  desiredColumns: ColumnDef[],
-  pgSchema: string,
-  droppedColNames: Set<string> = new Set(),
-): Operation[] {
-  const ops: Operation[] = [];
-  const existingByName = new Map(existing.map((uc) => [uc.name || `uq_${table}_${uc.columns.join('_')}`, uc]));
-
-  for (const uc of desired) {
-    const ucName = uc.name || `uq_${table}_${uc.columns.join('_')}`;
-    const existingUc = existingByName.get(ucName);
-    const needsRecreate = existingUc && Boolean(uc.nulls_not_distinct) !== Boolean(existingUc.nulls_not_distinct);
-    if (needsRecreate) {
-      // Drop existing constraint so it can be recreated with updated nulls_not_distinct
-      ops.push({
-        type: 'drop_unique_constraint',
-        phase: 6,
-        objectName: `${table}.${ucName}`,
-        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${ucName}"`,
-        destructive: true,
-      });
-    }
-    if (!existingUc || needsRecreate) {
-      // Safe unique constraint pattern (PRD §8.3):
-      // 1. CREATE UNIQUE INDEX CONCURRENTLY (non-blocking)
-      // 2. ALTER TABLE ADD CONSTRAINT ... USING INDEX (instant)
-      const cols = uc.columns.map((c) => `"${c}"`).join(', ');
-      const nnd = uc.nulls_not_distinct ? ' NULLS NOT DISTINCT' : '';
-      ops.push({
-        type: 'add_index',
-        phase: 7,
-        objectName: ucName,
-        sql: `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "${ucName}" ON "${pgSchema}"."${table}" (${cols})${nnd}`,
-        destructive: false,
-        concurrent: true,
-      });
-      ops.push({
-        type: 'add_unique_constraint',
-        phase: 8,
-        objectName: `${table}.${ucName}`,
-        sql: `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${ucName}') THEN ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${ucName}" UNIQUE USING INDEX "${ucName}"; END IF; END $$`,
-        destructive: false,
-        concurrent: true,
-      });
-    }
-    if (uc.comment && (!existingUc || uc.comment !== existingUc.comment)) {
-      ops.push({
-        type: 'set_comment',
-        phase: 14,
-        objectName: `${table}.${ucName}`,
-        sql: `COMMENT ON CONSTRAINT "${ucName}" ON "${pgSchema}"."${table}" IS '${escapeQuote(uc.comment)}'`,
-        destructive: false,
-      });
-    }
-  }
-
-  // Build set of column-level unique constraint names from desired columns.
-  // These are managed at the column level, not via unique_constraints array,
-  // so we must not drop them even if they appear in existing.unique_constraints.
-  const columnLevelUniqueNames = new Set<string>();
-  for (const col of desiredColumns) {
-    if (col.unique) {
-      columnLevelUniqueNames.add(col.unique_name || `${table}_${col.name}_key`);
-    }
-  }
-
-  // Drop unique constraints not in desired (and not managed at column level).
-  // Skip when the constraint references any column that's also being dropped —
-  // Postgres auto-cascades table-level constraints whose columns go away
-  // ("Indexes and table constraints involving the column will be automatically
-  // dropped" — ALTER TABLE docs). Emitting a separate DROP CONSTRAINT in the
-  // same phase would fail with "does not exist" after the drop_column runs.
-  const desiredNames = new Set(desired.map((uc) => uc.name || `uq_${table}_${uc.columns.join('_')}`));
-  for (const [name, uc] of existingByName) {
-    if (desiredNames.has(name) || columnLevelUniqueNames.has(name)) continue;
-    if (uc.columns.some((c) => droppedColNames.has(c))) continue;
-    ops.push({
-      type: 'drop_unique_constraint',
-      phase: 6,
-      objectName: `${table}.${name}`,
-      sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${name}"`,
-      destructive: true,
-    });
-  }
-
-  return ops;
-}
+// ─── Unique Constraints ────────────────────────────────────────────
+// Constraint-backed unique indexes are declared as `indexes:` entries with
+// `as_constraint: true`. Diffing, drop semantics, and the safe 2-step
+// CREATE INDEX CONCURRENTLY → ALTER TABLE ADD CONSTRAINT USING INDEX
+// pattern all live in diffIndexes / createIndexOps above.
 
 // ─── Exclusion Constraints ────────────────────────────────────
 
@@ -2209,7 +2221,7 @@ function diffMaterializedViews(
 
     if (mv.indexes) {
       for (const idx of mv.indexes) {
-        ops.push(createIndexOp(mv.name, idx, pgSchema));
+        ops.push(...createIndexOps(mv.name, idx, pgSchema));
       }
     }
 
@@ -2300,8 +2312,9 @@ function createSeedTableOp(
  *   1. Primary key (column-level `primary_key: true` or table-level
  *      `primary_key: [...]`), if every PK column is present in every seed row.
  *   2. The first unique constraint — declaration order, column-level
- *      `unique: true` first, then table-level `unique_constraints` — whose
- *      columns are all present in every seed row.
+ *      `unique: true` first, then table-level `indexes:` entries with
+ *      `as_constraint: true` — whose columns are all present in every seed
+ *      row.
  *   3. Empty array. The executor then skips UPDATE and only INSERTs rows
  *      whose values don't already exist in the table.
  *
@@ -2328,9 +2341,15 @@ function resolveSeedMatchColumns(
     if (col.unique && presentInAll([col.name])) return [col.name];
   }
 
-  // 3. Table-level unique constraints
-  for (const uc of table.unique_constraints ?? []) {
-    if (presentInAll(uc.columns)) return uc.columns;
+  // 3. Table-level unique constraints (now declared as `indexes:` entries
+  //    with `as_constraint: true`; bare-column entries only, since
+  //    expression keys can't be wrapped in a unique constraint).
+  for (const idx of table.indexes ?? []) {
+    if (!idx.unique || !idx.as_constraint) continue;
+    const cols = idx.columns
+      .map((k) => (typeof k === 'string' ? k : 'column' in k ? k.column : null))
+      .filter((c): c is string => c !== null);
+    if (cols.length === idx.columns.length && presentInAll(cols)) return cols;
   }
 
   return [];

@@ -1195,7 +1195,7 @@ describe('Planner', () => {
             { name: 'email', type: 'text' },
             { name: 'tenant_id', type: 'uuid' },
           ],
-          unique_constraints: [{ columns: ['email', 'tenant_id'], name: 'uq_email_tenant' }],
+          indexes: [{ columns: ['email', 'tenant_id'], name: 'uq_email_tenant', unique: true, as_constraint: true }],
         },
       ];
       const result = buildPlan(desired, emptyActual());
@@ -1999,7 +1999,9 @@ describe('Planner', () => {
             { name: 'email', type: 'text' },
             { name: 'tenant_id', type: 'uuid' },
           ],
-          unique_constraints: [{ columns: ['email', 'tenant_id'], name: 'uq_users_email_tenant' }],
+          indexes: [
+            { columns: ['email', 'tenant_id'], name: 'uq_users_email_tenant', unique: true, as_constraint: true },
+          ],
         },
       ];
       const actual = emptyActual();
@@ -2035,7 +2037,7 @@ describe('Planner', () => {
         {
           table: 'users',
           columns: [{ name: 'email', type: 'text' }],
-          unique_constraints: [{ columns: ['email'] }],
+          indexes: [{ columns: ['email'], unique: true, as_constraint: true }],
         },
       ];
       const actual = emptyActual();
@@ -2061,7 +2063,7 @@ describe('Planner', () => {
       actual.tables.set('users', {
         table: 'users',
         columns: [{ name: 'email', type: 'text' }],
-        unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+        indexes: [{ columns: ['email'], name: 'uq_users_email', unique: true, as_constraint: true }],
       });
       const result = buildPlan(desired, actual);
       expect(result.blocked.some((o) => o.type === 'drop_unique_constraint')).toBe(true);
@@ -2073,7 +2075,7 @@ describe('Planner', () => {
         {
           table: 'users',
           columns: [{ name: 'email', type: 'text' }],
-          unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+          indexes: [{ columns: ['email'], name: 'uq_users_email', unique: true, as_constraint: true }],
         },
       ];
       const result = buildPlan(desired, emptyActual());
@@ -2091,14 +2093,14 @@ describe('Planner', () => {
         {
           table: 'users',
           columns: [{ name: 'email', type: 'text' }],
-          unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+          indexes: [{ columns: ['email'], name: 'uq_users_email', unique: true, as_constraint: true }],
         },
       ];
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
         columns: [{ name: 'email', type: 'text' }],
-        unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+        indexes: [{ columns: ['email'], name: 'uq_users_email', unique: true, as_constraint: true }],
       });
       const result = buildPlan(desired, actual);
       const indexOps = findOps(result.operations, 'add_index');
@@ -2129,7 +2131,7 @@ describe('Planner', () => {
           { name: 'id', type: 'serial', primary_key: true },
           { name: 'legacy_code', type: 'varchar(50)' },
         ],
-        unique_constraints: [{ name: 'things_legacy_code_key', columns: ['legacy_code'] }],
+        indexes: [{ name: 'things_legacy_code_key', columns: ['legacy_code'], unique: true, as_constraint: true }],
       });
       const result = buildPlan(desired, actual, { allowDestructive: true });
 
@@ -2163,7 +2165,7 @@ describe('Planner', () => {
           { name: 'a', type: 'text' },
           { name: 'b', type: 'text' },
         ],
-        unique_constraints: [{ name: 'things_a_b_key', columns: ['a', 'b'] }],
+        indexes: [{ name: 'things_a_b_key', columns: ['a', 'b'], unique: true, as_constraint: true }],
       });
       const result = buildPlan(desired, actual, { allowDestructive: true });
 
@@ -2181,7 +2183,7 @@ describe('Planner', () => {
             { name: 'id', type: 'serial', primary_key: true },
             { name: 'email', type: 'text' },
           ],
-          // Note: no unique_constraints declared — existing uc should be dropped.
+          // Note: no constraint-backed index declared — existing one should be dropped.
         },
       ];
       const actual = emptyActual();
@@ -2191,7 +2193,7 @@ describe('Planner', () => {
           { name: 'id', type: 'serial', primary_key: true },
           { name: 'email', type: 'text' },
         ],
-        unique_constraints: [{ name: 'things_email_key', columns: ['email'] }],
+        indexes: [{ name: 'things_email_key', columns: ['email'], unique: true, as_constraint: true }],
       });
       const result = buildPlan(desired, actual, { allowDestructive: true });
 

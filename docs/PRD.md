@@ -157,10 +157,17 @@ checks:
     expression: 'length(email) > 0'
     comment: 'Ensure email is not blank'
 
-unique_constraints:
+# Table-level unique constraints are declared under `indexes:` with
+# `as_constraint: true` (unifies the old `unique_constraints:` section).
+# Only constraint-backed indexes can be DEFERRABLE — bare unique indexes
+# cannot. PG also restricts these to bare columns, btree, no partial WHERE.
+indexes:
   - columns: [email, tenant_id]
     name: uq_users_email_tenant
-    nulls_not_distinct: true # PostgreSQL 15+: treat NULLs as equal
+    unique: true
+    as_constraint: true
+    nulls_not_distinct: true   # PostgreSQL 15+: treat NULLs as equal
+    deferrable: initially_immediate   # optional; or `initially_deferred`
     comment: 'One email per tenant'
 
 exclusion_constraints:

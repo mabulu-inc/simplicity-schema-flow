@@ -117,7 +117,7 @@ describe('Batch seeds — planner', () => {
           { name: 'user_id', type: 'integer' },
           { name: 'role', type: 'text' },
         ],
-        unique_constraints: [{ columns: ['tenant_id', 'user_id'] }],
+        indexes: [{ columns: ['tenant_id', 'user_id'], unique: true, as_constraint: true }],
         seeds: [{ tenant_id: 1, user_id: 1, role: 'admin' }],
       },
     ];

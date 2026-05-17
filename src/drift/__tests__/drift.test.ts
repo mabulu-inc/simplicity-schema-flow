@@ -1259,7 +1259,7 @@ describe('detectDrift', () => {
           { name: 'id', type: 'integer', primary_key: true },
           { name: 'email', type: 'text' },
         ],
-        unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+        indexes: [{ columns: ['email'], name: 'uq_users_email', unique: true, as_constraint: true }],
       },
     ];
     const actual = emptyActual();
@@ -1298,7 +1298,7 @@ describe('detectDrift', () => {
         { name: 'id', type: 'integer', primary_key: true },
         { name: 'email', type: 'text' },
       ],
-      unique_constraints: [{ columns: ['email'], name: 'uq_users_email' }],
+      indexes: [{ columns: ['email'], name: 'uq_users_email', unique: true, as_constraint: true }],
     });
     const report = detectDrift(desired, actual);
     expect(report.items).toContainEqual(

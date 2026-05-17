@@ -35,9 +35,14 @@ function emptyActual(): ActualState {
 }
 
 // ─── Bug 1: Introspection must recognize unique constraints ─────
+//
+// Post-unification (0.8.0): constraint-backed unique indexes are surfaced
+// in the same `indexes:` array as plain indexes, marked with
+// `as_constraint: true`. Vanilla single-column uniques are folded into
+// `col.unique = true` since that's how users typically declare them.
 
 describe('introspection: unique constraints', () => {
-  it('returns multi-column unique constraints in unique_constraints array', async () => {
+  it('returns multi-column unique constraints in indexes[] with as_constraint:true', async () => {
     await client.query(`
       CREATE TABLE "${TEST_SCHEMA}".uc_multi (
         id uuid PRIMARY KEY,
@@ -49,13 +54,14 @@ describe('introspection: unique constraints', () => {
 
     const table = await introspectTable(client, 'uc_multi', TEST_SCHEMA);
 
-    expect(table.unique_constraints).toBeDefined();
-    expect(table.unique_constraints).toHaveLength(1);
-    expect(table.unique_constraints![0].name).toBe('uq_uc_multi_name');
-    expect(table.unique_constraints![0].columns).toEqual(['first_name', 'last_name']);
+    const idx = (table.indexes || []).find((i) => i.name === 'uq_uc_multi_name');
+    expect(idx).toBeDefined();
+    expect(idx!.as_constraint).toBe(true);
+    expect(idx!.unique).toBe(true);
+    expect(idx!.columns).toEqual(['first_name', 'last_name']);
   });
 
-  it('does not include constraint-backed indexes in the indexes array', async () => {
+  it('folds vanilla single-column unique constraints into col.unique=true', async () => {
     await client.query(`
       CREATE TABLE "${TEST_SCHEMA}".uc_single (
         id uuid PRIMARY KEY,
@@ -66,20 +72,14 @@ describe('introspection: unique constraints', () => {
 
     const table = await introspectTable(client, 'uc_single', TEST_SCHEMA);
 
-    // The backing index for the unique constraint should NOT appear in indexes
-    const indexNames = (table.indexes || []).map((i) => i.name);
-    expect(indexNames).not.toContain('uq_uc_single_email');
+    const emailCol = table.columns.find((c) => c.name === 'email');
+    expect(emailCol!.unique).toBe(true);
+    expect(emailCol!.unique_name).toBe('uq_uc_single_email');
+    // Not double-counted in indexes[]:
+    expect((table.indexes || []).find((i) => i.name === 'uq_uc_single_email')).toBeUndefined();
   });
 
-  it('does not include multi-column constraint-backed indexes in the indexes array', async () => {
-    // uc_multi was created above with CONSTRAINT uq_uc_multi_name UNIQUE (first_name, last_name)
-    const table = await introspectTable(client, 'uc_multi', TEST_SCHEMA);
-
-    const indexNames = (table.indexes || []).map((i) => i.name);
-    expect(indexNames).not.toContain('uq_uc_multi_name');
-  });
-
-  it('still includes regular indexes that are not constraint-backed', async () => {
+  it('still includes regular non-constraint indexes alongside constraint-backed ones', async () => {
     await client.query(`
       CREATE TABLE "${TEST_SCHEMA}".uc_mixed (
         id uuid PRIMARY KEY,
@@ -94,11 +94,13 @@ describe('introspection: unique constraints', () => {
 
     const table = await introspectTable(client, 'uc_mixed', TEST_SCHEMA);
 
-    // Regular index should still be present
     const indexNames = (table.indexes || []).map((i) => i.name);
+    // The plain index is present:
     expect(indexNames).toContain('idx_uc_mixed_status');
-    // Constraint-backed index should not be present
+    // The single-column unique was folded to col.unique, not in indexes[]:
     expect(indexNames).not.toContain('uq_uc_mixed_email');
+    const emailCol = table.columns.find((c) => c.name === 'email');
+    expect(emailCol!.unique).toBe(true);
   });
 });
 
@@ -121,9 +123,11 @@ columns:
   - name: last_name
     type: text
     nullable: false
-unique_constraints:
+indexes:
   - name: uq_uc_multi_name
     columns: [first_name, last_name]
+    unique: true
+    as_constraint: true
 `);
 
     const desiredState: DesiredState = {
@@ -196,10 +200,15 @@ columns:
   });
 });
 
-// ─── Bug 3: Single-column unique constraint defined in unique_constraints array (GH #7) ─────
+// ─── Bug 3: Single-column unique constraint round-trip (GH #7) ─────
+//
+// Pre-0.8.0 these constraints surfaced in a separate `unique_constraints:`
+// array. After unification a vanilla single-column unique constraint surfaces
+// as `col.unique = true` (with `col.unique_name` if non-default). Users can
+// still declare it either way in YAML — both produce idempotent plans.
 
-describe('planner: single-column unique_constraints array idempotence (GH #7)', () => {
-  it('introspection includes single-column unique constraints in unique_constraints array', async () => {
+describe('planner: single-column unique constraint round-trip (GH #7)', () => {
+  it('introspection surfaces vanilla single-column unique as col.unique=true (with custom name)', async () => {
     await client.query(`
       CREATE TABLE "${TEST_SCHEMA}".tenant_auth_config (
         id uuid PRIMARY KEY,
@@ -210,16 +219,14 @@ describe('planner: single-column unique_constraints array idempotence (GH #7)', 
 
     const table = await introspectTable(client, 'tenant_auth_config', TEST_SCHEMA);
 
-    // Single-column unique constraint defined via CONSTRAINT clause should appear
-    // in unique_constraints array (not only as col.unique = true)
-    expect(table.unique_constraints).toBeDefined();
-    expect(table.unique_constraints).toContainEqual({
-      columns: ['tenant_id'],
-      name: 'tenant_auth_config_tenant_id_key',
-    });
+    const tenantCol = table.columns.find((c) => c.name === 'tenant_id');
+    expect(tenantCol).toBeDefined();
+    expect(tenantCol!.unique).toBe(true);
+    // Name matches the PG-default `${table}_${col}_key`, so unique_name not set:
+    expect(tenantCol!.unique_name).toBeUndefined();
   });
 
-  it('produces 0 operations when single-column unique constraint is in unique_constraints array', async () => {
+  it('produces 0 operations when single-column unique is declared via indexes[as_constraint:true]', async () => {
     // Table tenant_auth_config created above with single-column unique constraint
     const table = await introspectTable(client, 'tenant_auth_config', TEST_SCHEMA);
 
@@ -232,10 +239,11 @@ columns:
   - name: tenant_id
     type: uuid
     nullable: false
-unique_constraints:
+indexes:
   - name: tenant_auth_config_tenant_id_key
-    columns:
-      - tenant_id
+    columns: [tenant_id]
+    unique: true
+    as_constraint: true
 `);
 
     const desiredState: DesiredState = {
@@ -276,7 +284,7 @@ unique_constraints:
 
     const table = await introspectTable(client, 'col_unique_test', TEST_SCHEMA);
 
-    // User defines unique at the column level (not in unique_constraints)
+    // User defines unique at the column level (not via `indexes:`)
     const desired = parseTable(`
 table: col_unique_test
 columns:
@@ -312,7 +320,7 @@ columns:
         op.type === 'add_index' ||
         op.type === 'drop_index',
     );
-    // Should NOT drop the constraint just because it's not in desired.unique_constraints
+    // Should NOT drop the constraint just because it's not in desired.indexes
     expect(relevantOps).toHaveLength(0);
   });
 });
@@ -337,7 +345,7 @@ columns:
         { name: 'id', type: 'uuid', primary_key: true },
         { name: 'email', type: 'text' },
       ],
-      unique_constraints: [{ columns: ['email'], name: 'uq_test_drop_email' }],
+      indexes: [{ columns: ['email'], name: 'uq_test_drop_email', unique: true, as_constraint: true }],
     };
 
     const desiredState: DesiredState = {

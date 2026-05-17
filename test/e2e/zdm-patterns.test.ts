@@ -118,9 +118,11 @@ columns:
     type: text
   - name: tenant_id
     type: uuid
-unique_constraints:
+indexes:
   - columns: [email, tenant_id]
     name: uq_zdm_email_tenant
+    unique: true
+    as_constraint: true
 `,
     });
 

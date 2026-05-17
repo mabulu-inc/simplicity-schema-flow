@@ -428,7 +428,6 @@ export async function introspectTable(client: Client, tableName: string, schema:
   const compositePk = await getCompositePrimaryKey(client, tableName, schema);
   const tableGrants = await getTableLevelGrants(client, tableName, schema);
   const rlsInfo = await getRlsStatus(client, tableName, schema);
-  const uniqueConstraints = await getUniqueConstraints(client, tableName, schema);
   const exclusionConstraints = await getExclusionConstraints(client, tableName, schema);
 
   // Merge FK info into columns
@@ -458,18 +457,34 @@ export async function introspectTable(client: Client, tableName: string, schema:
     }
   }
 
-  // Merge single-column unique constraint info into columns
-  for (const uc of uniqueConstraints) {
-    if (uc.columns.length === 1) {
-      const col = columns.find((c) => c.name === uc.columns[0]);
-      if (col) {
+  // Surface "vanilla" single-column constraint-backed unique indexes as
+  // `col.unique = true` rather than as table-level `indexes:` entries —
+  // that matches how users typically declare them with `unique: true` on
+  // the column. Anything with non-default features (nulls_not_distinct,
+  // deferrable, comment, include columns) stays in `indexes:` because
+  // those can't be represented column-level.
+  const indexesAfterColumnMerge: IndexDef[] = [];
+  for (const idx of indexes) {
+    const isVanillaSingleColUnique =
+      idx.unique &&
+      idx.as_constraint &&
+      idx.columns.length === 1 &&
+      typeof idx.columns[0] === 'string' &&
+      !idx.nulls_not_distinct &&
+      !idx.deferrable &&
+      !idx.comment &&
+      !idx.include;
+    if (isVanillaSingleColUnique) {
+      const colName = idx.columns[0] as string;
+      const col = columns.find((c) => c.name === colName);
+      if (col && idx.name) {
         col.unique = true;
-        const defaultName = `${tableName}_${uc.columns[0]}_key`;
-        if (uc.constraint_name !== defaultName) {
-          col.unique_name = uc.constraint_name;
-        }
+        const defaultName = `${tableName}_${colName}_key`;
+        if (idx.name !== defaultName) col.unique_name = idx.name;
+        continue;
       }
     }
+    indexesAfterColumnMerge.push(idx);
   }
 
   const result: TableSchema = {
@@ -479,23 +494,8 @@ export async function introspectTable(client: Client, tableName: string, schema:
 
   if (compositePk.columns.length > 1) result.primary_key = compositePk.columns;
   if (compositePk.constraintName) result.primary_key_name = compositePk.constraintName;
-  if (indexes.length > 0) result.indexes = indexes;
+  if (indexesAfterColumnMerge.length > 0) result.indexes = indexesAfterColumnMerge;
   if (checks.length > 0) result.checks = checks;
-
-  // Populate all unique constraints (single-column and multi-column)
-  if (uniqueConstraints.length > 0) {
-    result.unique_constraints = uniqueConstraints.map((uc) => {
-      const def: { columns: string[]; name: string; nulls_not_distinct?: boolean } = {
-        columns: uc.columns,
-        name: uc.constraint_name,
-      };
-      if (uc.nulls_not_distinct) {
-        def.nulls_not_distinct = true;
-      }
-      return def;
-    });
-  }
-
   if (exclusionConstraints.length > 0) result.exclusion_constraints = exclusionConstraints;
   if (triggers.length > 0) result.triggers = triggers;
   if (policies.length > 0) result.policies = policies;
@@ -624,6 +624,17 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
   // for individual columns does *not* include order/nulls, so we read them
   // separately here. Cast to int[] for client-side parsing — note this is
   // 0-indexed (issue #26 lesson) so we re-emit it 1-indexed when joining.
+  // `indnullsnotdistinct` is PG15+; older versions are treated as `false`.
+  //
+  // LEFT JOIN to pg_constraint: unique constraints (`u`) are surfaced as
+  // `as_constraint: true` on the resulting IndexDef, along with their
+  // deferrable settings. Primary key indexes (`p`) and the indexes backing
+  // exclusion constraints (`x`) are filtered out — both are handled by
+  // separate code paths (composite PK + exclusion_constraints).
+  const pgVersionResult = await client.query('SHOW server_version_num');
+  const pgVersion = parseInt(pgVersionResult.rows[0].server_version_num as string, 10);
+  const nndExpr = pgVersion >= 150000 ? 'COALESCE(ix.indnullsnotdistinct, false)' : 'false';
+
   const result = await client.query(
     `SELECT
        i.relname AS name,
@@ -639,19 +650,28 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
          FROM generate_series(ix.indnkeyatts + 1, ix.indnatts) AS k
        ) AS include_cols,
        ix.indoption::int[] AS indoptions,
-       obj_description(i.oid, 'pg_class') AS comment
+       ${nndExpr} AS nulls_not_distinct,
+       (con.oid IS NOT NULL) AS is_constraint,
+       COALESCE(con.condeferrable, false) AS is_deferrable,
+       COALESCE(con.condeferred, false) AS is_deferred,
+       COALESCE(
+         obj_description(con.oid, 'pg_constraint'),
+         obj_description(i.oid, 'pg_class')
+       ) AS comment
      FROM pg_catalog.pg_index ix
      JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
      JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
      JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
      JOIN pg_catalog.pg_am am ON am.oid = i.relam
+     LEFT JOIN pg_catalog.pg_constraint con
+       ON con.conindid = ix.indexrelid AND con.contype = 'u'
      WHERE t.relname = $1
        AND n.nspname = $2
        AND NOT ix.indisprimary
        AND NOT EXISTS (
-         SELECT 1 FROM pg_catalog.pg_constraint con
-         WHERE con.conindid = ix.indexrelid
-           AND con.contype IN ('u', 'x')
+         SELECT 1 FROM pg_catalog.pg_constraint excl
+         WHERE excl.conindid = ix.indexrelid
+           AND excl.contype = 'x'
        )
      ORDER BY i.relname`,
     [table, schema],
@@ -674,6 +694,13 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
     if (r.comment) idx.comment = r.comment as string;
     const includeCols = (r.include_cols as string[]).map((k) => stripQuotes(k.trim()));
     if (includeCols.length > 0) idx.include = includeCols;
+    if (idx.unique && r.nulls_not_distinct) idx.nulls_not_distinct = true;
+    if (r.is_constraint) {
+      idx.as_constraint = true;
+      if (r.is_deferrable) {
+        idx.deferrable = r.is_deferred ? 'initially_deferred' : 'initially_immediate';
+      }
+    }
     return idx;
   });
 }
@@ -1138,41 +1165,4 @@ async function getTableComment(client: Client, table: string, schema: string): P
   );
   const comment = result.rows[0]?.comment;
   return comment || undefined;
-}
-
-interface UniqueConstraintInfo {
-  constraint_name: string;
-  columns: string[];
-  nulls_not_distinct: boolean;
-}
-
-async function getUniqueConstraints(client: Client, table: string, schema: string): Promise<UniqueConstraintInfo[]> {
-  // Check if indnullsnotdistinct column exists (PostgreSQL 15+)
-  const pgVersionResult = await client.query('SHOW server_version_num');
-  const pgVersion = parseInt(pgVersionResult.rows[0].server_version_num as string, 10);
-  const hasNullsNotDistinct = pgVersion >= 150000;
-
-  const nullsNotDistinctExpr = hasNullsNotDistinct ? 'COALESCE(idx.indnullsnotdistinct, false)' : 'false';
-
-  const result = await client.query(
-    `SELECT con.conname AS constraint_name,
-            array_agg(a.attname::text ORDER BY array_position(con.conkey, a.attnum)) AS columns,
-            ${nullsNotDistinctExpr} AS nulls_not_distinct
-     FROM pg_catalog.pg_constraint con
-     JOIN pg_catalog.pg_class cls ON cls.oid = con.conrelid
-     JOIN pg_catalog.pg_namespace ns ON ns.oid = cls.relnamespace
-     JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ANY(con.conkey)
-     LEFT JOIN pg_catalog.pg_index idx ON idx.indexrelid = con.conindid
-     WHERE con.contype = 'u'
-       AND cls.relname = $1
-       AND ns.nspname = $2
-     GROUP BY con.conname, ${nullsNotDistinctExpr}
-     ORDER BY con.conname`,
-    [table, schema],
-  );
-  return result.rows.map((r: Record<string, unknown>) => ({
-    constraint_name: r.constraint_name as string,
-    columns: r.columns as string[],
-    nulls_not_distinct: r.nulls_not_distinct as boolean,
-  }));
 }

@@ -6,7 +6,7 @@ import type {
   IndexKey,
   IndexMethod,
   CheckDef,
-  UniqueConstraintDef,
+  DeferrableMode,
   ExclusionConstraintDef,
   ExclusionConstraintElement,
   TriggerDef,
@@ -75,11 +75,55 @@ function resolveComment(raw: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+/**
+ * Strict-key validation: throw if any field in `raw` isn't in `allowed`.
+ * Catches typos at parse time instead of silently ignoring unknown fields.
+ * Pass the full set of legal keys (including aliases like `description`).
+ */
+function checkKeys(raw: Record<string, unknown>, allowed: readonly string[], context: string): void {
+  const allowedSet = new Set(allowed);
+  const unknown = Object.keys(raw).filter((k) => !allowedSet.has(k));
+  if (unknown.length === 0) return;
+  const unknownList = unknown.map((k) => `"${k}"`).join(', ');
+  const allowedList = [...allowed].sort().join(', ');
+  throw new Error(`${context}: unknown field(s) ${unknownList}. Allowed: ${allowedList}`);
+}
+
 // ─── Column Parsing ─────────────────────────────────────────────
 
 const FK_ACTIONS: readonly ForeignKeyAction[] = ['CASCADE', 'SET NULL', 'SET DEFAULT', 'RESTRICT', 'NO ACTION'];
 
+const COLUMN_KEYS = [
+  'name',
+  'type',
+  'nullable',
+  'primary_key',
+  'unique',
+  'unique_name',
+  'default',
+  'check',
+  'comment',
+  'description',
+  'generated',
+  'references',
+  'expand',
+] as const;
+
+const FK_REF_KEYS = [
+  'table',
+  'column',
+  'name',
+  'schema',
+  'on_delete',
+  'on_update',
+  'deferrable',
+  'initially_deferred',
+] as const;
+
+const EXPAND_KEYS = ['from', 'transform', 'reverse', 'batch_size'] as const;
+
 function parseColumnDef(raw: Record<string, unknown>, context: string): ColumnDef {
+  checkKeys(raw, COLUMN_KEYS, context);
   const col: ColumnDef = {
     name: requireString(raw, 'name', context),
     type: requireString(raw, 'type', context),
@@ -97,6 +141,7 @@ function parseColumnDef(raw: Record<string, unknown>, context: string): ColumnDe
 
   if (raw.references != null) {
     const ref = raw.references as Record<string, unknown>;
+    checkKeys(ref, FK_REF_KEYS, `${context}.references`);
     const fk: ForeignKeyRef = {
       table: requireString(ref, 'table', `${context}.references`),
       column: requireString(ref, 'column', `${context}.references`),
@@ -114,6 +159,7 @@ function parseColumnDef(raw: Record<string, unknown>, context: string): ColumnDe
 
   if (raw.expand != null) {
     const exp = raw.expand as Record<string, unknown>;
+    checkKeys(exp, EXPAND_KEYS, `${context}.expand`);
     const expandDef: ExpandDef = {
       from: requireString(exp, 'from', `${context}.expand`),
       transform: requireString(exp, 'transform', `${context}.expand`),
@@ -130,7 +176,26 @@ function parseColumnDef(raw: Record<string, unknown>, context: string): ColumnDe
 
 const INDEX_METHODS: readonly IndexMethod[] = ['btree', 'gin', 'gist', 'hash', 'brin'];
 
+const INDEX_KEYS = [
+  'name',
+  'columns',
+  'unique',
+  'method',
+  'where',
+  'include',
+  'opclass',
+  'nulls_not_distinct',
+  'as_constraint',
+  'deferrable',
+  'comment',
+  'description',
+] as const;
+
+const INDEX_COLUMN_EXPR_KEYS = ['expression'] as const;
+const INDEX_COLUMN_BARE_KEYS = ['column', 'order', 'nulls'] as const;
+
 function parseIndexDef(raw: Record<string, unknown>, context: string): IndexDef {
+  checkKeys(raw, INDEX_KEYS, context);
   // Each `columns` entry is either a plain column name (string) or an object
   // with an `expression` field. Expressions let us declare functional /
   // coalescing indexes in YAML instead of dropping down to raw SQL.
@@ -140,6 +205,7 @@ function parseIndexDef(raw: Record<string, unknown>, context: string): IndexDef 
     if (entry && typeof entry === 'object') {
       const obj = entry as Record<string, unknown>;
       if ('expression' in obj) {
+        checkKeys(obj, INDEX_COLUMN_EXPR_KEYS, `${context}.columns[${i}]`);
         const expr = obj.expression;
         if (typeof expr !== 'string' || expr.trim().length === 0) {
           throw new Error(`${context}.columns[${i}]: 'expression' must be a non-empty string`);
@@ -147,6 +213,7 @@ function parseIndexDef(raw: Record<string, unknown>, context: string): IndexDef 
         return { expression: expr };
       }
       if ('column' in obj) {
+        checkKeys(obj, INDEX_COLUMN_BARE_KEYS, `${context}.columns[${i}]`);
         const col = obj.column;
         if (typeof col !== 'string' || col.trim().length === 0) {
           throw new Error(`${context}.columns[${i}]: 'column' must be a non-empty string`);
@@ -180,6 +247,74 @@ function parseIndexDef(raw: Record<string, unknown>, context: string): IndexDef 
   if (raw.where !== undefined) idx.where = String(raw.where);
   if (raw.include !== undefined) idx.include = raw.include as string[];
   if (raw.opclass !== undefined) idx.opclass = String(raw.opclass);
+  if (raw.nulls_not_distinct !== undefined) {
+    const nnd = Boolean(raw.nulls_not_distinct);
+    if (nnd && !idx.unique) {
+      throw new Error(
+        `${context}: "nulls_not_distinct" only applies to unique indexes; set "unique: true" or remove the field`,
+      );
+    }
+    idx.nulls_not_distinct = nnd;
+  }
+  if (raw.as_constraint !== undefined) {
+    const asC = Boolean(raw.as_constraint);
+    if (asC) {
+      if (!idx.unique) {
+        throw new Error(
+          `${context}: "as_constraint: true" requires "unique: true" — Postgres only wraps unique indexes in constraints`,
+        );
+      }
+      // PG restricts ALTER TABLE ADD CONSTRAINT … USING INDEX: bare columns
+      // only, no partial WHERE, btree only, default ordering. Reject loudly
+      // here rather than letting Postgres complain at apply time.
+      for (let i = 0; i < idx.columns.length; i++) {
+        const key = idx.columns[i];
+        if (typeof key === 'object' && 'expression' in key) {
+          throw new Error(`${context}.columns[${i}]: expression keys are not allowed on constraint-backed indexes`);
+        }
+        if (typeof key === 'object' && 'column' in key) {
+          if (key.order && key.order !== 'ASC') {
+            throw new Error(
+              `${context}.columns[${i}]: non-default column order is not allowed on constraint-backed indexes`,
+            );
+          }
+          if (key.nulls && key.nulls !== 'LAST') {
+            throw new Error(
+              `${context}.columns[${i}]: non-default nulls position is not allowed on constraint-backed indexes`,
+            );
+          }
+        }
+      }
+      if (idx.where) {
+        throw new Error(`${context}: "where" (partial index) is not allowed on constraint-backed indexes`);
+      }
+      if (idx.method && idx.method !== 'btree') {
+        throw new Error(`${context}: "method" must be btree on constraint-backed indexes`);
+      }
+      if (idx.opclass) {
+        throw new Error(`${context}: "opclass" is not allowed on constraint-backed indexes`);
+      }
+      idx.as_constraint = true;
+    }
+  }
+  if (raw.deferrable !== undefined) {
+    if (raw.deferrable === false) {
+      // explicit `deferrable: false` is a no-op — same as omitting it
+    } else {
+      const mode = String(raw.deferrable);
+      if (mode !== 'initially_immediate' && mode !== 'initially_deferred') {
+        throw new Error(
+          `${context}: "deferrable" must be "initially_immediate" or "initially_deferred" (got "${mode}")`,
+        );
+      }
+      if (!idx.as_constraint) {
+        throw new Error(
+          `${context}: "deferrable" requires "as_constraint: true" — Postgres only allows deferrable on constraints, not on bare indexes`,
+        );
+      }
+      idx.deferrable = mode as DeferrableMode;
+    }
+  }
   const idxComment = resolveComment(raw);
   if (idxComment !== undefined) idx.comment = idxComment;
   return idx;
@@ -191,7 +326,10 @@ const TRIGGER_TIMINGS: readonly TriggerTiming[] = ['BEFORE', 'AFTER', 'INSTEAD O
 const TRIGGER_EVENTS: readonly TriggerEvent[] = ['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'];
 const TRIGGER_FOR_EACH: readonly TriggerForEach[] = ['ROW', 'STATEMENT'];
 
+const TRIGGER_KEYS = ['name', 'timing', 'events', 'function', 'for_each', 'when', 'comment', 'description'] as const;
+
 function parseTriggerDef(raw: Record<string, unknown>, context: string): TriggerDef {
+  checkKeys(raw, TRIGGER_KEYS, context);
   const trig: TriggerDef = {
     name: requireString(raw, 'name', context),
     timing: validateEnum(String(raw.timing), TRIGGER_TIMINGS, 'timing', context),
@@ -212,7 +350,10 @@ function parseTriggerDef(raw: Record<string, unknown>, context: string): Trigger
 
 const POLICY_COMMANDS: readonly PolicyCommand[] = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'ALL'];
 
+const POLICY_KEYS = ['name', 'for', 'to', 'using', 'check', 'permissive', 'comment', 'description'] as const;
+
 function parsePolicyDef(raw: Record<string, unknown>, context: string): PolicyDef {
+  checkKeys(raw, POLICY_KEYS, context);
   const pol: PolicyDef = {
     name: requireString(raw, 'name', context),
     to: requireString(raw, 'to', context),
@@ -228,7 +369,11 @@ function parsePolicyDef(raw: Record<string, unknown>, context: string): PolicyDe
 
 // ─── Grant Parsing ──────────────────────────────────────────────
 
+const GRANT_KEYS = ['to', 'privileges', 'columns', 'with_grant_option'] as const;
+const FUNCTION_GRANT_KEYS = ['to', 'privileges'] as const;
+
 function parseGrantDef(raw: Record<string, unknown>, context: string): GrantDef {
+  checkKeys(raw, GRANT_KEYS, context);
   const grant: GrantDef = {
     to: requireString(raw, 'to', context),
     privileges: requireArray<string>(raw, 'privileges', context),
@@ -239,6 +384,7 @@ function parseGrantDef(raw: Record<string, unknown>, context: string): GrantDef 
 }
 
 function parseFunctionGrantDef(raw: Record<string, unknown>, context: string): FunctionGrantDef {
+  checkKeys(raw, FUNCTION_GRANT_KEYS, context);
   return {
     to: requireString(raw, 'to', context),
     privileges: requireArray<string>(raw, 'privileges', context),
@@ -247,7 +393,13 @@ function parseFunctionGrantDef(raw: Record<string, unknown>, context: string): F
 
 // ─── Check / Unique / Precheck Parsing ──────────────────────────
 
+const CHECK_KEYS = ['name', 'expression', 'comment', 'description'] as const;
+const EXCLUSION_KEYS = ['name', 'using', 'elements', 'where', 'comment', 'description'] as const;
+const EXCLUSION_ELEMENT_KEYS = ['column', 'operator'] as const;
+const PRECHECK_KEYS = ['name', 'query', 'message'] as const;
+
 function parseCheckDef(raw: Record<string, unknown>, context: string): CheckDef {
+  checkKeys(raw, CHECK_KEYS, context);
   const chk: CheckDef = {
     name: requireString(raw, 'name', context),
     expression: requireString(raw, 'expression', context),
@@ -257,23 +409,16 @@ function parseCheckDef(raw: Record<string, unknown>, context: string): CheckDef 
   return chk;
 }
 
-function parseUniqueConstraintDef(raw: Record<string, unknown>, context: string): UniqueConstraintDef {
-  const uc: UniqueConstraintDef = {
-    columns: requireArray<string>(raw, 'columns', context),
-  };
-  if (raw.name !== undefined) uc.name = String(raw.name);
-  if (raw.nulls_not_distinct !== undefined) uc.nulls_not_distinct = Boolean(raw.nulls_not_distinct);
-  const ucComment = resolveComment(raw);
-  if (ucComment !== undefined) uc.comment = ucComment;
-  return uc;
-}
-
 function parseExclusionConstraintDef(raw: Record<string, unknown>, context: string): ExclusionConstraintDef {
+  checkKeys(raw, EXCLUSION_KEYS, context);
   const rawElements = requireArray<Record<string, unknown>>(raw, 'elements', context);
-  const elements: ExclusionConstraintElement[] = rawElements.map((el, i) => ({
-    column: requireString(el, 'column', `${context}.elements[${i}]`),
-    operator: requireString(el, 'operator', `${context}.elements[${i}]`),
-  }));
+  const elements: ExclusionConstraintElement[] = rawElements.map((el, i) => {
+    checkKeys(el, EXCLUSION_ELEMENT_KEYS, `${context}.elements[${i}]`);
+    return {
+      column: requireString(el, 'column', `${context}.elements[${i}]`),
+      operator: requireString(el, 'operator', `${context}.elements[${i}]`),
+    };
+  });
   const def: ExclusionConstraintDef = { elements };
   if (raw.name !== undefined) def.name = String(raw.name);
   if (raw.using !== undefined) def.using = String(raw.using);
@@ -284,6 +429,7 @@ function parseExclusionConstraintDef(raw: Record<string, unknown>, context: stri
 }
 
 function parsePrecheckDef(raw: Record<string, unknown>, context: string): PrecheckDef {
+  checkKeys(raw, PRECHECK_KEYS, context);
   return {
     name: requireString(raw, 'name', context),
     query: requireString(raw, 'query', context),
@@ -293,9 +439,35 @@ function parsePrecheckDef(raw: Record<string, unknown>, context: string): Preche
 
 // ─── Top-level Parsers ──────────────────────────────────────────
 
+// `unique_constraints` is kept in the allowed set so the migration error
+// (below) fires with a useful message rather than the generic
+// `unknown field(s)` error from checkKeys.
+const TABLE_KEYS = [
+  'table',
+  'columns',
+  'primary_key',
+  'primary_key_name',
+  'indexes',
+  'checks',
+  'unique_constraints',
+  'exclusion_constraints',
+  'triggers',
+  'rls',
+  'force_rls',
+  'policies',
+  'grants',
+  'prechecks',
+  'seeds',
+  'seeds_on_conflict',
+  'mixins',
+  'comment',
+  'description',
+] as const;
+
 export function parseTable(yamlStr: string): TableSchema {
   const raw = parseYaml(yamlStr, { customTags: [sqlTag] }) as Record<string, unknown>;
   const ctx = 'table';
+  checkKeys(raw, TABLE_KEYS, ctx);
 
   const table: TableSchema = {
     table: requireString(raw, 'table', ctx),
@@ -312,10 +484,23 @@ export function parseTable(yamlStr: string): TableSchema {
     );
   if (raw.checks !== undefined)
     table.checks = (raw.checks as Record<string, unknown>[]).map((c, i) => parseCheckDef(c, `${ctx}.checks[${i}]`));
-  if (raw.unique_constraints !== undefined)
-    table.unique_constraints = (raw.unique_constraints as Record<string, unknown>[]).map((uc, i) =>
-      parseUniqueConstraintDef(uc, `${ctx}.unique_constraints[${i}]`),
+  if (raw.unique_constraints !== undefined) {
+    // The `unique_constraints:` section was unified into `indexes:` in
+    // schema-flow 0.8.0. Each former entry becomes an `indexes:` entry
+    // with `unique: true` and `as_constraint: true` (and the same name,
+    // columns, nulls_not_distinct, comment). Indexes-with-as_constraint
+    // also unlock `deferrable:` — see docs/PRD.md §8.3.
+    throw new Error(
+      `${ctx}: "unique_constraints:" was removed in schema-flow 0.8.0. ` +
+        `Move each entry under "indexes:" and add "unique: true" + "as_constraint: true". ` +
+        `Example:\n` +
+        `  indexes:\n` +
+        `    - name: uq_${table.table}_email\n` +
+        `      columns: [email]\n` +
+        `      unique: true\n` +
+        `      as_constraint: true`,
     );
+  }
   if (raw.exclusion_constraints !== undefined)
     table.exclusion_constraints = (raw.exclusion_constraints as Record<string, unknown>[]).map((ec, i) =>
       parseExclusionConstraintDef(ec, `${ctx}.exclusion_constraints[${i}]`),
@@ -356,9 +541,12 @@ export function parseTable(yamlStr: string): TableSchema {
   return table;
 }
 
+const ENUM_KEYS = ['name', 'values', 'comment', 'description'] as const;
+
 export function parseEnum(yamlStr: string): EnumSchema {
   const raw = parseYaml(yamlStr) as Record<string, unknown>;
   const ctx = 'enum';
+  checkKeys(raw, ENUM_KEYS, ctx);
 
   const enumComment = resolveComment(raw);
   return {
@@ -368,9 +556,31 @@ export function parseEnum(yamlStr: string): EnumSchema {
   };
 }
 
+const FUNCTION_KEYS = [
+  'name',
+  'language',
+  'returns',
+  'args',
+  'body',
+  'security',
+  'volatility',
+  'parallel',
+  'strict',
+  'leakproof',
+  'cost',
+  'rows',
+  'set',
+  'grants',
+  'comment',
+  'description',
+] as const;
+
+const FUNCTION_ARG_KEYS = ['name', 'type', 'mode', 'default'] as const;
+
 export function parseFunction(yamlStr: string): FunctionSchema {
   const raw = parseYaml(yamlStr) as Record<string, unknown>;
   const ctx = 'function';
+  checkKeys(raw, FUNCTION_KEYS, ctx);
 
   const SECURITY: readonly FunctionSecurity[] = ['invoker', 'definer'];
   const VOLATILITY: readonly FunctionVolatility[] = ['volatile', 'stable', 'immutable'];
@@ -386,6 +596,7 @@ export function parseFunction(yamlStr: string): FunctionSchema {
 
   if (raw.args !== undefined) {
     fn.args = (raw.args as Record<string, unknown>[]).map((a, i) => {
+      checkKeys(a, FUNCTION_ARG_KEYS, `${ctx}.args[${i}]`);
       const arg: FunctionArg = {
         name: requireString(a, 'name', `${ctx}.args[${i}]`),
         type: requireString(a, 'type', `${ctx}.args[${i}]`),
@@ -414,9 +625,21 @@ export function parseFunction(yamlStr: string): FunctionSchema {
   return fn;
 }
 
+const VIEW_KEYS = ['name', 'query', 'materialized', 'options', 'triggers', 'grants', 'comment', 'description'] as const;
+const MATERIALIZED_VIEW_KEYS = [
+  'name',
+  'query',
+  'materialized',
+  'indexes',
+  'grants',
+  'comment',
+  'description',
+] as const;
+
 export function parseView(yamlStr: string): ViewSchema | MaterializedViewSchema {
   const raw = parseYaml(yamlStr) as Record<string, unknown>;
   const ctx = 'view';
+  checkKeys(raw, raw.materialized === true ? MATERIALIZED_VIEW_KEYS : VIEW_KEYS, ctx);
 
   const name = requireString(raw, 'name', ctx);
   const query = requireString(raw, 'query', ctx);
@@ -453,9 +676,25 @@ export function parseView(yamlStr: string): ViewSchema | MaterializedViewSchema 
   return view;
 }
 
+const ROLE_KEYS = [
+  'role',
+  'login',
+  'superuser',
+  'createdb',
+  'createrole',
+  'inherit',
+  'bypassrls',
+  'replication',
+  'connection_limit',
+  'in',
+  'comment',
+  'description',
+] as const;
+
 export function parseRole(yamlStr: string): RoleSchema {
   const raw = parseYaml(yamlStr) as Record<string, unknown>;
   const ctx = 'role';
+  checkKeys(raw, ROLE_KEYS, ctx);
 
   const role: RoleSchema = {
     role: requireString(raw, 'role', ctx),
@@ -476,30 +715,47 @@ export function parseRole(yamlStr: string): RoleSchema {
   return role;
 }
 
+const EXTENSIONS_KEYS = ['extensions', 'schema_grants'] as const;
+const SCHEMA_GRANT_KEYS = ['to', 'schemas'] as const;
+
 export function parseExtensions(yamlStr: string): ExtensionsSchema {
   const raw = parseYaml(yamlStr) as Record<string, unknown>;
   const ctx = 'extensions';
+  checkKeys(raw, EXTENSIONS_KEYS, ctx);
 
   const ext: ExtensionsSchema = {
     extensions: requireArray<string>(raw, 'extensions', ctx),
   };
 
   if (raw.schema_grants !== undefined) {
-    ext.schema_grants = (raw.schema_grants as Record<string, unknown>[]).map(
-      (sg, i) =>
-        ({
-          to: requireString(sg, 'to', `${ctx}.schema_grants[${i}]`),
-          schemas: requireArray<string>(sg, 'schemas', `${ctx}.schema_grants[${i}]`),
-        }) satisfies SchemaGrant,
-    );
+    ext.schema_grants = (raw.schema_grants as Record<string, unknown>[]).map((sg, i) => {
+      checkKeys(sg, SCHEMA_GRANT_KEYS, `${ctx}.schema_grants[${i}]`);
+      return {
+        to: requireString(sg, 'to', `${ctx}.schema_grants[${i}]`),
+        schemas: requireArray<string>(sg, 'schemas', `${ctx}.schema_grants[${i}]`),
+      } satisfies SchemaGrant;
+    });
   }
 
   return ext;
 }
 
+const MIXIN_KEYS = [
+  'mixin',
+  'columns',
+  'indexes',
+  'checks',
+  'triggers',
+  'policies',
+  'grants',
+  'rls',
+  'force_rls',
+] as const;
+
 export function parseMixin(yamlStr: string): MixinSchema {
   const raw = parseYaml(yamlStr) as Record<string, unknown>;
   const ctx = 'mixin';
+  checkKeys(raw, MIXIN_KEYS, ctx);
 
   const mixin: MixinSchema = {
     mixin: requireString(raw, 'mixin', ctx),

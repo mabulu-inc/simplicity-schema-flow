@@ -13,7 +13,6 @@ import type {
   ColumnDef,
   IndexDef,
   CheckDef,
-  UniqueConstraintDef,
   ExclusionConstraintDef,
   TriggerDef,
   PolicyDef,
@@ -275,11 +274,11 @@ function driftTables(desired: TableSchema[], actual: Map<string, TableSchema>): 
       items.push(...driftCompositePk(dt.table, dt, at));
       items.push(...driftColumns(dt.table, dt.columns, at.columns));
       items.push(...driftForeignKeys(dt.table, dt.columns, at.columns));
+      // driftIndexes covers both plain unique indexes and constraint-backed
+      // ones (`as_constraint: true`). No separate driftUniqueConstraints —
+      // the unification happens at the data-model level.
       items.push(...driftIndexes(dt.table, dt.indexes || [], at.indexes || [], dt.columns));
       items.push(...driftChecks(dt.table, dt.checks || [], at.checks || []));
-      items.push(
-        ...driftUniqueConstraints(dt.table, dt.unique_constraints || [], at.unique_constraints || [], dt.columns),
-      );
       items.push(
         ...driftExclusionConstraints(dt.table, dt.exclusion_constraints || [], at.exclusion_constraints || []),
       );
@@ -483,10 +482,11 @@ function driftIndexes(table: string, desired: IndexDef[], actual: IndexDef[], co
     if (idx.name) actualByName.set(idx.name, idx);
   }
 
-  // Build set of constraint names managed at the column level (unique: true).
-  // Constraint-backed indexes are filtered out by introspection, so an explicit
-  // index entry whose name matches a column-level unique constraint is satisfied
-  // by that constraint and should not be reported as missing.
+  // Build set of constraint names managed at the column level (`unique: true`
+  // on a ColumnDef). The introspector surfaces single-column uniques as a
+  // column-level flag rather than as an `indexes:` entry, so a desired
+  // `indexes:` entry whose name matches one is satisfied by the column-level
+  // constraint and not reported as missing.
   const columnLevelUniqueNames = new Set<string>();
   for (const col of columns) {
     if (col.unique) {
@@ -494,24 +494,36 @@ function driftIndexes(table: string, desired: IndexDef[], actual: IndexDef[], co
     }
   }
 
+  // Whether to report as a 'constraint' or 'index' drift item — preserves
+  // the pre-unification semantic distinction. as_constraint indexes are
+  // surfaced as constraints (since that's what they are in PG), the rest
+  // as plain indexes.
+  const itemType = (idx: IndexDef): 'index' | 'constraint' =>
+    idx.unique && idx.as_constraint ? 'constraint' : 'index';
+  const objectName = (idx: IndexDef, name: string): string =>
+    itemType(idx) === 'constraint' ? `${table}.${name}` : name;
+
   for (const idx of desired) {
     const name = idx.name || defaultIndexName(table, idx);
     if (columnLevelUniqueNames.has(name)) continue;
     const ai = actualByName.get(name);
     if (!ai) {
-      items.push({ type: 'index', object: name, status: 'missing_in_db' });
+      items.push({ type: itemType(idx), object: objectName(idx, name), status: 'missing_in_db' });
     } else {
       const diffs: string[] = [];
       if (indexKeysIdentity(idx) !== indexKeysIdentity(ai)) diffs.push('columns');
       if (Boolean(idx.unique) !== Boolean(ai.unique)) diffs.push('unique');
       if ((idx.method || 'btree') !== (ai.method || 'btree')) diffs.push('method');
       if (normalizeIndexClause(idx.where) !== normalizeIndexClause(ai.where)) diffs.push('where');
+      if (Boolean(idx.nulls_not_distinct) !== Boolean(ai.nulls_not_distinct)) diffs.push('nulls_not_distinct');
+      if (Boolean(idx.as_constraint) !== Boolean(ai.as_constraint)) diffs.push('as_constraint');
+      if ((idx.deferrable || null) !== (ai.deferrable || null)) diffs.push('deferrable');
       if (diffs.length > 0) {
         items.push({
-          type: 'index',
-          object: name,
+          type: itemType(idx),
+          object: objectName(idx, name),
           status: 'different',
-          detail: `Index differs: ${diffs.join(', ')}`,
+          detail: `${itemType(idx) === 'constraint' ? 'Constraint' : 'Index'} differs: ${diffs.join(', ')}`,
         });
       }
     }
@@ -520,7 +532,7 @@ function driftIndexes(table: string, desired: IndexDef[], actual: IndexDef[], co
   const desiredNames = new Set(desired.map((idx) => idx.name || defaultIndexName(table, idx)));
   for (const idx of actual) {
     if (idx.name && !desiredNames.has(idx.name)) {
-      items.push({ type: 'index', object: idx.name, status: 'missing_in_yaml' });
+      items.push({ type: itemType(idx), object: objectName(idx, idx.name), status: 'missing_in_yaml' });
     }
   }
   return items;
@@ -812,44 +824,6 @@ function driftForeignKeys(table: string, desired: ColumnDef[], actual: ColumnDef
           detail: `FK name differs: expected ${dRef.name}, actual ${aRef.name ?? '(default)'}`,
         });
       }
-    }
-  }
-  return items;
-}
-
-// ─── Unique Constraints ─────────────────────────────────────────
-
-function driftUniqueConstraints(
-  table: string,
-  desired: UniqueConstraintDef[],
-  actual: UniqueConstraintDef[],
-  desiredColumns: ColumnDef[],
-): DriftItem[] {
-  const items: DriftItem[] = [];
-  const getName = (uc: UniqueConstraintDef) => uc.name || `${table}_${uc.columns.join('_')}_key`;
-  const actualByName = new Map(actual.map((uc) => [getName(uc), uc]));
-
-  // Build set of constraint names managed at the column level (unique: true).
-  // These are NOT in the unique_constraints array but exist in the DB as real constraints.
-  const columnLevelUniqueNames = new Set<string>();
-  for (const col of desiredColumns) {
-    if (col.unique) {
-      columnLevelUniqueNames.add(col.unique_name || `${table}_${col.name}_key`);
-    }
-  }
-
-  for (const uc of desired) {
-    const name = getName(uc);
-    if (!actualByName.has(name)) {
-      items.push({ type: 'constraint', object: `${table}.${name}`, status: 'missing_in_db' });
-    }
-  }
-
-  const desiredNames = new Set(desired.map(getName));
-  for (const uc of actual) {
-    const name = getName(uc);
-    if (!desiredNames.has(name) && !columnLevelUniqueNames.has(name)) {
-      items.push({ type: 'constraint', object: `${table}.${name}`, status: 'missing_in_yaml' });
     }
   }
   return items;

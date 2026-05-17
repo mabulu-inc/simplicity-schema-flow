@@ -69,6 +69,8 @@ export interface IndexColumn {
 
 export type IndexKey = string | { expression: string } | IndexColumn;
 
+export type DeferrableMode = 'initially_immediate' | 'initially_deferred';
+
 export interface IndexDef {
   name?: string;
   /**
@@ -82,6 +84,31 @@ export interface IndexDef {
   where?: string;
   include?: string[];
   opclass?: string;
+  /**
+   * Only meaningful when `unique: true`. When set, the unique index treats
+   * NULL values as equal for the purpose of uniqueness enforcement, so a
+   * second row with the same NULLs in the indexed columns conflicts.
+   * Postgres ≥15.
+   */
+  nulls_not_distinct?: boolean;
+  /**
+   * When true, the unique index is also wrapped in a `pg_constraint` row
+   * (i.e. emitted as a `UNIQUE` constraint backed by this index). Required
+   * for `deferrable:` and for canonical FK target naming. Requires
+   * `unique: true`, btree, no partial `where:`, no expression keys, and no
+   * non-default column ordering — these are PG's restrictions on
+   * `ALTER TABLE ADD CONSTRAINT ... USING INDEX`.
+   */
+  as_constraint?: boolean;
+  /**
+   * Defer the constraint check from per-statement to commit-time. Requires
+   * `as_constraint: true` (bare unique indexes cannot be deferred). Values:
+   *  - `initially_immediate`: deferrable but checked immediately by default;
+   *    transactions can opt in with `SET CONSTRAINTS … DEFERRED`.
+   *  - `initially_deferred`: checked at COMMIT by default; transactions can
+   *    re-enable immediate checking with `SET CONSTRAINTS … IMMEDIATE`.
+   */
+  deferrable?: DeferrableMode;
   comment?: string;
 }
 
@@ -90,15 +117,6 @@ export interface IndexDef {
 export interface CheckDef {
   name: string;
   expression: string;
-  comment?: string;
-}
-
-// ─── Unique Constraint ──────────────────────────────────────────
-
-export interface UniqueConstraintDef {
-  columns: string[];
-  name?: string;
-  nulls_not_distinct?: boolean;
   comment?: string;
 }
 
@@ -196,7 +214,6 @@ export interface TableSchema {
   primary_key_name?: string;
   indexes?: IndexDef[];
   checks?: CheckDef[];
-  unique_constraints?: UniqueConstraintDef[];
   exclusion_constraints?: ExclusionConstraintDef[];
   triggers?: TriggerDef[];
   rls?: boolean;

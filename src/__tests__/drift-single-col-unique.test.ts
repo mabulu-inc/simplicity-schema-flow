@@ -119,7 +119,7 @@ columns:
     expect(related).toHaveLength(0);
   });
 
-  it('reports no constraint/index drift for multi-column unique_constraints (no regression)', async () => {
+  it('reports no constraint/index drift for multi-column constraint-backed unique indexes (no regression)', async () => {
     const desired = parseTable(`
 table: drift_uq_multi
 columns:
@@ -133,9 +133,11 @@ columns:
   - name: last_name
     type: text
     nullable: false
-unique_constraints:
+indexes:
   - name: uq_drift_multi_name
     columns: [first_name, last_name]
+    unique: true
+    as_constraint: true
 `);
 
     const desiredState: DesiredState = { ...emptyDesired(), tables: [desired] };

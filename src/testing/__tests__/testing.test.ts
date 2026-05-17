@@ -113,7 +113,7 @@ columns:
 columns:
   - name: id
     type: serial
-    primaryKey: true
+    primary_key: true
   - name: name
     type: text
 `,
