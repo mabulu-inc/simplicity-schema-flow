@@ -306,24 +306,65 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     executedOperations: [],
   };
 
-  // Dry-run: just log what would happen
+  // Dry-run: populate the result with what would happen and let the caller
+  // (reportMigrationResult) render it. We don't log per-op or per-script
+  // lines here — that path used to dump full SQL for every operation,
+  // which made `plan` output unreadable for non-trivial migrations.
+  //
+  // Pre/post scripts are filtered by content hash so the plan matches what
+  // a real run would do. Probe the history table read-only (to_regclass)
+  // rather than calling ensureHistoryTable so `plan` against a fresh DB
+  // has no side effects.
   if (dryRun) {
     if (perTxSqlPath) {
-      logger?.info(`[dry-run] Would inject per-tx SQL into every transaction: ${perTxSqlPath}`);
+      logger?.debug(`[dry-run] Would inject per-tx SQL into every transaction: ${perTxSqlPath}`);
     }
-    for (const script of preScripts) {
-      logger?.info(`[dry-run] Would run pre-script: ${script.relativePath}`);
+
+    let historyClient: pg.PoolClient | null = null;
+    let historyExists = false;
+    if (preScripts.length > 0 || postScripts.length > 0) {
+      historyClient = await acquireClient(connectionString, { pgSchema });
+      const probe = await historyClient.query(`SELECT to_regclass('_smplcty_schema_flow.history') AS reg`);
+      historyExists = probe.rows[0].reg !== null;
     }
-    const dryRunMain = operations.filter((op) => op.type !== 'tighten_not_null');
-    const dryRunTighten = operations.filter((op) => op.type === 'tighten_not_null');
-    for (const op of dryRunMain) {
-      logger?.info(`[dry-run] ${op.type} ${op.objectName}: ${op.sql}`);
-    }
-    for (const script of postScripts) {
-      logger?.info(`[dry-run] Would run post-script: ${script.relativePath}`);
-    }
-    for (const op of dryRunTighten) {
-      logger?.info(`[dry-run] ${op.type} ${op.objectName}: ${op.sql}`);
+
+    try {
+      for (const script of preScripts) {
+        const wouldRun =
+          !historyExists || (await fileNeedsApply(historyClient!, script.relativePath, script.hash, pgSchema));
+        if (wouldRun) {
+          result.preScriptsRun++;
+        } else {
+          result.skippedScripts++;
+        }
+      }
+
+      // Tighten ops run after post-scripts in the live path; preserve that
+      // order in the plan so the output reads chronologically.
+      const dryRunMain = operations.filter((op) => op.type !== 'tighten_not_null');
+      const dryRunTighten = operations.filter((op) => op.type === 'tighten_not_null');
+
+      for (const op of dryRunMain) {
+        result.executed++;
+        result.executedOperations.push(op);
+      }
+
+      for (const script of postScripts) {
+        const wouldRun =
+          !historyExists || (await fileNeedsApply(historyClient!, script.relativePath, script.hash, pgSchema));
+        if (wouldRun) {
+          result.postScriptsRun++;
+        } else {
+          result.skippedScripts++;
+        }
+      }
+
+      for (const op of dryRunTighten) {
+        result.executed++;
+        result.executedOperations.push(op);
+      }
+    } finally {
+      historyClient?.release();
     }
     return result;
   }

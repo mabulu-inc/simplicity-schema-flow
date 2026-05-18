@@ -115,7 +115,11 @@ export async function runPipeline(
       }
     }
 
-    logger.info(`Plan: ${operations.length} operations (${blocked.length} blocked)`);
+    // In dry-run (plan) the report renders its own "Plan:" summary, so
+    // skip this line to avoid two redundant "Plan:" headers.
+    if (!config.dryRun) {
+      logger.info(`Plan: ${operations.length} operations (${blocked.length} blocked)`);
+    }
   }
 
   // Re-plan against the post-pre-script DB state. Pre-scripts can mutate the

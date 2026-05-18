@@ -165,7 +165,12 @@ describe('Executor', () => {
         logger,
       });
 
-      expect(result.executed).toBe(0);
+      // executed/executedOperations represent "operations the executor
+      // processed" — in dry-run that's what would run, so the report can
+      // render them uniformly with the live path. The DB check below is
+      // what actually proves nothing was applied.
+      expect(result.executed).toBe(1);
+      expect(result.executedOperations).toHaveLength(1);
       expect(result.dryRun).toBe(true);
 
       const pool = getPool(DATABASE_URL);
@@ -1072,6 +1077,98 @@ describe('Executor', () => {
       expect(result2.skippedScripts).toBe(1);
 
       await fs.rm(tmpDir, { recursive: true });
+    });
+
+    it('dry-run should skip pre/post scripts whose hash matches history', async () => {
+      const fs = await import('node:fs/promises');
+      const os = await import('node:os');
+      const path = await import('node:path');
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'executor-test-'));
+      const preSqlPath = path.join(tmpDir, 'pre.sql');
+      const postSqlPath = path.join(tmpDir, 'post.sql');
+      const changedSqlPath = path.join(tmpDir, 'pre-changed.sql');
+      await fs.writeFile(preSqlPath, `SELECT 1`);
+      await fs.writeFile(postSqlPath, `SELECT 2`);
+      await fs.writeFile(changedSqlPath, `SELECT 3`);
+
+      const { hashFile } = await import('../../core/files.js');
+      const preHash = await hashFile(preSqlPath);
+      const postHash = await hashFile(postSqlPath);
+      const changedHash = await hashFile(changedSqlPath);
+
+      const preRel = `pre/${testSchema}_dryskip_pre.sql`;
+      const postRel = `post/${testSchema}_dryskip_post.sql`;
+      const changedRel = `pre/${testSchema}_dryskip_changed.sql`;
+
+      // First, apply both pre and post for real so they're recorded in history.
+      const liveResult = await execute({
+        connectionString: DATABASE_URL,
+        operations: [],
+        preScripts: [{ relativePath: preRel, absolutePath: preSqlPath, phase: 'pre', hash: preHash }],
+        postScripts: [{ relativePath: postRel, absolutePath: postSqlPath, phase: 'post', hash: postHash }],
+        logger,
+      });
+      expect(liveResult.preScriptsRun).toBe(1);
+      expect(liveResult.postScriptsRun).toBe(1);
+
+      // Now dry-run with one unchanged pre, one unchanged post, and one
+      // unrecorded (new) pre script. Only the new one should be reported
+      // as "would run"; the other two should count as skipped.
+      const dryResult = await execute({
+        connectionString: DATABASE_URL,
+        operations: [],
+        preScripts: [
+          { relativePath: preRel, absolutePath: preSqlPath, phase: 'pre', hash: preHash },
+          { relativePath: changedRel, absolutePath: changedSqlPath, phase: 'pre', hash: changedHash },
+        ],
+        postScripts: [{ relativePath: postRel, absolutePath: postSqlPath, phase: 'post', hash: postHash }],
+        dryRun: true,
+        logger,
+      });
+
+      expect(dryResult.dryRun).toBe(true);
+      // The two unchanged scripts (preRel, postRel) get skipped by hash;
+      // the new changedRel pre-script counts as would-run.
+      expect(dryResult.skippedScripts).toBe(2);
+      expect(dryResult.preScriptsRun).toBe(1);
+      expect(dryResult.postScriptsRun).toBe(0);
+
+      await fs.rm(tmpDir, { recursive: true });
+    });
+
+    it('dry-run against a fresh DB (no history table) should report all scripts as would-run', async () => {
+      const fs = await import('node:fs/promises');
+      const os = await import('node:os');
+      const path = await import('node:path');
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'executor-test-'));
+      const preSqlPath = path.join(tmpDir, 'pre.sql');
+      await fs.writeFile(preSqlPath, `SELECT 1`);
+
+      const { hashFile } = await import('../../core/files.js');
+      const hash = await hashFile(preSqlPath);
+
+      // Use a throwaway schema so the global history table doesn't pollute
+      // the assertion. The probe checks `to_regclass`, which is a global
+      // schema lookup, so we can't really hide an existing history table
+      // here — but a non-matching hash for a never-recorded file still
+      // produces wouldRun=true regardless.
+      const dryResult = await execute({
+        connectionString: DATABASE_URL,
+        operations: [],
+        preScripts: [
+          {
+            relativePath: `pre/${testSchema}_never_recorded.sql`,
+            absolutePath: preSqlPath,
+            phase: 'pre',
+            hash,
+          },
+        ],
+        dryRun: true,
+        logger,
+      });
+
+      expect(dryResult.skippedScripts).toBe(0);
+      expect(dryResult.preScriptsRun).toBe(1);
     });
 
     it('should execute post-scripts after operations', async () => {

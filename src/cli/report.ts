@@ -13,13 +13,19 @@ export interface ReportOptions {
   operations: Operation[];
   mode: VerbosityMode;
   write: (msg: string) => void;
+  /**
+   * Render as a plan preview rather than a completion summary: present-tense
+   * verbs ("Create table" not "Created table"), a "Plan:" header, and SQL
+   * dumped under each op in verbose mode for review.
+   */
+  dryRun?: boolean;
 }
 
 export function reportMigrationResult(options: ReportOptions): void {
-  const { result, operations, mode, write } = options;
+  const { result, operations, mode, write, dryRun = false } = options;
 
   // Quiet mode: nothing on zero changes
-  if (mode === 'quiet' && result.executed === 0 && result.preScriptsRun === 0 && result.postScriptsRun === 0) {
+  if (mode === 'quiet' && operations.length === 0 && result.preScriptsRun === 0 && result.postScriptsRun === 0) {
     return;
   }
 
@@ -29,19 +35,29 @@ export function reportMigrationResult(options: ReportOptions): void {
   if (mode === 'default' || mode === 'verbose') {
     for (const op of operations) {
       if (mode === 'default' && isNoOpSeed(op)) continue;
-      write(`  ${formatOperationMessage(op)}`);
+      write(`  ${formatOperationMessage(op, { dryRun })}`);
+      if (dryRun && mode === 'verbose') {
+        for (const line of op.sql.split('\n')) {
+          write(`      ${line}`);
+        }
+      }
     }
   }
 
   // Summary line
-  write(`Migration complete: ${result.executed} operations executed`);
+  const opCount = operations.length;
+  if (dryRun) {
+    write(`Plan: ${opCount} operation${opCount === 1 ? '' : 's'} would execute`);
+  } else {
+    write(`Migration complete: ${result.executed} operations executed`);
+  }
 
   // Script counts
   if (result.preScriptsRun > 0) {
-    write(`  Pre-scripts: ${result.preScriptsRun}`);
+    write(`  Pre-scripts: ${result.preScriptsRun}${dryRun ? ' (would run)' : ''}`);
   }
   if (result.postScriptsRun > 0) {
-    write(`  Post-scripts: ${result.postScriptsRun}`);
+    write(`  Post-scripts: ${result.postScriptsRun}${dryRun ? ' (would run)' : ''}`);
   }
   if (result.skippedScripts > 0) {
     write(`  Skipped (unchanged): ${result.skippedScripts}`);

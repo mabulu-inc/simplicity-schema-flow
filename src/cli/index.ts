@@ -132,6 +132,14 @@ async function main(): Promise<void> {
 
         if (config.json) {
           console.log(JSON.stringify(result, null, 2));
+        } else {
+          reportMigrationResult({
+            result,
+            operations: result.executedOperations,
+            mode: verbosity,
+            write: (msg) => logger.info(msg),
+            dryRun: true,
+          });
         }
         break;
       }

@@ -76,6 +76,67 @@ const DESCRIPTIONS: Record<OperationType, string> = {
   tighten_not_null: 'Tightened NOT NULL',
 };
 
+// Present-tense variants used by `plan` output, where nothing has happened yet
+// and past-tense reads as a false completion claim.
+const PRESENT_DESCRIPTIONS: Record<OperationType, string> = {
+  create_table: 'Create table',
+  drop_table: 'Drop table',
+  add_column: 'Add column',
+  alter_column: 'Alter column',
+  drop_column: 'Drop column',
+  add_index: 'Add index',
+  drop_index: 'Drop index',
+  add_check: 'Add check',
+  add_check_not_valid: 'Add check (NOT VALID)',
+  drop_check: 'Drop check',
+  add_foreign_key: 'Add foreign key',
+  add_foreign_key_not_valid: 'Add foreign key (NOT VALID)',
+  validate_constraint: 'Validate constraint',
+  drop_foreign_key: 'Drop foreign key',
+  add_unique_constraint: 'Add unique constraint',
+  drop_unique_constraint: 'Drop unique constraint',
+  add_exclusion_constraint: 'Add exclusion constraint',
+  drop_exclusion_constraint: 'Drop exclusion constraint',
+  create_enum: 'Create enum',
+  add_enum_value: 'Add enum value',
+  remove_enum_value: 'Remove enum value',
+  create_function: 'Create function',
+  create_trigger: 'Create trigger',
+  drop_trigger: 'Drop trigger',
+  enable_rls: 'Enable RLS',
+  disable_rls: 'Disable RLS',
+  force_rls: 'Force RLS',
+  disable_force_rls: 'Disable force RLS',
+  create_policy: 'Apply policy',
+  drop_policy: 'Drop policy',
+  create_view: 'Create view',
+  drop_view: 'Drop view',
+  create_materialized_view: 'Create materialized view',
+  drop_materialized_view: 'Drop materialized view',
+  refresh_materialized_view: 'Refresh materialized view',
+  create_extension: 'Create extension',
+  drop_extension: 'Drop extension',
+  create_role: 'Create role',
+  alter_role: 'Alter role',
+  grant_table: 'Grant',
+  grant_column: 'Grant',
+  revoke_table: 'Revoke',
+  revoke_column: 'Revoke',
+  grant_function: 'Grant',
+  revoke_function: 'Revoke',
+  grant_membership: 'Grant membership',
+  grant_schema: 'Grant schema',
+  grant_sequence: 'Grant',
+  revoke_sequence: 'Revoke',
+  run_precheck: 'Run precheck',
+  expand_column: 'Expand column',
+  create_dual_write_trigger: 'Create dual-write trigger',
+  set_comment: 'Set comment',
+  add_seed: 'Seed',
+  seed_table: 'Seed',
+  tighten_not_null: 'Tighten NOT NULL',
+};
+
 const GRANT_REVOKE_TYPES = new Set<OperationType>([
   'grant_table',
   'grant_column',
@@ -87,8 +148,8 @@ const GRANT_REVOKE_TYPES = new Set<OperationType>([
   'revoke_sequence',
 ]);
 
-export function formatOperationMessage(op: Operation): string {
-  const prefix = DESCRIPTIONS[op.type];
+export function formatOperationMessage(op: Operation, options: { dryRun?: boolean } = {}): string {
+  const prefix = (options.dryRun ? PRESENT_DESCRIPTIONS : DESCRIPTIONS)[op.type];
   if (op.type === 'seed_table' && op.seedResult) {
     const parts: string[] = [];
     if (op.seedResult.inserted > 0) parts.push(`${op.seedResult.inserted} inserted`);
