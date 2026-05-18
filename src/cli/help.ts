@@ -127,6 +127,8 @@ Examples:
 
 Performs a dry-run and displays the operations that would be executed without making any changes.
 
+Default output shows one line per planned operation plus a summary. Use --verbose to inline the SQL under each operation, or --json for machine-readable output. Unchanged pre/post scripts (whose recorded hash matches) are reported as skipped, mirroring what run would actually do.
+
 Usage: schema-flow plan [options]
 
 Options:
@@ -135,7 +137,9 @@ ${COMMON_DB_FLAGS}
 
 Examples:
   schema-flow plan
-  schema-flow plan --db postgres://localhost/mydb --verbose`,
+  schema-flow plan --verbose
+  schema-flow plan --json
+  schema-flow plan --db postgres://localhost/mydb`,
 
   validate: `schema-flow validate — Validate SQL in a rollback transaction
 

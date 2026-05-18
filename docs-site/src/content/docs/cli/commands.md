@@ -33,8 +33,12 @@ Run only post-scripts (SQL files in `schema/post/`).
 
 Dry-run. Shows planned operations without executing. Equivalent to `run --dry-run`.
 
+Default output shows one line per planned operation plus a `Plan: N operations would execute` summary. Use `--verbose` to inline the SQL under each operation, or `--json` for machine-readable output. Unchanged pre/post scripts (whose recorded hash matches) are reported as skipped, mirroring what `run` would actually do.
+
 ```bash
 npx @smplcty/schema-flow plan --db postgresql://user:pass@localhost:5432/mydb
+npx @smplcty/schema-flow plan --verbose
+npx @smplcty/schema-flow plan --json
 ```
 
 ### `schema-flow validate`
