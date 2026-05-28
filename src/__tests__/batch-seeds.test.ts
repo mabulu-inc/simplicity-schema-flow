@@ -454,6 +454,55 @@ describe('Batch seeds — executor', () => {
     }
   });
 
+  it('keeps distinct SQL expressions per row on the same column (#49)', async () => {
+    const ops: Operation[] = [
+      {
+        type: 'create_table',
+        phase: 6,
+        objectName: 'system_settings',
+        sql: `CREATE TABLE "${testSchema}"."system_settings" ("key" varchar(50) PRIMARY KEY, "value" jsonb NOT NULL)`,
+        destructive: false,
+      },
+      {
+        type: 'seed_table',
+        phase: 15,
+        objectName: 'system_settings',
+        sql: '',
+        destructive: false,
+        seedRows: [
+          { key: 'default_delay_reasons', value: { __sql: `'["Customer not ready","Late truck arrival"]'::jsonb` } },
+          { key: 'eroad_host', value: { __sql: `'""'::jsonb` } },
+        ],
+        seedColumns: [
+          { name: 'key', type: 'varchar(50)' },
+          { name: 'value', type: 'jsonb' },
+        ],
+        seedMatchColumns: ['key'],
+      },
+    ];
+
+    const result = await execute({
+      connectionString: DATABASE_URL,
+      operations: ops,
+      pgSchema: testSchema,
+      logger,
+    });
+
+    expect(result.executed).toBe(2);
+
+    const pool = getPool(DATABASE_URL);
+    const client = await pool.connect();
+    try {
+      const res = await client.query(`SELECT key, value FROM "${testSchema}"."system_settings" ORDER BY key`);
+      expect(res.rows).toEqual([
+        { key: 'default_delay_reasons', value: ['Customer not ready', 'Late truck arrival'] },
+        { key: 'eroad_host', value: '' },
+      ]);
+    } finally {
+      client.release();
+    }
+  });
+
   it('handles seeds with uuid primary keys', async () => {
     const ops: Operation[] = [
       {

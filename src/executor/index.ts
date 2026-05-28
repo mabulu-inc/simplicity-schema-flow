@@ -207,12 +207,13 @@ async function executeSeedTable(client: pg.PoolClient, op: Operation, pgSchema: 
   const colExtractions = seedColumns.map((col) => {
     const sqlExprs = sqlExpressions.get(col.name);
     if (sqlExprs) {
-      if (sqlExprs.size === seedRows.length) {
-        // All rows have the same SQL expression — just use it directly
-        const expr = sqlExprs.values().next().value;
+      const distinct = new Set(sqlExprs.values());
+      if (sqlExprs.size === seedRows.length && distinct.size === 1) {
+        // Every row uses the *same* SQL expression — emit it once for the column.
+        const expr = distinct.values().next().value;
         return `${expr} AS "${col.name}"`;
       }
-      // Mixed: use CASE with row index
+      // Mixed (some rows literal, or differing expressions): use CASE with row index
       const cases = [...sqlExprs.entries()]
         .map(([idx, expr]) => `WHEN (elem->>'_idx')::integer = ${idx} THEN ${expr}`)
         .join(' ');
