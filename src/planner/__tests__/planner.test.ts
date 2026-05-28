@@ -330,6 +330,62 @@ describe('Planner', () => {
       expect(ops).toHaveLength(1);
       expect(ops[0].sql).toContain('CONNECTION LIMIT 50');
     });
+
+    it('creates a membership parent before its child (#50)', () => {
+      const desired = emptyDesired();
+      // Child declared first in the file; topo order must still create the parent first.
+      desired.roles = [{ role: 'app_admin', in: ['app_user'] }, { role: 'app_user' }];
+      const result = buildPlan(desired, emptyActual());
+      const createNames = findOps(result.operations, 'create_role').map((o) => o.objectName);
+      expect(createNames).toEqual(['app_user', 'app_admin']);
+      // The grant must come after both creates.
+      const grant = findOps(result.operations, 'grant_membership');
+      expect(grant).toHaveLength(1);
+      expect(grant[0].sql).toContain('GRANT "app_user" TO "app_admin"');
+    });
+
+    it('rejects a cyclic member_of graph at plan time, naming the cycle (#50)', () => {
+      const desired = emptyDesired();
+      desired.roles = [
+        { role: 'a', in: ['b'] },
+        { role: 'b', in: ['a'] },
+      ];
+      expect(() => buildPlan(desired, emptyActual())).toThrow(/membership cycle/i);
+      expect(() => buildPlan(desired, emptyActual())).toThrow(/a → b → a/);
+    });
+
+    it('revokes a membership that is no longer declared (#50)', () => {
+      const desired = emptyDesired();
+      desired.roles = [{ role: 'group_a' }, { role: 'app_user', in: ['group_a'] }];
+      const actual = emptyActual();
+      actual.roles.set('group_a', { role: 'group_a' });
+      actual.roles.set('app_user', { role: 'app_user', in: ['group_a', 'group_b'] });
+      const result = buildPlan(desired, actual, { allowDestructive: true });
+      const ops = findOps(result.operations, 'revoke_membership');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toContain('REVOKE "group_b" FROM "app_user"');
+      expect(ops[0].objectName).toBe('app_user.group_b');
+    });
+
+    it('blocks membership revoke when allowDestructive is false (#50)', () => {
+      const desired = emptyDesired();
+      desired.roles = [{ role: 'app_user', in: [] }];
+      const actual = emptyActual();
+      actual.roles.set('app_user', { role: 'app_user', in: ['group_b'] });
+      const result = buildPlan(desired, actual);
+      expect(findOps(result.operations, 'revoke_membership')).toHaveLength(0);
+      expect(findOps(result.blocked, 'revoke_membership')).toHaveLength(1);
+    });
+
+    it('leaves existing memberships untouched when member_of is absent (#50)', () => {
+      const desired = emptyDesired();
+      desired.roles = [{ role: 'app_user', login: true }]; // no in/member_of field
+      const actual = emptyActual();
+      actual.roles.set('app_user', { role: 'app_user', login: true, in: ['group_b'] });
+      const result = buildPlan(desired, actual, { allowDestructive: true });
+      expect(findOps(result.operations, 'revoke_membership')).toHaveLength(0);
+      expect(findOps(result.operations, 'grant_membership')).toHaveLength(0);
+    });
   });
 
   describe('functions', () => {

@@ -86,6 +86,7 @@ export type OperationType =
   | 'grant_function'
   | 'revoke_function'
   | 'grant_membership'
+  | 'revoke_membership'
   | 'grant_schema'
   | 'grant_sequence'
   | 'revoke_sequence'
@@ -329,10 +330,52 @@ function diffEnums(desired: EnumSchema[], actual: Map<string, EnumSchema>, pgSch
 
 // ─── Roles ─────────────────────────────────────────────────────
 
+/**
+ * Order roles so that any role appears after every membership parent that is
+ * also being applied in this run. A `GRANT parent TO child` (child is
+ * `member_of` parent) can only run once `parent` exists, so the parent's
+ * create_role must be emitted first.
+ *
+ * Parents that aren't in the desired set impose no ordering constraint here —
+ * they're expected to already exist (an unknown parent surfaces as an apply
+ * error, which is out of scope per issue #50).
+ *
+ * Throws at plan time if `member_of` forms a cycle, naming the cycle.
+ */
+function topoSortRoles(desired: RoleSchema[]): RoleSchema[] {
+  const byName = new Map(desired.map((r) => [r.role, r]));
+  const sorted: RoleSchema[] = [];
+  const visited = new Set<string>(); // fully processed
+  const onStack = new Set<string>(); // in the current DFS path
+  const stack: string[] = [];
+
+  const visit = (role: RoleSchema): void => {
+    if (visited.has(role.role)) return;
+    if (onStack.has(role.role)) {
+      const cycleStart = stack.indexOf(role.role);
+      const cycle = [...stack.slice(cycleStart), role.role].join(' → ');
+      throw new Error(`role membership cycle detected via member_of: ${cycle}`);
+    }
+    onStack.add(role.role);
+    stack.push(role.role);
+    for (const parent of role.in ?? []) {
+      const parentRole = byName.get(parent);
+      if (parentRole) visit(parentRole);
+    }
+    stack.pop();
+    onStack.delete(role.role);
+    visited.add(role.role);
+    sorted.push(role);
+  };
+
+  for (const role of desired) visit(role);
+  return sorted;
+}
+
 function diffRoles(desired: RoleSchema[], actual: Map<string, RoleSchema>): Operation[] {
   const ops: Operation[] = [];
 
-  for (const desiredRole of desired) {
+  for (const desiredRole of topoSortRoles(desired)) {
     const existing = actual.get(desiredRole.role);
     if (!existing) {
       const attrs = buildRoleAttributes(desiredRole);
@@ -358,10 +401,14 @@ function diffRoles(desired: RoleSchema[], actual: Map<string, RoleSchema>): Oper
       }
     }
 
-    // Role group memberships
-    if (desiredRole.in && desiredRole.in.length > 0) {
+    // Role group memberships (`member_of:` / `in:`). When the field is present
+    // we reconcile to exactly that set: GRANT what's missing, REVOKE what's no
+    // longer declared. When the field is absent (undefined) we leave existing
+    // memberships untouched — same rule the attribute diff uses for unset keys.
+    if (desiredRole.in !== undefined) {
+      const desiredMemberships = desiredRole.in;
       const existingMemberships = existing?.in ?? [];
-      for (const group of desiredRole.in) {
+      for (const group of desiredMemberships) {
         if (!existingMemberships.includes(group)) {
           ops.push({
             type: 'grant_membership',
@@ -369,6 +416,17 @@ function diffRoles(desired: RoleSchema[], actual: Map<string, RoleSchema>): Oper
             objectName: `${desiredRole.role}.${group}`,
             sql: `GRANT "${group}" TO "${desiredRole.role}"`,
             destructive: false,
+          });
+        }
+      }
+      for (const group of existingMemberships) {
+        if (!desiredMemberships.includes(group)) {
+          ops.push({
+            type: 'revoke_membership',
+            phase: 4,
+            objectName: `${desiredRole.role}.${group}`,
+            sql: `REVOKE "${group}" FROM "${desiredRole.role}"`,
+            destructive: true,
           });
         }
       }

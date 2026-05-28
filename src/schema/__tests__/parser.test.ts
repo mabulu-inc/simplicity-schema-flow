@@ -785,6 +785,16 @@ comment: "Read-only role"
     expect(result.role).toBe('viewer');
   });
 
+  it('accepts member_of: as an alias for in:', () => {
+    const result = parseRole('role: app_admin\nmember_of: [app_user, reporting]');
+    expect(result.in).toEqual(['app_user', 'reporting']);
+  });
+
+  it('lets member_of: take precedence when both are given', () => {
+    const result = parseRole('role: app_admin\nmember_of: [a]\nin: [b]');
+    expect(result.in).toEqual(['a']);
+  });
+
   it('throws if role is missing', () => {
     expect(() => parseRole('login: true')).toThrow(/role/i);
   });

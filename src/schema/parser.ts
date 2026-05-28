@@ -687,6 +687,7 @@ const ROLE_KEYS = [
   'replication',
   'connection_limit',
   'in',
+  'member_of',
   'comment',
   'description',
 ] as const;
@@ -708,7 +709,11 @@ export function parseRole(yamlStr: string): RoleSchema {
   if (raw.bypassrls !== undefined) role.bypassrls = Boolean(raw.bypassrls);
   if (raw.replication !== undefined) role.replication = Boolean(raw.replication);
   if (raw.connection_limit !== undefined) role.connection_limit = Number(raw.connection_limit);
-  if (raw.in !== undefined) role.in = raw.in as string[];
+  // `member_of:` is the canonical, self-documenting spelling; `in:` is the
+  // original alias. Both declare the groups this role is a member of and map
+  // to the same internal field. `member_of:` wins if somehow both are present.
+  if (raw.member_of !== undefined) role.in = raw.member_of as string[];
+  else if (raw.in !== undefined) role.in = raw.in as string[];
   const roleComment = resolveComment(raw);
   if (roleComment !== undefined) role.comment = roleComment;
 

@@ -106,6 +106,78 @@ in:
     expect(result.rows[0].group_name).toBe(groupName);
   });
 
+  it('orders role apply so a member_of parent is created before its child (#50)', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+    const parentName = uniqueRole('app_user');
+    const childName = uniqueRole('app_admin');
+    ctx.registerRole(childName);
+    ctx.registerRole(parentName);
+
+    // Both roles are new and declared together. The child's GRANT references the
+    // parent, so the apply must create the parent first — purely from member_of,
+    // not file/alphabetical order.
+    writeSchema(ctx.dir, {
+      [`roles/${childName}.yaml`]: `
+role: ${childName}
+login: true
+member_of:
+  - ${parentName}
+`,
+      [`roles/${parentName}.yaml`]: `
+role: ${parentName}
+login: false
+`,
+    });
+
+    await runMigration(ctx);
+
+    const result = await queryDb(
+      ctx,
+      `SELECT r.rolname AS member, g.rolname AS group_name
+       FROM pg_auth_members m
+       JOIN pg_roles r ON r.oid = m.member
+       JOIN pg_roles g ON g.oid = m.roleid
+       WHERE r.rolname = $1 AND g.rolname = $2`,
+      [childName, parentName],
+    );
+    expect(result.rowCount).toBe(1);
+  });
+
+  it('revokes a membership removed from member_of on the next apply (#50)', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+    const parentName = uniqueRole('app_user');
+    const childName = uniqueRole('app_admin');
+    ctx.registerRole(childName);
+    ctx.registerRole(parentName);
+
+    const membershipCount = async () =>
+      (
+        await queryDb(
+          ctx,
+          `SELECT 1 FROM pg_auth_members m
+           JOIN pg_roles r ON r.oid = m.member
+           JOIN pg_roles g ON g.oid = m.roleid
+           WHERE r.rolname = $1 AND g.rolname = $2`,
+          [childName, parentName],
+        )
+      ).rowCount;
+
+    writeSchema(ctx.dir, {
+      [`roles/${childName}.yaml`]: `\nrole: ${childName}\nlogin: true\nmember_of:\n  - ${parentName}\n`,
+      [`roles/${parentName}.yaml`]: `\nrole: ${parentName}\nlogin: false\n`,
+    });
+    await runMigration(ctx);
+    expect(await membershipCount()).toBe(1);
+
+    // Remove the membership from the child's YAML — apply should REVOKE it.
+    writeSchema(ctx.dir, {
+      [`roles/${childName}.yaml`]: `\nrole: ${childName}\nlogin: true\nmember_of: []\n`,
+      [`roles/${parentName}.yaml`]: `\nrole: ${parentName}\nlogin: false\n`,
+    });
+    await runMigration(ctx, { allowDestructive: true });
+    expect(await membershipCount()).toBe(0);
+  });
+
   it('sets a role comment', async () => {
     ctx = await useTestProject(DATABASE_URL);
     const roleName = uniqueRole('commented_role');
