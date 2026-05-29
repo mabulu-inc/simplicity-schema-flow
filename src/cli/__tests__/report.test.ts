@@ -47,6 +47,41 @@ describe('reportMigrationResult', () => {
     expect(lines.some((l) => l.includes('timezones'))).toBe(false);
   });
 
+  it('labels the bootstrap and main phases when bootstrap ops are present (#51)', () => {
+    const ops: Operation[] = [
+      { type: 'create_table', phase: 6, objectName: 'users', sql: 'CREATE ...', destructive: false, bootstrap: true },
+      { type: 'create_table', phase: 6, objectName: 'events', sql: 'CREATE ...', destructive: false },
+    ];
+    const { write, lines } = capture();
+    reportMigrationResult({
+      result: emptyResult({ executed: 2, executedOperations: ops }),
+      operations: ops,
+      mode: 'default',
+      write,
+    });
+    const bootstrapIdx = lines.findIndex((l) => l.startsWith('Bootstrap phase'));
+    const mainIdx = lines.findIndex((l) => l === 'Main phase:');
+    expect(bootstrapIdx).toBeGreaterThanOrEqual(0);
+    expect(mainIdx).toBeGreaterThan(bootstrapIdx);
+    // The bootstrap header precedes the users op; the main header precedes events.
+    expect(lines.findIndex((l) => l.includes('users'))).toBeGreaterThan(bootstrapIdx);
+    expect(lines.findIndex((l) => l.includes('events'))).toBeGreaterThan(mainIdx);
+  });
+
+  it('omits phase headers when there are no bootstrap ops (#51)', () => {
+    const ops: Operation[] = [
+      { type: 'create_table', phase: 6, objectName: 'events', sql: 'CREATE ...', destructive: false },
+    ];
+    const { write, lines } = capture();
+    reportMigrationResult({
+      result: emptyResult({ executed: 1, executedOperations: ops }),
+      operations: ops,
+      mode: 'default',
+      write,
+    });
+    expect(lines.some((l) => l.startsWith('Bootstrap phase') || l === 'Main phase:')).toBe(false);
+  });
+
   it('still shows no-op seed ops in verbose mode', () => {
     const ops: Operation[] = [
       {

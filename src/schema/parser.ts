@@ -460,6 +460,7 @@ const TABLE_KEYS = [
   'seeds',
   'seeds_on_conflict',
   'mixins',
+  'bootstrap',
   'comment',
   'description',
 ] as const;
@@ -524,6 +525,7 @@ export function parseTable(yamlStr: string): TableSchema {
   if (raw.seeds !== undefined) table.seeds = raw.seeds as Record<string, unknown>[];
   if (raw.seeds_on_conflict !== undefined) table.seeds_on_conflict = raw.seeds_on_conflict as SeedOnConflict;
   if (raw.mixins !== undefined) table.mixins = raw.mixins as string[];
+  if (raw.bootstrap !== undefined) table.bootstrap = Boolean(raw.bootstrap);
   const tableComment = resolveComment(raw);
   if (tableComment !== undefined) table.comment = tableComment;
 

@@ -153,6 +153,7 @@ export async function runPipeline(
     logger,
     replanAfterPreScripts,
     perTxSqlPath: config.perTxSqlPath,
+    bootstrapSession: config.bootstrapSession,
   });
 
   // 7. Record schema files in history after successful migration

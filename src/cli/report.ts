@@ -33,8 +33,20 @@ export function reportMigrationResult(options: ReportOptions): void {
   // In default mode, skip seed ops that wrote nothing — the line would
   // read "Seeded: X (N unchanged)" which is noise. Still shown in verbose.
   if (mode === 'default' || mode === 'verbose') {
+    // When a bootstrap phase is present, label it and the main phase so the
+    // two transactions read distinctly. Headers are skipped when there are no
+    // bootstrap ops, keeping ordinary output unchanged.
+    const hasBootstrap = operations.some((op) => op.bootstrap);
+    let lastHeader: 'bootstrap' | 'main' | null = null;
     for (const op of operations) {
       if (mode === 'default' && isNoOpSeed(op)) continue;
+      if (hasBootstrap) {
+        const header = op.bootstrap ? 'bootstrap' : 'main';
+        if (header !== lastHeader) {
+          write(header === 'bootstrap' ? 'Bootstrap phase (separate transaction):' : 'Main phase:');
+          lastHeader = header;
+        }
+      }
       write(`  ${formatOperationMessage(op, { dryRun })}`);
       if (dryRun && mode === 'verbose') {
         for (const line of op.sql.split('\n')) {

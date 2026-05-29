@@ -74,6 +74,21 @@ default:
     expect(result!.lockTimeout).toBe(3000);
   });
 
+  it('loads bootstrapSession as a name→value map (#51)', () => {
+    const configPath = join(tmpDir, 'config.yaml');
+    writeFileSync(
+      configPath,
+      `
+default:
+  bootstrapSession:
+    app.audit_lenient: true
+    app.tenant: acme
+`,
+    );
+    const result = loadConfigFile(configPath);
+    expect(result!.bootstrapSession).toEqual({ 'app.audit_lenient': true, 'app.tenant': 'acme' });
+  });
+
   it('interpolates environment variables', () => {
     process.env.TEST_DB_URL = 'postgres://localhost/interpolated';
     const configPath = join(tmpDir, 'config.yaml');

@@ -225,6 +225,14 @@ export interface TableSchema {
   seeds_on_conflict?: SeedOnConflict;
   mixins?: string[];
   comment?: string;
+  /**
+   * Apply this table (its CREATE plus indexes/constraints/seeds) in a dedicated
+   * transaction that commits BEFORE the main apply transaction. Lets per-tx
+   * hooks in the main tx resolve rows seeded here (e.g. a service user an audit
+   * trigger stamps from). A bootstrap table may not have a foreign key to a
+   * non-bootstrap table — that's rejected at plan time.
+   */
+  bootstrap?: boolean;
 }
 
 // ─── Enum ───────────────────────────────────────────────────────

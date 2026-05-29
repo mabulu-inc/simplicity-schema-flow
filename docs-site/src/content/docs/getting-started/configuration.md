@@ -50,7 +50,18 @@ environments:
 | `statementTimeout` | `--statement-timeout`         | `30000` (ms) | Statement execution timeout                                 |
 | `maxRetries`       | `--max-retries`               | `3`          | Max retries on transient errors                             |
 | `perTxSqlPath`     | `--per-tx-sql`                | unset        | SQL injected at the start of every executor transaction     |
+| `bootstrapSession` | --                            | unset        | GUCs set (as `SET LOCAL`) during the bootstrap transaction  |
 | `historyTable`     | --                            | `history`    | Migration tracking table (in `_smplcty_schema_flow` schema) |
 | `verbose`          | `--verbose`                   | `false`      | Verbose output                                              |
 | `quiet`            | `--quiet`                     | `false`      | Suppress non-error output                                   |
 | `json`             | `--json`                      | `false`      | JSON output                                                 |
+
+## Bootstrap session settings
+
+`bootstrapSession` is a config-file-only map of session settings applied (as `SET LOCAL`) for the duration of the [bootstrap transaction](/schema-flow/schema/tables/#bootstrap-phase), alongside the built-in `smplcty.bootstrap = 'true'`. Point it at a GUC your own triggers already check so bootstrap seeds behave the way you need without touching the trigger:
+
+```yaml
+default:
+  bootstrapSession:
+    app.audit_lenient: true
+```

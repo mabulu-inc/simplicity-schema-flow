@@ -52,6 +52,15 @@ export interface ExecuteOptions {
    * that gap.
    */
   perTxSqlPath?: string;
+  /**
+   * Session settings applied (via `set_config(name, value, true)` — i.e.
+   * `SET LOCAL`) at the start of the bootstrap transaction, after the built-in
+   * `smplcty.bootstrap = 'true'` and before any per-tx SQL. Lets a consumer
+   * point schema-flow at the GUC their own audit trigger already checks (e.g.
+   * `{ 'app.audit_lenient': true }`) so bootstrap seeds land the way they need
+   * without modifying the trigger. Scoped to the bootstrap tx only.
+   */
+  bootstrapSession?: Record<string, string | number | boolean>;
 }
 
 export interface ExecuteResult {
@@ -291,6 +300,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     logger,
     replanAfterPreScripts,
     perTxSqlPath,
+    bootstrapSession,
   } = options;
 
   // Read once; injected after BEGIN in every executor transaction below.
@@ -341,8 +351,11 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
       }
 
       // Tighten ops run after post-scripts in the live path; preserve that
-      // order in the plan so the output reads chronologically.
-      const dryRunMain = operations.filter((op) => op.type !== 'tighten_not_null');
+      // order in the plan so the output reads chronologically. Bootstrap ops
+      // run in their own tx ahead of the main apply tx, so list them first.
+      const dryRunMain = operations
+        .filter((op) => op.type !== 'tighten_not_null')
+        .sort((a, b) => Number(b.bootstrap ?? false) - Number(a.bootstrap ?? false));
       const dryRunTighten = operations.filter((op) => op.type === 'tighten_not_null');
 
       for (const op of dryRunMain) {
@@ -435,9 +448,12 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
       const sorted = [...operations].sort((a, b) => a.phase - b.phase);
       const precheckOps = sorted.filter((op) => op.type === 'run_precheck');
       const tightenOps = sorted.filter((op) => op.type === 'tighten_not_null');
-      const transactionalOps = sorted.filter(
-        (op) => !op.concurrent && op.type !== 'run_precheck' && op.type !== 'tighten_not_null',
-      );
+      const isMainTxOp = (op: Operation) =>
+        !op.concurrent && op.type !== 'run_precheck' && op.type !== 'tighten_not_null';
+      // Bootstrap ops apply in their own transaction that commits before the
+      // main apply tx, so per-tx hooks in the main tx see the rows seeded here.
+      const bootstrapOps = sorted.filter((op) => op.bootstrap && isMainTxOp(op));
+      const transactionalOps = sorted.filter((op) => !op.bootstrap && isMainTxOp(op));
       const concurrentOps = sorted.filter((op) => op.concurrent);
 
       // Run prechecks before any operations
@@ -457,6 +473,48 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           logger?.info(`Precheck passed: ${op.objectName}`);
         } finally {
           precheckClient.release();
+        }
+      }
+
+      // Bootstrap transaction — runs and COMMITs before the main apply tx so
+      // its CREATEd tables and seeded rows are visible to the per-tx hook that
+      // opens every subsequent transaction. Sets `smplcty.bootstrap = 'true'`
+      // plus any consumer-declared session settings (e.g. an audit-lenient GUC)
+      // for the duration of the tx, ahead of the per-tx SQL.
+      if (bootstrapOps.length > 0) {
+        const bsClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
+        try {
+          await bsClient.query('BEGIN');
+          await bsClient.query(`SELECT set_config('smplcty.bootstrap', 'true', true)`);
+          for (const [name, value] of Object.entries(bootstrapSession ?? {})) {
+            await bsClient.query('SELECT set_config($1, $2, true)', [name, String(value)]);
+          }
+          if (perTxSql) await bsClient.query(perTxSql);
+
+          for (const op of bootstrapOps) {
+            logger?.debug(`Executing (bootstrap): ${op.type} ${op.objectName}`);
+            await withOpContext(op, async () => {
+              if (op.type === 'seed_table') {
+                const counts = await executeSeedTable(bsClient, op, pgSchema);
+                op.seedResult = counts;
+              } else {
+                await bsClient.query(op.sql);
+              }
+            });
+            result.executed++;
+            result.executedOperations.push(op);
+          }
+
+          if (validateOnly) {
+            await bsClient.query('ROLLBACK');
+          } else {
+            await bsClient.query('COMMIT');
+          }
+        } catch (err) {
+          await bsClient.query('ROLLBACK').catch(() => {});
+          throw err;
+        } finally {
+          bsClient.release();
         }
       }
 

@@ -31,6 +31,18 @@ columns:
     });
   });
 
+  it('parses bootstrap: true', () => {
+    const result = parseTable(
+      'table: users\nbootstrap: true\ncolumns:\n  - { name: id, type: uuid, primary_key: true }',
+    );
+    expect(result.bootstrap).toBe(true);
+  });
+
+  it('leaves bootstrap undefined when not set', () => {
+    const result = parseTable('table: users\ncolumns:\n  - { name: id, type: uuid, primary_key: true }');
+    expect(result.bootstrap).toBeUndefined();
+  });
+
   it('parses a full table with all features', () => {
     const yaml = `
 table: orders

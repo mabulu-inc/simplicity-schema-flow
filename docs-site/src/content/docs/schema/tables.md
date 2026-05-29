@@ -450,6 +450,35 @@ There is no implicit "treat `id` as the key" behaviour — if your PK is `code` 
 
 Use the `!sql` YAML tag for SQL expressions in values. Seeds whose existing values already match the YAML are detected via an `EXCEPT` round-trip and produce no operation in the plan.
 
+## Bootstrap phase
+
+Mark a table `bootstrap: true` to apply it — its `CREATE`, indexes, constraints, and seeds — in a **dedicated transaction that commits before the main apply transaction**:
+
+```yaml
+table: users
+bootstrap: true
+columns:
+  - { name: user_id, type: serial, primary_key: true }
+  - { name: name, type: varchar(100), nullable: false }
+seeds:
+  - { name: app-init }
+```
+
+This exists for the chicken-and-egg case where the rest of the migration depends on rows that must already be present. The classic example is an audit setup: a per-tx hook (via [`--per-tx-sql`](/schema-flow/cli/flags/)) resolves a service user and stamps `app.actor_id` at the start of every transaction. On a fresh database that user doesn't exist yet, so without a bootstrap phase every seed in the main transaction lands unattributed. With it, the service user is committed first and the main-tx hook resolves it.
+
+Apply order becomes:
+
+1. **Pre-scripts** — each in its own tx.
+2. **Bootstrap tx** — bootstrap tables created and seeded, then committed.
+3. **Main apply tx** — everything else. The per-tx hook here sees the committed bootstrap rows.
+4. **Post-scripts**, then the **tighten** phase — unchanged.
+
+### Rules and behavior
+
+- **No FK to a non-bootstrap table.** A bootstrap table can't have a foreign key to a table this migration creates outside the bootstrap set — it wouldn't exist yet when the bootstrap tx runs. The planner rejects this at `plan` time, naming the offending FK. (An FK to a table that already exists in the database is fine.) Bootstrap-to-bootstrap FKs are allowed.
+- **Session settings.** The bootstrap tx sets `smplcty.bootstrap = 'true'` for its duration, so triggers/hooks can detect it generically with `current_setting('smplcty.bootstrap', true)`. You can also have schema-flow set your own GUCs during the bootstrap tx via the [`bootstrapSession`](/schema-flow/getting-started/configuration/) config — point it at the GUC your audit trigger already checks (e.g. `app.audit_lenient`) so its first seed behaves the way you need without changing the trigger.
+- **Audit columns on the bootstrap table itself.** The very first service-user row has nothing to stamp it (the hook is lenient inside the bootstrap tx, before the table exists). Give that seed explicit `created_by`/`updated_by` values — it's the first row, so it can reference its own known id. Combined with a `bootstrapSession` lenient GUC so the trigger doesn't overwrite them, this removes the need for any audit-backfill post-script.
+
 ## Description alias
 
 `description` is an alias for `comment` on any field that supports it. Either works; `comment` takes precedence.

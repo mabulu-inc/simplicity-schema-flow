@@ -737,6 +737,84 @@ describe('Planner', () => {
       expect(ops[0].sql).toContain('email_not_empty');
     });
 
+    it('tags every op of a bootstrap table with bootstrap=true (#51)', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          bootstrap: true,
+          columns: [
+            { name: 'user_id', type: 'serial', primary_key: true },
+            { name: 'name', type: 'varchar(100)', nullable: false },
+          ],
+          seeds: [{ name: 'app-init' }],
+        },
+        {
+          table: 'orders',
+          columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+        },
+      ];
+      const result = buildPlan(desired, emptyActual());
+      const bootstrapOps = result.operations.filter((o) => o.bootstrap);
+      // The users CREATE and its seed are tagged bootstrap; the orders ops are not.
+      expect(bootstrapOps.length).toBeGreaterThan(0);
+      // objectName is sometimes qualified (e.g. "users.name") — none belong to orders.
+      expect(bootstrapOps.every((o) => o.objectName.startsWith('users'))).toBe(true);
+      expect(bootstrapOps.some((o) => o.type === 'create_table')).toBe(true);
+      expect(bootstrapOps.some((o) => o.type === 'seed_table')).toBe(true);
+      expect(result.operations.some((o) => o.objectName.includes('orders') && o.bootstrap)).toBe(false);
+    });
+
+    it('rejects a bootstrap table with an FK to a non-bootstrap table (#51)', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          bootstrap: true,
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'org_id', type: 'uuid', references: { table: 'orgs', column: 'id' } },
+          ],
+        },
+        { table: 'orgs', columns: [{ name: 'id', type: 'uuid', primary_key: true }] },
+      ];
+      expect(() => buildPlan(desired, emptyActual())).toThrow(
+        /bootstrap table "users".*foreign key.*non-bootstrap table "orgs"/i,
+      );
+    });
+
+    it('allows a bootstrap table FK to another bootstrap table (#51)', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          bootstrap: true,
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'org_id', type: 'uuid', references: { table: 'orgs', column: 'id' } },
+          ],
+        },
+        { table: 'orgs', bootstrap: true, columns: [{ name: 'id', type: 'uuid', primary_key: true }] },
+      ];
+      expect(() => buildPlan(desired, emptyActual())).not.toThrow();
+    });
+
+    it('allows a bootstrap table FK to a table that already exists outside the desired set (#51)', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'users',
+          bootstrap: true,
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'org_id', type: 'uuid', references: { table: 'orgs', column: 'id' } },
+          ],
+        },
+      ];
+      // orgs is not in the desired set — assumed to already exist in the DB.
+      expect(() => buildPlan(desired, emptyActual())).not.toThrow();
+    });
+
     it('creates table with foreign keys as NOT VALID', () => {
       const desired = emptyDesired();
       desired.tables = [

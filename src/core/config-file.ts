@@ -25,6 +25,7 @@ export interface FileConfigValues {
   quiet?: boolean;
   json?: boolean;
   perTxSqlPath?: string;
+  bootstrapSession?: Record<string, string | number | boolean>;
 }
 
 interface RawConfigFile {
@@ -74,6 +75,13 @@ function toFileConfigValues(raw: Record<string, unknown>): FileConfigValues {
   if (typeof raw.quiet === 'boolean') result.quiet = raw.quiet;
   if (typeof raw.json === 'boolean') result.json = raw.json;
   if (typeof raw.perTxSqlPath === 'string') result.perTxSqlPath = raw.perTxSqlPath;
+  if (raw.bootstrapSession && typeof raw.bootstrapSession === 'object' && !Array.isArray(raw.bootstrapSession)) {
+    const session: Record<string, string | number | boolean> = {};
+    for (const [k, v] of Object.entries(raw.bootstrapSession as Record<string, unknown>)) {
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') session[k] = v;
+    }
+    result.bootstrapSession = session;
+  }
 
   return result;
 }

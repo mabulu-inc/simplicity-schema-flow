@@ -31,6 +31,13 @@ export interface SimplicitySchemaConfig {
    * audit triggers see a stable actor across the whole pipeline.
    */
   perTxSqlPath?: string;
+  /**
+   * Session settings applied (as `SET LOCAL`) for the duration of the bootstrap
+   * transaction, alongside the built-in `smplcty.bootstrap = 'true'`. Maps GUC
+   * name → value, e.g. `{ 'app.audit_lenient': true }`. Config-file only (a map
+   * doesn't fit a CLI flag).
+   */
+  bootstrapSession?: Record<string, string | number | boolean>;
 }
 
 export interface ConfigOverrides {
@@ -97,6 +104,7 @@ export function resolveConfig(overrides: ConfigOverrides = {}): SimplicitySchema
     if (fileConfig.quiet !== undefined) config.quiet = fileConfig.quiet;
     if (fileConfig.json !== undefined) config.json = fileConfig.json;
     if (fileConfig.perTxSqlPath !== undefined) config.perTxSqlPath = fileConfig.perTxSqlPath;
+    if (fileConfig.bootstrapSession !== undefined) config.bootstrapSession = fileConfig.bootstrapSession;
   }
 
   // Layer 1: CLI overrides
