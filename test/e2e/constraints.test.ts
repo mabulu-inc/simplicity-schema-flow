@@ -383,4 +383,52 @@ columns:
     expect(after.rowCount).toBe(1);
     expect(after.rows[0].conname).toBe('uq_drop_code');
   });
+
+  // Issue #54: an expression that itself starts with "(" and ends with ")"
+  // (top-level operator outside the first group) was corrupted by a greedy
+  // outer-paren strip, producing invalid DDL like `CHECK (a) <> (b)`.
+  it('handles check expressions that start and end with parentheses', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/chk_xor.yaml': `
+table: chk_xor
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+    default: gen_random_uuid()
+  - name: product_id
+    type: uuid
+  - name: product_group_id
+    type: uuid
+checks:
+  - name: entity_xor
+    expression: "(product_id IS NULL) <> (product_group_id IS NULL)"
+  - name: exactly_one
+    expression: "(product_id IS NOT NULL)::int + (product_group_id IS NOT NULL)::int = 1"
+`,
+    });
+
+    // Apply must succeed — previously the corrupted expression produced a
+    // syntax error at or near "<>".
+    await runMigration(ctx);
+    await assertTableExists(ctx, 'chk_xor');
+
+    const result = await queryDb(
+      ctx,
+      `SELECT con.conname
+       FROM pg_constraint con
+       JOIN pg_class cls ON cls.oid = con.conrelid
+       JOIN pg_namespace n ON n.oid = cls.relnamespace
+       WHERE con.contype = 'c' AND n.nspname = $1 AND cls.relname = 'chk_xor'
+       ORDER BY con.conname`,
+      [ctx.schema],
+    );
+    expect(result.rows.map((r) => r.conname)).toEqual(['entity_xor', 'exactly_one']);
+
+    // Re-plan must converge to zero ops — no false drift on these expressions.
+    const second = await runMigration(ctx);
+    expect(second.executed).toBe(0);
+  });
 });

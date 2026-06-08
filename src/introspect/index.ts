@@ -783,8 +783,11 @@ async function getChecks(client: Client, table: string, schema: string): Promise
   );
 
   return result.rows.map((r: { name: string; definition: string; comment: string | null }) => {
-    // pg_get_constraintdef returns "CHECK ((expr))" — extract the expression
-    const match = r.definition.match(/^CHECK\s*\(\((.*)\)\)$/s) || r.definition.match(/^CHECK\s*\((.*)\)$/s);
+    // pg_get_constraintdef returns "CHECK (<expr>)" — strip only the CHECK's
+    // own outer parens. A greedy "CHECK ((…))" match would corrupt expressions
+    // that themselves start/end with parens, e.g. "(a) <> (b)" (issue #54), so
+    // capture everything between the first "(" after CHECK and the final ")".
+    const match = r.definition.match(/^CHECK\s*\((.*)\)$/s);
     const expression = match ? match[1] : r.definition;
     const check: CheckDef = { name: r.name, expression };
     if (r.comment) check.comment = r.comment;

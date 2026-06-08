@@ -138,8 +138,13 @@ async function normalizeCheckExpression(client: PoolClient, table: TableSchema, 
     const def = result.rows[0]?.def as string | undefined;
     await client.query('ROLLBACK TO normalize_check');
     if (!def) return expression;
-    // pg_get_constraintdef returns "CHECK ((expr))" or "CHECK (expr)" — extract inner.
-    const m = def.match(/^CHECK\s*\(\((.*)\)\)$/s) || def.match(/^CHECK\s*\((.*)\)$/s);
+    // pg_get_constraintdef returns "CHECK (<expr>)" — strip only the CHECK's
+    // own outer parens. We must NOT greedily strip a second pair: an
+    // expression like "(a) <> (b)" comes back as "CHECK ((a) <> (b))", and a
+    // greedy "CHECK ((…))" match would capture "a) <> (b" — unbalanced — which
+    // then re-emits as invalid DDL (issue #54). Keeping a redundant inner pair
+    // is harmless and valid.
+    const m = def.match(/^CHECK\s*\((.*)\)$/s);
     return m ? m[1] : expression;
   } catch {
     await client.query('ROLLBACK TO normalize_check').catch(() => {});
