@@ -932,15 +932,22 @@ function driftGrants(table: string, desired: GrantDef[], actual: GrantDef[]): Dr
 
 // ─── Seeds ──────────────────────────────────────────────────────
 
+function isSqlExpression(val: unknown): boolean {
+  return (
+    typeof val === 'object' && val !== null && '__sql' in val && typeof (val as { __sql: string }).__sql === 'string'
+  );
+}
+
 function normalizeSeedValue(val: unknown): string {
   if (val === null || val === undefined) return 'NULL';
   if (typeof val === 'boolean') return val ? 'true' : 'false';
   return String(val);
 }
 
-function normalizeSeedRow(row: Record<string, unknown>): Record<string, string> {
+function normalizeSeedRow(row: Record<string, unknown>, skip: Set<string>): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [key, val] of Object.entries(row)) {
+    if (skip.has(key)) continue;
     result[key] = normalizeSeedValue(val);
   }
   return result;
@@ -954,8 +961,19 @@ function driftSeeds(
   const dLen = desired?.length ?? 0;
   const aLen = actual?.length ?? 0;
   if (dLen === 0 && aLen === 0) return [];
-  const normalizedDesired = (desired || []).map(normalizeSeedRow);
-  const normalizedActual = (actual || []).map(normalizeSeedRow);
+  // Columns whose desired value is a SQL expression (`{ __sql: '…' }`) can't
+  // be compared as static text — String() of an unevaluated expression never
+  // equals the stored typed value, so it would flag drift on every run
+  // (issue #53). The planner's typed EXCEPT is the authority for whether such
+  // seeds changed; exclude these columns from the advisory drift compare.
+  const skip = new Set<string>();
+  for (const row of desired || []) {
+    for (const [key, val] of Object.entries(row)) {
+      if (isSqlExpression(val)) skip.add(key);
+    }
+  }
+  const normalizedDesired = (desired || []).map((r) => normalizeSeedRow(r, skip));
+  const normalizedActual = (actual || []).map((r) => normalizeSeedRow(r, skip));
   const dJson = JSON.stringify(normalizedDesired);
   const aJson = JSON.stringify(normalizedActual);
   if (dJson !== aJson) {

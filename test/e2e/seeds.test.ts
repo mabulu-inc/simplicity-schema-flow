@@ -387,4 +387,44 @@ seeds:
     expect(result.rows[2].name).toBe('Clothing');
     expect(result.rows[2].sort_order).toBe(30);
   });
+
+  // Issue #53: a jsonb seed supplied as a compact `!sql` expression is stored
+  // by Postgres space-normalized (`["a", "b"]`), so a text comparison reported
+  // a phantom seed op on every plan. The typed EXCEPT must treat them equal.
+  it('(10) jsonb !sql seed does not report perpetual drift', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/system_settings.yaml': `
+table: system_settings
+columns:
+  - name: key
+    type: text
+    primary_key: true
+  - name: value
+    type: jsonb
+seeds:
+  - key: default_delay_reasons
+    value: !sql |-
+      '["Customer not ready","Late truck arrival","Equipment failure"]'::jsonb
+`,
+    });
+
+    await runMigration(ctx);
+
+    const stored = await queryDb(
+      ctx,
+      `SELECT value = '["Customer not ready","Late truck arrival","Equipment failure"]'::jsonb AS eq
+       FROM "${ctx.schema}".system_settings WHERE key = 'default_delay_reasons'`,
+    );
+    expect(stored.rows[0].eq).toBe(true);
+
+    // Re-plan must converge to zero ops despite Postgres re-formatting the jsonb.
+    const second = await runMigration(ctx);
+    expect(second.executed).toBe(0);
+
+    // The advisory drift report must also be clean.
+    const report = await ctx.drift();
+    expect(report.items.filter((i) => i.type === 'seed')).toHaveLength(0);
+  });
 });

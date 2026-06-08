@@ -9,9 +9,15 @@
  * is exactly the executor's no-op condition (whether it would match by
  * a key column or via full-row dedup), so emitting nothing is safe.
  *
+ * SQL-expression values (`{ __sql: '…' }`) are emitted into the temp table
+ * verbatim rather than bound as parameters, so they evaluate to their real
+ * typed value before the EXCEPT. Because the comparison is done over the
+ * actual column types (jsonb, numeric, arrays, …) it ignores formatting
+ * differences — e.g. a jsonb seed `'["a","b"]'::jsonb` matches the
+ * space-normalized `["a", "b"]` Postgres stores, so it no longer reports
+ * perpetual drift (issue #53).
+ *
  * Skipped (seeds left intact, planner emits the op as before):
- *  - tables with seed values that are SQL expressions (`{ __sql: '…' }`)
- *    — those evaluate at apply time and can't be compared statically;
  *  - first-apply against a fresh DB where the real table doesn't exist
  *    yet — the EXCEPT throws, the catch leaves seeds intact.
  */
@@ -35,8 +41,6 @@ async function processCandidates(client: PoolClient, candidates: TableSchema[], 
   for (const table of candidates) {
     const seeds = table.seeds!;
 
-    if (seeds.some((row) => Object.values(row).some(isSqlExpression))) continue;
-
     const seedColumns = collectSeedColumns(seeds);
     const colDefMap = new Map((table.columns ?? []).map((c) => [c.name, mapColumnType(c.type)]));
     if (!seedColumns.every((c) => colDefMap.has(c))) continue;
@@ -49,11 +53,15 @@ async function processCandidates(client: PoolClient, candidates: TableSchema[], 
 
       const params: unknown[] = [];
       const valueLines = seeds.map((row) => {
-        const placeholders = seedColumns.map((c) => {
-          params.push(row[c] ?? null);
+        const cells = seedColumns.map((c) => {
+          const val = row[c];
+          // SQL-expression values are spliced in raw so Postgres evaluates
+          // them to their typed value (e.g. '[…]'::jsonb) before the EXCEPT.
+          if (isSqlExpression(val)) return (val as { __sql: string }).__sql;
+          params.push(val ?? null);
           return `$${params.length}`;
         });
-        return `(${placeholders.join(', ')})`;
+        return `(${cells.join(', ')})`;
       });
       const colList = seedColumns.map((c) => `"${c}"`).join(', ');
       await client.query(`INSERT INTO "${tempName}" (${colList}) VALUES ${valueLines.join(', ')}`, params);
