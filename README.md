@@ -89,6 +89,60 @@ schema/
     └── 001_refresh_views.sql
 ```
 
+## Seeds
+
+Keep reference/lookup rows present on every apply. Seeds upsert by the table's primary key (or first matching unique constraint) and converge to zero operations once the rows match — including `jsonb`/`numeric`/array values that Postgres re-formats on storage.
+
+```yaml
+table: users
+columns:
+  - { name: id, type: uuid, primary_key: true }
+  - { name: email, type: text, unique: true }
+seeds:
+  - id: '00000000-0000-0000-0000-000000000001'
+    email: 'admin@example.com'
+    created_at: !sql now() # SQL expression via the !sql tag
+seeds_on_conflict: 'DO NOTHING' # optional — skip UPDATE, only INSERT new rows
+```
+
+Note: seeding an explicit value into a `serial`/identity key does **not** advance the sequence. See the [Seeds docs](https://mabulu-inc.github.io/simplicity-schema-flow/schema/seeds/).
+
+## Bootstrap tables
+
+Mark a table `bootstrap: true` to apply and seed it in a transaction that **commits before the main migration** — for rows the rest of the migration depends on (e.g. a service user a per-tx audit hook resolves).
+
+```yaml
+table: users
+bootstrap: true
+columns:
+  - { name: user_id, type: serial, primary_key: true }
+seeds:
+  - { name: app-init }
+```
+
+A bootstrap table may not have a foreign key to a non-bootstrap table this migration creates, and its triggers run before any `CREATE FUNCTION` in the same migration. The optional `bootstrapSession` config sets `SET LOCAL` GUCs for the bootstrap transaction:
+
+```yaml
+default:
+  bootstrapSession:
+    app.audit_lenient: true
+```
+
+See the [Bootstrap docs](https://mabulu-inc.github.io/simplicity-schema-flow/schema/bootstrap/).
+
+## Roles
+
+Roles are declared one YAML per file under `roles/`. Use `member_of` (alias `in:`) to grant membership in other roles; schema-flow orders grants topologically, rejects cycles, and revokes removed memberships under `--allow-destructive`.
+
+```yaml
+role: app_readwrite
+login: false
+member_of:
+  - app_readonly
+```
+
+Per-object privileges are declared with `grants:` on the table (or function/view) that owns them, not on the role. See the [Roles docs](https://mabulu-inc.github.io/simplicity-schema-flow/schema/roles/).
+
 ## CLI commands
 
 ### Migration

@@ -424,35 +424,22 @@ If any precheck returns a falsy value, migration aborts.
 
 ## Seeds
 
+Declare reference/lookup rows that schema-flow keeps present on every apply:
+
 ```yaml
 seeds:
   - id: '00000000-0000-0000-0000-000000000001'
     email: 'admin@example.com'
     name: 'Admin'
     created_at: !sql now() # SQL expression
-seeds_on_conflict: 'DO NOTHING' # optional — see below
+seeds_on_conflict: 'DO NOTHING' # optional
 ```
 
-### Match-key resolution
-
-To re-apply seeds idempotently, schema-flow needs a way to identify which existing row a seed row corresponds to. The match key is resolved per table, in this order:
-
-1. **Primary key**, if every PK column is present in every seed row.
-2. **The first unique constraint** whose columns are all present in every seed row — column-level `unique: true` first, then table-level `indexes:` entries with `as_constraint: true`.
-3. **No match key.** UPDATE is skipped entirely, and rows are INSERTed only when no existing row in the table already has the same values for every seed-provided column (null-safe via `IS NOT DISTINCT FROM`). Table columns the YAML didn't mention are never consulted.
-
-There is no implicit "treat `id` as the key" behaviour — if your PK is `code` and your seed only supplies `id`, the planner will fall through to (2) or (3).
-
-### Conflict behaviour
-
-- **Default (no `seeds_on_conflict`)** — upsert via the resolved match key: rows whose non-key columns differ are UPDATEd, rows that don't yet exist are INSERTed.
-- **`seeds_on_conflict: 'DO NOTHING'`** — skips the UPDATE step even when a match key exists, so existing rows are never overwritten. New rows are still INSERTed.
-
-Use the `!sql` YAML tag for SQL expressions in values. Seeds whose existing values already match the YAML are detected via an `EXCEPT` round-trip and produce no operation in the plan.
+See [Seeds](/schema-flow/schema/seeds/) for match-key resolution, conflict behaviour, SQL-expression values, and the serial/identity sequence caveat.
 
 ## Bootstrap phase
 
-Mark a table `bootstrap: true` to apply it — its `CREATE`, indexes, constraints, and seeds — in a **dedicated transaction that commits before the main apply transaction**:
+Mark a table `bootstrap: true` to apply and seed it in a transaction that **commits before the main apply transaction** — for rows the rest of the migration depends on:
 
 ```yaml
 table: users
@@ -464,20 +451,7 @@ seeds:
   - { name: app-init }
 ```
 
-This exists for the chicken-and-egg case where the rest of the migration depends on rows that must already be present. The classic example is an audit setup: a per-tx hook (via [`--per-tx-sql`](/schema-flow/cli/flags/)) resolves a service user and stamps `app.actor_id` at the start of every transaction. On a fresh database that user doesn't exist yet, so without a bootstrap phase every seed in the main transaction lands unattributed. With it, the service user is committed first and the main-tx hook resolves it.
-
-Apply order becomes:
-
-1. **Pre-scripts** — each in its own tx.
-2. **Bootstrap tx** — bootstrap tables created and seeded, then committed.
-3. **Main apply tx** — everything else. The per-tx hook here sees the committed bootstrap rows.
-4. **Post-scripts**, then the **tighten** phase — unchanged.
-
-### Rules and behavior
-
-- **No FK to a non-bootstrap table.** A bootstrap table can't have a foreign key to a table this migration creates outside the bootstrap set — it wouldn't exist yet when the bootstrap tx runs. The planner rejects this at `plan` time, naming the offending FK. (An FK to a table that already exists in the database is fine.) Bootstrap-to-bootstrap FKs are allowed.
-- **Session settings.** The bootstrap tx sets `smplcty.bootstrap = 'true'` for its duration, so triggers/hooks can detect it generically with `current_setting('smplcty.bootstrap', true)`. You can also have schema-flow set your own GUCs during the bootstrap tx via the [`bootstrapSession`](/schema-flow/getting-started/configuration/) config — point it at the GUC your audit trigger already checks (e.g. `app.audit_lenient`) so its first seed behaves the way you need without changing the trigger.
-- **Audit columns on the bootstrap table itself.** The very first service-user row has nothing to stamp it (the hook is lenient inside the bootstrap tx, before the table exists). Give that seed explicit `created_by`/`updated_by` values — it's the first row, so it can reference its own known id. Combined with a `bootstrapSession` lenient GUC so the trigger doesn't overwrite them, this removes the need for any audit-backfill post-script.
+See [Bootstrap tables & sessions](/schema-flow/schema/bootstrap/) for the apply ordering, the no-FK-to-non-bootstrap rule, the trigger-vs-function gotcha, and `bootstrapSession`.
 
 ## Description alias
 

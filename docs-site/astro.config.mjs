@@ -29,6 +29,8 @@ export default defineConfig({
           label: 'Schema YAML',
           items: [
             { label: 'Tables', slug: 'schema/tables' },
+            { label: 'Seeds', slug: 'schema/seeds' },
+            { label: 'Bootstrap tables & sessions', slug: 'schema/bootstrap' },
             { label: 'Enums', slug: 'schema/enums' },
             { label: 'Functions', slug: 'schema/functions' },
             { label: 'Views', slug: 'schema/views' },
