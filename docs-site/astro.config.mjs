@@ -37,6 +37,7 @@ export default defineConfig({
             { label: 'Roles', slug: 'schema/roles' },
             { label: 'Extensions', slug: 'schema/extensions' },
             { label: 'Mixins', slug: 'schema/mixins' },
+            { label: 'Imports & extend', slug: 'schema/imports' },
             { label: 'Pre/post scripts', slug: 'schema/scripts' },
           ],
         },

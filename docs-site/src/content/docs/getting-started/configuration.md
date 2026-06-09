@@ -51,6 +51,7 @@ environments:
 | `maxRetries`       | `--max-retries`               | `3`          | Max retries on transient errors                             |
 | `perTxSqlPath`     | `--per-tx-sql`                | unset        | SQL injected at the start of every executor transaction     |
 | `bootstrapSession` | --                            | unset        | GUCs set (as `SET LOCAL`) during the bootstrap transaction  |
+| `imports`          | --                            | unset        | Packages whose `schema/` is merged in — see below           |
 | `historyTable`     | --                            | `history`    | Migration tracking table (in `_smplcty_schema_flow` schema) |
 | `verbose`          | `--verbose`                   | `false`      | Verbose output                                              |
 | `quiet`            | `--quiet`                     | `false`      | Suppress non-error output                                   |
@@ -58,10 +59,23 @@ environments:
 
 ## Bootstrap session settings
 
-`bootstrapSession` is a config-file-only map of session settings applied (as `SET LOCAL`) for the duration of the [bootstrap transaction](/schema-flow/schema/tables/#bootstrap-phase), alongside the built-in `smplcty.bootstrap = 'true'`. Point it at a GUC your own triggers already check so bootstrap seeds behave the way you need without touching the trigger:
+`bootstrapSession` is a config-file-only map of session settings applied (as `SET LOCAL`) for the duration of the [bootstrap transaction](/simplicity-schema-flow/schema/tables/#bootstrap-phase), alongside the built-in `smplcty.bootstrap = 'true'`. Point it at a GUC your own triggers already check so bootstrap seeds behave the way you need without touching the trigger:
 
 ```yaml
 default:
   bootstrapSession:
     app.audit_lenient: true
+```
+
+## Imports
+
+`imports` is a top-level config key (sibling to `default`/`environments`) listing packages whose `schema/` directories are merged with your local schema. See [Imports & extend](/simplicity-schema-flow/schema/imports/) for the full reference.
+
+```yaml
+imports:
+  - '@smplcty/auth'
+  - '@smplcty/schema-std'
+
+default:
+  pgSchema: public
 ```

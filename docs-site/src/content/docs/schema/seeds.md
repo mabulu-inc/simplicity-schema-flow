@@ -72,5 +72,5 @@ Before planning, schema-flow loads the YAML seeds into a temporary table and `EX
 
 ## See also
 
-- [Bootstrap phase](/schema-flow/schema/bootstrap/) — seeding rows that the rest of the migration depends on, in a transaction that commits first.
-- [Tables](/schema-flow/schema/tables/) — the full table YAML reference.
+- [Bootstrap phase](/simplicity-schema-flow/schema/bootstrap/) — seeding rows that the rest of the migration depends on, in a transaction that commits first.
+- [Tables](/simplicity-schema-flow/schema/tables/) — the full table YAML reference.

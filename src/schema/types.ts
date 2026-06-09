@@ -235,6 +235,30 @@ export interface TableSchema {
   bootstrap?: boolean;
 }
 
+// ─── Extend ─────────────────────────────────────────────────────
+
+/**
+ * An `extend:` file augments an existing table (imported or local) without
+ * redeclaring it. The named table's columns/indexes/mixins/policies/grants/
+ * checks/triggers/seeds are merged in. Re-declaring an existing column is an
+ * error (type changes go through a pre-script). Multiple extends for one table
+ * are allowed and merge in source order (imports first, then local).
+ */
+export interface ExtendSchema {
+  extend: string;
+  columns?: ColumnDef[];
+  indexes?: IndexDef[];
+  checks?: CheckDef[];
+  triggers?: TriggerDef[];
+  policies?: PolicyDef[];
+  grants?: GrantDef[];
+  mixins?: string[];
+  rls?: boolean;
+  force_rls?: boolean;
+  seeds?: SeedRow[];
+  seeds_on_conflict?: SeedOnConflict;
+}
+
 // ─── Enum ───────────────────────────────────────────────────────
 
 export interface EnumSchema {
@@ -328,8 +352,22 @@ export interface ExtensionsSchema {
 
 // ─── Mixin ──────────────────────────────────────────────────────
 
+/**
+ * A mixin parameter declaration. Parameters let a sharable mixin (and the
+ * functions shipped alongside it) reference app-specific things — the FK
+ * target for `created_by`, the GUC an audit trigger reads — without coupling
+ * to any one app. The consuming app supplies values via `imports[].params`;
+ * `{{name}}` placeholders are interpolated into the mixin's columns/refs/
+ * indexes/policies and into the shipping package's function bodies. A default
+ * makes the common case param-free.
+ */
+export interface MixinParam {
+  default?: string;
+}
+
 export interface MixinSchema {
   mixin: string;
+  params?: Record<string, MixinParam>;
   columns?: ColumnDef[];
   indexes?: IndexDef[];
   checks?: CheckDef[];

@@ -15,7 +15,7 @@ seeds:
   - { name: app-init }
 ```
 
-The classic example is an audit setup: a per-tx hook (via [`--per-tx-sql`](/schema-flow/cli/flags/)) resolves a service user and stamps `app.actor_id` at the start of every transaction. On a fresh database that user doesn't exist yet, so without a bootstrap phase every seed in the main transaction lands unattributed. With it, the service user is committed first and the main-tx hook resolves it.
+The classic example is an audit setup: a per-tx hook (via [`--per-tx-sql`](/simplicity-schema-flow/cli/flags/)) resolves a service user and stamps `app.actor_id` at the start of every transaction. On a fresh database that user doesn't exist yet, so without a bootstrap phase every seed in the main transaction lands unattributed. With it, the service user is committed first and the main-tx hook resolves it.
 
 ## Apply order
 
@@ -49,9 +49,9 @@ export default {
 
 Point it at a GUC your own triggers already check so bootstrap seeds behave the way you need without touching the trigger. The values are rendered into `SET LOCAL`, so they apply only inside the bootstrap tx and reset automatically when it commits.
 
-See [Configuration](/schema-flow/getting-started/configuration/) for where this sits among the other config keys.
+See [Configuration](/simplicity-schema-flow/getting-started/configuration/) for where this sits among the other config keys.
 
 ## See also
 
-- [Seeds](/schema-flow/schema/seeds/) — the seeding mechanics bootstrap tables reuse.
-- [Execution phases](/schema-flow/architecture/execution-phases/) — full transaction ordering.
+- [Seeds](/simplicity-schema-flow/schema/seeds/) — the seeding mechanics bootstrap tables reuse.
+- [Execution phases](/simplicity-schema-flow/architecture/execution-phases/) — full transaction ordering.

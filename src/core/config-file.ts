@@ -10,6 +10,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import type { ImportSpec } from './config.js';
 
 export interface FileConfigValues {
   connectionString?: string;
@@ -26,11 +27,13 @@ export interface FileConfigValues {
   json?: boolean;
   perTxSqlPath?: string;
   bootstrapSession?: Record<string, string | number | boolean>;
+  imports?: ImportSpec[];
 }
 
 interface RawConfigFile {
   default?: Record<string, unknown>;
   environments?: Record<string, Record<string, unknown>>;
+  imports?: unknown;
 }
 
 const DEFAULT_CONFIG_FILENAME = 'schema-flow.config.yaml';
@@ -87,6 +90,44 @@ function toFileConfigValues(raw: Record<string, unknown>): FileConfigValues {
 }
 
 /**
+ * Normalize the `imports:` section into a list of ImportSpec. Each entry is
+ * either a bare package name (string) or an object with `package` and optional
+ * `params`. Env vars are interpolated in package names and param values.
+ */
+function normalizeImports(raw: unknown): ImportSpec[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    throw new Error('config: "imports" must be a list of package names or { package, params } objects');
+  }
+  const specs: ImportSpec[] = raw.map((entry, i) => {
+    if (typeof entry === 'string') {
+      return { package: interpolateEnvVars(entry) };
+    }
+    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      const obj = entry as Record<string, unknown>;
+      const pkg = obj.package;
+      if (typeof pkg !== 'string' || pkg.length === 0) {
+        throw new Error(`config: imports[${i}] must have a non-empty "package" string`);
+      }
+      const spec: ImportSpec = { package: interpolateEnvVars(pkg) };
+      if (obj.params !== undefined) {
+        if (typeof obj.params !== 'object' || obj.params === null || Array.isArray(obj.params)) {
+          throw new Error(`config: imports[${i}].params must be a map of param → value`);
+        }
+        const params: Record<string, string> = {};
+        for (const [k, v] of Object.entries(obj.params as Record<string, unknown>)) {
+          params[k] = interpolateEnvVars(String(v));
+        }
+        spec.params = params;
+      }
+      return spec;
+    }
+    throw new Error(`config: imports[${i}] must be a package name (string) or { package, params } object`);
+  });
+  return specs;
+}
+
+/**
  * Load and parse the config file. Returns null if no config file found.
  */
 export function loadConfigFile(configPath?: string, environment?: string): FileConfigValues | null {
@@ -117,5 +158,12 @@ export function loadConfigFile(configPath?: string, environment?: string): FileC
   // Interpolate env vars
   merged = interpolateObject(merged);
 
-  return toFileConfigValues(merged);
+  const result = toFileConfigValues(merged);
+
+  // `imports:` is a top-level key (sibling to default/environments), but also
+  // honored under `default:`. Top-level wins when both are present.
+  const imports = normalizeImports(parsed.imports ?? merged.imports);
+  if (imports !== undefined) result.imports = imports;
+
+  return result;
 }

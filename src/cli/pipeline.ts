@@ -3,13 +3,11 @@
  */
 
 import * as fs from 'node:fs';
-import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SimplicitySchemaConfig } from '../core/config.js';
 import type { Logger } from '../core/logger.js';
-import { discoverSchemaFiles } from '../core/files.js';
-import { parseSchemaFile } from '../schema/parser.js';
-import { loadMixins, applyMixins } from '../schema/mixins.js';
+import { discoverAllSources, resolveImportParams } from '../core/sources.js';
+import { buildDesiredState } from '../schema/desired-state.js';
 import {
   getExistingTables,
   getExistingEnums,
@@ -42,8 +40,6 @@ import type {
   ViewSchema,
   MaterializedViewSchema,
   RoleSchema,
-  ExtensionsSchema,
-  MixinSchema,
 } from '../schema/types.js';
 
 export interface PipelineOptions {
@@ -63,8 +59,8 @@ export async function runPipeline(
 ): Promise<ExecuteResult> {
   const { phaseFilter, validateOnly = false } = options;
 
-  // 1. Discover files
-  const discovered = await discoverSchemaFiles(config.baseDir);
+  // 1. Discover files (local schema + imported package schema)
+  const discovered = await discoverAllSources(config);
   logger.debug(
     `Discovered ${discovered.pre.length} pre, ${discovered.schema.length} schema, ${discovered.post.length} post files`,
   );
@@ -79,8 +75,8 @@ export async function runPipeline(
   let desired: DesiredState | null = null;
 
   if (shouldMigrate && discovered.schema.length > 0) {
-    // 2. Parse YAML files
-    desired = await parseDesiredState(discovered.schema, config.baseDir, logger);
+    // 2. Parse YAML files (merging imported sources + local schema)
+    desired = await buildDesiredState(discovered.schema, { importParams: resolveImportParams(config) });
 
     // 3. Normalize SQL expressions via PG round-trip — policy USING/CHECK,
     //    table CHECK constraints, and partial-index WHERE clauses. Without
@@ -173,70 +169,6 @@ export async function runPipeline(
 }
 
 /**
- * Parse all discovered schema files into a DesiredState.
- */
-async function parseDesiredState(
-  schemaFiles: { absolutePath: string; relativePath: string }[],
-  baseDir: string,
-  logger: Logger,
-): Promise<DesiredState> {
-  const tables: TableSchema[] = [];
-  const enums: EnumSchema[] = [];
-  const functions: FunctionSchema[] = [];
-  const views: ViewSchema[] = [];
-  const materializedViews: MaterializedViewSchema[] = [];
-  const roles: RoleSchema[] = [];
-  const mixinSchemas: MixinSchema[] = [];
-  let extensions: ExtensionsSchema | null = null;
-
-  for (const file of schemaFiles) {
-    const content = await readFile(file.absolutePath, 'utf-8');
-    try {
-      const parsed = parseSchemaFile(content);
-      switch (parsed.kind) {
-        case 'table':
-          tables.push(parsed.schema);
-          break;
-        case 'enum':
-          enums.push(parsed.schema);
-          break;
-        case 'function':
-          functions.push(parsed.schema);
-          break;
-        case 'view':
-          views.push(parsed.schema);
-          break;
-        case 'materialized_view':
-          materializedViews.push(parsed.schema);
-          break;
-        case 'role':
-          roles.push(parsed.schema);
-          break;
-        case 'extensions':
-          extensions = parsed.schema;
-          break;
-        case 'mixin':
-          mixinSchemas.push(parsed.schema);
-          break;
-      }
-    } catch (err) {
-      logger.error(`Failed to parse ${file.relativePath}: ${(err as Error).message}`);
-      throw err;
-    }
-  }
-
-  // Apply mixins to tables
-  if (mixinSchemas.length > 0) {
-    const registry = loadMixins(mixinSchemas);
-    for (let i = 0; i < tables.length; i++) {
-      tables[i] = applyMixins(tables[i], registry);
-    }
-  }
-
-  return { tables, enums, functions, views, materializedViews, roles, extensions };
-}
-
-/**
  * Introspect the live database to get the ActualState.
  */
 async function introspectDatabase(config: SimplicitySchemaConfig, logger: Logger): Promise<ActualState> {
@@ -302,8 +234,8 @@ export async function buildDesiredAndActual(
   config: SimplicitySchemaConfig,
   logger: Logger,
 ): Promise<{ desired: DesiredState; actual: ActualState }> {
-  const discovered = await discoverSchemaFiles(config.baseDir);
-  const desired = await parseDesiredState(discovered.schema, config.baseDir, logger);
+  const discovered = await discoverAllSources(config);
+  const desired = await buildDesiredState(discovered.schema, { importParams: resolveImportParams(config) });
 
   // Normalize policy expressions via PG round-trip + hydrate actual seeds
   const normClient = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
@@ -364,7 +296,7 @@ export async function runBaseline(config: SimplicitySchemaConfig, logger: Logger
   try {
     await ensureHistoryTable(client);
 
-    const discovered = await discoverSchemaFiles(config.baseDir);
+    const discovered = await discoverAllSources(config);
     const allFiles = [...discovered.pre, ...discovered.schema, ...discovered.post];
 
     let recorded = 0;
@@ -434,7 +366,7 @@ export async function getStatus(config: SimplicitySchemaConfig, _logger: Logger)
     const history = await getHistory(client, config.pgSchema);
 
     // Discover current files
-    const discovered = await discoverSchemaFiles(config.baseDir);
+    const discovered = await discoverAllSources(config);
     const allFiles = [...discovered.pre, ...discovered.schema, ...discovered.post];
 
     // Count files that differ from recorded hashes

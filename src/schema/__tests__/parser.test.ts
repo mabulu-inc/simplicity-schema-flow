@@ -7,6 +7,7 @@ import {
   parseRole,
   parseExtensions,
   parseMixin,
+  parseExtend,
   parseSchemaFile,
 } from '../parser.js';
 
@@ -1181,5 +1182,71 @@ description: "From description"
 `;
     const result = parseRole(yaml);
     expect(result.comment).toBe('From comment');
+  });
+});
+
+describe('parseExtend', () => {
+  it('parses extend target and column/index/mixin fragments', () => {
+    const yaml = `
+extend: users
+columns:
+  - { name: display_name, type: text }
+indexes:
+  - { columns: [display_name] }
+mixins: [soft_delete]
+`;
+    const result = parseExtend(yaml);
+    expect(result.extend).toBe('users');
+    expect(result.columns).toHaveLength(1);
+    expect(result.columns?.[0].name).toBe('display_name');
+    expect(result.indexes).toHaveLength(1);
+    expect(result.mixins).toEqual(['soft_delete']);
+  });
+
+  it('requires a non-empty extend target', () => {
+    expect(() => parseExtend('extend: ""')).toThrow(/"extend" is required/);
+  });
+
+  it('rejects unknown fields', () => {
+    expect(() => parseExtend('extend: users\nbogus: 1')).toThrow(/unknown field/);
+  });
+
+  it('parseSchemaFile detects extend kind', () => {
+    const parsed = parseSchemaFile('extend: users\ncolumns:\n  - { name: x, type: text }');
+    expect(parsed.kind).toBe('extend');
+    if (parsed.kind === 'extend') {
+      expect(parsed.schema.extend).toBe('users');
+    }
+  });
+});
+
+describe('parseMixin params', () => {
+  it('parses params with defaults', () => {
+    const yaml = `
+mixin: audit
+params:
+  user_table: { default: users }
+  actor_guc: { default: app.actor_id }
+columns:
+  - { name: created_by, type: bigint }
+`;
+    const result = parseMixin(yaml);
+    expect(result.params).toEqual({
+      user_table: { default: 'users' },
+      actor_guc: { default: 'app.actor_id' },
+    });
+  });
+
+  it('parses a param with no default as an empty spec', () => {
+    const result = parseMixin('mixin: audit\nparams:\n  actor_guc: {}');
+    expect(result.params).toEqual({ actor_guc: {} });
+  });
+
+  it('throws when params is not a map', () => {
+    expect(() => parseMixin('mixin: audit\nparams: [a, b]')).toThrow(/"params" must be a map/);
+  });
+
+  it('throws when a param spec is a scalar', () => {
+    expect(() => parseMixin('mixin: audit\nparams:\n  x: 5')).toThrow(/must be a map with an optional "default"/);
   });
 });

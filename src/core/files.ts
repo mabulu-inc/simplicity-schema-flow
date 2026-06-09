@@ -13,7 +13,12 @@ import path from 'node:path';
 export type Phase = 'pre' | 'schema' | 'post';
 
 export interface SchemaFile {
-  /** Relative path from baseDir (e.g., "tables/users.yaml") */
+  /**
+   * Relative path used for history tracking. For local files this is the path
+   * from baseDir (e.g. "tables/users.yaml"); for imported files it is
+   * namespaced by package (e.g. "@smplcty/auth:tables/users.yaml") so paths
+   * from different sources never collide.
+   */
   relativePath: string;
   /** Absolute path on disk */
   absolutePath: string;
@@ -21,6 +26,11 @@ export interface SchemaFile {
   phase: Phase;
   /** SHA-256 hash of file contents */
   hash: string;
+  /**
+   * Package name this file was imported from, or undefined for local files.
+   * Used to attribute conflicts and to scope imported mixin params.
+   */
+  source?: string;
 }
 
 export interface DiscoveredFiles {
@@ -49,11 +59,11 @@ export async function hashFile(filePath: string): Promise<string> {
  * - extensions.yaml  → phase "schema"
  * - post/*.sql       → phase "post" (alphabetical order)
  */
-export async function discoverSchemaFiles(baseDir: string): Promise<DiscoveredFiles> {
+export async function discoverSchemaFiles(baseDir: string, source?: string): Promise<DiscoveredFiles> {
   const abs = path.resolve(baseDir);
 
   const [preFiles, schemaFiles, postFiles] = await Promise.all([
-    discoverPhaseFiles(abs, ['pre/*.sql'], 'pre'),
+    discoverPhaseFiles(abs, ['pre/*.sql'], 'pre', source),
     discoverPhaseFiles(
       abs,
       [
@@ -66,8 +76,9 @@ export async function discoverSchemaFiles(baseDir: string): Promise<DiscoveredFi
         'extensions.yaml',
       ],
       'schema',
+      source,
     ),
-    discoverPhaseFiles(abs, ['post/*.sql'], 'post'),
+    discoverPhaseFiles(abs, ['post/*.sql'], 'post', source),
   ]);
 
   return {
@@ -77,7 +88,12 @@ export async function discoverSchemaFiles(baseDir: string): Promise<DiscoveredFi
   };
 }
 
-async function discoverPhaseFiles(baseDir: string, patterns: string[], phase: Phase): Promise<SchemaFile[]> {
+async function discoverPhaseFiles(
+  baseDir: string,
+  patterns: string[],
+  phase: Phase,
+  source?: string,
+): Promise<SchemaFile[]> {
   const allPaths: string[] = [];
 
   for (const pattern of patterns) {
@@ -95,11 +111,13 @@ async function discoverPhaseFiles(baseDir: string, patterns: string[], phase: Ph
   const files: SchemaFile[] = [];
   for (const absPath of allPaths) {
     const hash = await hashFile(absPath);
+    const rel = path.relative(baseDir, absPath);
     files.push({
-      relativePath: path.relative(baseDir, absPath),
+      relativePath: source ? `${source}:${rel}` : rel,
       absolutePath: absPath,
       phase,
       hash,
+      ...(source !== undefined && { source }),
     });
   }
 

@@ -130,7 +130,7 @@ Print the YAML format reference to stdout.
 
 ### `schema-flow down`
 
-Rollback to the previous migration snapshot. See [rollback](/schema-flow/safety/rollback/).
+Rollback to the previous migration snapshot. See [rollback](/simplicity-schema-flow/safety/rollback/).
 
 ### `schema-flow backfill`
 

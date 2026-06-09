@@ -5,11 +5,34 @@
  * for querying the database and asserting schema state.
  */
 
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { getPool } from '../../src/core/db.js';
 import type { TestProject } from '../../src/testing/index.js';
+import type { SimplicitySchemaConfig, ImportSpec } from '../../src/core/config.js';
 
 export { useTestProject, writeSchema } from '../../src/testing/index.js';
 export type { TestProject } from '../../src/testing/index.js';
+
+/**
+ * Write files into a fake installed package under the project's node_modules,
+ * so `imports:` resolution (which walks up from baseDir) can find its schema.
+ */
+export function writePackage(projectDir: string, pkg: string, files: Record<string, string>): void {
+  const pkgRoot = join(projectDir, 'node_modules', pkg);
+  mkdirSync(pkgRoot, { recursive: true });
+  writeFileSync(join(pkgRoot, 'package.json'), JSON.stringify({ name: pkg, version: '1.0.0' }));
+  for (const [rel, content] of Object.entries(files)) {
+    const full = join(pkgRoot, 'schema', rel);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, content, 'utf-8');
+  }
+}
+
+/** Clone a test project's config with the given package imports added. */
+export function configWithImports(ctx: TestProject, imports: ImportSpec[]): SimplicitySchemaConfig {
+  return { ...ctx.config, imports };
+}
 
 export interface ColumnInfo {
   type: string;

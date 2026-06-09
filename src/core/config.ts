@@ -10,6 +10,16 @@
 
 import { loadConfigFile } from './config-file.js';
 
+/**
+ * A package import. Either a bare package name (string in YAML) or an object
+ * with `package` and optional `params` (used to override mixin parameters
+ * shipped by that package — see parameterized mixins).
+ */
+export interface ImportSpec {
+  package: string;
+  params?: Record<string, string>;
+}
+
 export interface SimplicitySchemaConfig {
   connectionString: string;
   baseDir: string;
@@ -38,6 +48,14 @@ export interface SimplicitySchemaConfig {
    * doesn't fit a CLI flag).
    */
   bootstrapSession?: Record<string, string | number | boolean>;
+  /**
+   * Packages whose `schema/` directories are loaded as additional sources,
+   * merged with the local schema. Resolved from the consumer project's
+   * `node_modules` (walking up from `baseDir`), so the installed dependency
+   * version controls the imported schema. Imported sources load first (in
+   * listed order), then the local schema.
+   */
+  imports?: ImportSpec[];
 }
 
 export interface ConfigOverrides {
@@ -105,6 +123,7 @@ export function resolveConfig(overrides: ConfigOverrides = {}): SimplicitySchema
     if (fileConfig.json !== undefined) config.json = fileConfig.json;
     if (fileConfig.perTxSqlPath !== undefined) config.perTxSqlPath = fileConfig.perTxSqlPath;
     if (fileConfig.bootstrapSession !== undefined) config.bootstrapSession = fileConfig.bootstrapSession;
+    if (fileConfig.imports !== undefined) config.imports = fileConfig.imports;
   }
 
   // Layer 1: CLI overrides

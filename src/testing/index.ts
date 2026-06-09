@@ -23,9 +23,8 @@ import type { SimplicitySchemaConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
 import { runPipeline } from '../cli/pipeline.js';
 import type { ExecuteResult } from '../executor/index.js';
-import { discoverSchemaFiles } from '../core/files.js';
-import { parseSchemaFile } from '../schema/parser.js';
-import { loadMixins, applyMixins } from '../schema/mixins.js';
+import { discoverAllSources, resolveImportParams } from '../core/sources.js';
+import { buildDesiredState } from '../schema/desired-state.js';
 import {
   getExistingTables,
   getExistingEnums,
@@ -37,8 +36,7 @@ import {
 } from '../introspect/index.js';
 import { detectDrift, hydrateActualSeeds } from '../drift/index.js';
 import type { DriftReport } from '../drift/index.js';
-import type { DesiredState, ActualState } from '../planner/index.js';
-import { readFile } from 'node:fs/promises';
+import type { ActualState } from '../planner/index.js';
 import type {
   TableSchema,
   EnumSchema,
@@ -46,8 +44,6 @@ import type {
   ViewSchema,
   MaterializedViewSchema,
   RoleSchema,
-  ExtensionsSchema,
-  MixinSchema,
 } from '../schema/types.js';
 
 export interface TestProject {
@@ -106,7 +102,8 @@ export async function useTestProject(connectionString: string): Promise<TestProj
   }
 
   async function drift(): Promise<DriftReport> {
-    const desired = await parseDesiredState(dir);
+    const discovered = await discoverAllSources(config);
+    const desired = await buildDesiredState(discovered.schema, { importParams: resolveImportParams(config) });
     const actual = await introspectActual(connectionString, schema);
 
     const driftClient = await pool.connect();
@@ -149,58 +146,6 @@ export function writeSchema(dir: string, files: Record<string, string>): void {
 }
 
 // ─── Internal helpers ──────────────────────────────────────────
-
-async function parseDesiredState(baseDir: string): Promise<DesiredState> {
-  const discovered = await discoverSchemaFiles(baseDir);
-  const tables: TableSchema[] = [];
-  const enums: EnumSchema[] = [];
-  const functions: FunctionSchema[] = [];
-  const views: ViewSchema[] = [];
-  const materializedViews: MaterializedViewSchema[] = [];
-  const roles: RoleSchema[] = [];
-  const mixinSchemas: MixinSchema[] = [];
-  let extensions: ExtensionsSchema | null = null;
-
-  for (const file of discovered.schema) {
-    const content = await readFile(file.absolutePath, 'utf-8');
-    const parsed = parseSchemaFile(content);
-    switch (parsed.kind) {
-      case 'table':
-        tables.push(parsed.schema);
-        break;
-      case 'enum':
-        enums.push(parsed.schema);
-        break;
-      case 'function':
-        functions.push(parsed.schema);
-        break;
-      case 'view':
-        views.push(parsed.schema);
-        break;
-      case 'materialized_view':
-        materializedViews.push(parsed.schema);
-        break;
-      case 'role':
-        roles.push(parsed.schema);
-        break;
-      case 'extensions':
-        extensions = parsed.schema;
-        break;
-      case 'mixin':
-        mixinSchemas.push(parsed.schema);
-        break;
-    }
-  }
-
-  if (mixinSchemas.length > 0) {
-    const registry = loadMixins(mixinSchemas);
-    for (let i = 0; i < tables.length; i++) {
-      tables[i] = applyMixins(tables[i], registry);
-    }
-  }
-
-  return { tables, enums, functions, views, materializedViews, roles, extensions };
-}
 
 async function introspectActual(connectionString: string, pgSchema: string): Promise<ActualState> {
   const pool = getPool(connectionString);

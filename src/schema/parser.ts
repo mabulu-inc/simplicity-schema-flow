@@ -34,6 +34,8 @@ import type {
   ExtensionsSchema,
   SchemaGrant,
   MixinSchema,
+  MixinParam,
+  ExtendSchema,
   SeedOnConflict,
 } from './types.js';
 
@@ -749,6 +751,7 @@ export function parseExtensions(yamlStr: string): ExtensionsSchema {
 
 const MIXIN_KEYS = [
   'mixin',
+  'params',
   'columns',
   'indexes',
   'checks',
@@ -771,6 +774,26 @@ export function parseMixin(yamlStr: string): MixinSchema {
   };
   const mixinComment = resolveComment(raw);
   if (mixinComment !== undefined) mixin.comment = mixinComment;
+
+  if (raw.params !== undefined) {
+    if (typeof raw.params !== 'object' || raw.params === null || Array.isArray(raw.params)) {
+      throw new Error(`${ctx}: "params" must be a map of param → { default }`);
+    }
+    const params: Record<string, MixinParam> = {};
+    for (const [name, spec] of Object.entries(raw.params as Record<string, unknown>)) {
+      if (spec === null || spec === undefined) {
+        params[name] = {};
+      } else if (typeof spec === 'object' && !Array.isArray(spec)) {
+        const p: MixinParam = {};
+        const d = (spec as Record<string, unknown>).default;
+        if (d !== undefined) p.default = String(d);
+        params[name] = p;
+      } else {
+        throw new Error(`${ctx}.params.${name}: must be a map with an optional "default"`);
+      }
+    }
+    mixin.params = params;
+  }
 
   if (raw.columns !== undefined)
     mixin.columns = (raw.columns as Record<string, unknown>[]).map((c, i) => parseColumnDef(c, `${ctx}.columns[${i}]`));
@@ -796,9 +819,69 @@ export function parseMixin(yamlStr: string): MixinSchema {
   return mixin;
 }
 
+const EXTEND_KEYS = [
+  'extend',
+  'columns',
+  'indexes',
+  'checks',
+  'triggers',
+  'policies',
+  'grants',
+  'mixins',
+  'rls',
+  'force_rls',
+  'seeds',
+  'seeds_on_conflict',
+] as const;
+
+export function parseExtend(yamlStr: string): ExtendSchema {
+  const raw = parseYaml(yamlStr, { customTags: [sqlTag] }) as Record<string, unknown>;
+  const ctx = 'extend';
+  checkKeys(raw, EXTEND_KEYS, ctx);
+
+  const ext: ExtendSchema = {
+    extend: requireString(raw, 'extend', ctx),
+  };
+
+  if (raw.columns !== undefined)
+    ext.columns = (raw.columns as Record<string, unknown>[]).map((c, i) => parseColumnDef(c, `${ctx}.columns[${i}]`));
+  if (raw.indexes !== undefined)
+    ext.indexes = (raw.indexes as Record<string, unknown>[]).map((idx, i) =>
+      parseIndexDef(idx, `${ctx}.indexes[${i}]`),
+    );
+  if (raw.checks !== undefined)
+    ext.checks = (raw.checks as Record<string, unknown>[]).map((c, i) => parseCheckDef(c, `${ctx}.checks[${i}]`));
+  if (raw.triggers !== undefined)
+    ext.triggers = (raw.triggers as Record<string, unknown>[]).map((t, i) =>
+      parseTriggerDef(t, `${ctx}.triggers[${i}]`),
+    );
+  if (raw.policies !== undefined)
+    ext.policies = (raw.policies as Record<string, unknown>[]).map((p, i) =>
+      parsePolicyDef(p, `${ctx}.policies[${i}]`),
+    );
+  if (raw.grants !== undefined)
+    ext.grants = (raw.grants as Record<string, unknown>[]).map((g, i) => parseGrantDef(g, `${ctx}.grants[${i}]`));
+  if (raw.mixins !== undefined) ext.mixins = raw.mixins as string[];
+  if (raw.rls !== undefined) ext.rls = Boolean(raw.rls);
+  if (raw.force_rls !== undefined) ext.force_rls = Boolean(raw.force_rls);
+  if (raw.seeds !== undefined) ext.seeds = raw.seeds as Record<string, unknown>[];
+  if (raw.seeds_on_conflict !== undefined) ext.seeds_on_conflict = raw.seeds_on_conflict as SeedOnConflict;
+
+  return ext;
+}
+
 // ─── Auto-detect Schema Kind ────────────────────────────────────
 
-export type SchemaKind = 'table' | 'enum' | 'function' | 'view' | 'materialized_view' | 'role' | 'extensions' | 'mixin';
+export type SchemaKind =
+  | 'table'
+  | 'enum'
+  | 'function'
+  | 'view'
+  | 'materialized_view'
+  | 'role'
+  | 'extensions'
+  | 'mixin'
+  | 'extend';
 
 export type ParsedSchema =
   | { kind: 'table'; schema: TableSchema }
@@ -808,11 +891,15 @@ export type ParsedSchema =
   | { kind: 'materialized_view'; schema: MaterializedViewSchema }
   | { kind: 'role'; schema: RoleSchema }
   | { kind: 'extensions'; schema: ExtensionsSchema }
-  | { kind: 'mixin'; schema: MixinSchema };
+  | { kind: 'mixin'; schema: MixinSchema }
+  | { kind: 'extend'; schema: ExtendSchema };
 
 export function parseSchemaFile(yamlStr: string): ParsedSchema {
   const raw = parseYaml(yamlStr, { customTags: [sqlTag] }) as Record<string, unknown>;
 
+  if (raw.extend !== undefined) {
+    return { kind: 'extend', schema: parseExtend(yamlStr) };
+  }
   if (raw.table !== undefined) {
     return { kind: 'table', schema: parseTable(yamlStr) };
   }

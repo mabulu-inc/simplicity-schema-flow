@@ -161,4 +161,66 @@ default:
     expect(result!.allowDestructive).toBe(true);
     expect(result!.verbose).toBe(false);
   });
+
+  it('parses top-level imports as bare package strings', () => {
+    const configPath = join(tmpDir, 'config.yaml');
+    writeFileSync(
+      configPath,
+      `
+imports:
+  - '@smplcty/auth'
+  - '@smplcty/schema-std'
+default:
+  pgSchema: public
+`,
+    );
+    const result = loadConfigFile(configPath);
+    expect(result!.imports).toEqual([{ package: '@smplcty/auth' }, { package: '@smplcty/schema-std' }]);
+  });
+
+  it('parses imports with package + params objects', () => {
+    const configPath = join(tmpDir, 'config.yaml');
+    writeFileSync(
+      configPath,
+      `
+imports:
+  - package: '@smplcty/schema-std'
+    params:
+      user_table: users
+      actor_guc: app.actor_id
+`,
+    );
+    const result = loadConfigFile(configPath);
+    expect(result!.imports).toEqual([
+      { package: '@smplcty/schema-std', params: { user_table: 'users', actor_guc: 'app.actor_id' } },
+    ]);
+  });
+
+  it('interpolates env vars in import params', () => {
+    process.env.GUC = 'app.who';
+    const configPath = join(tmpDir, 'config.yaml');
+    writeFileSync(
+      configPath,
+      `
+imports:
+  - package: '@smplcty/schema-std'
+    params:
+      actor_guc: \${GUC}
+`,
+    );
+    const result = loadConfigFile(configPath);
+    expect(result!.imports![0].params!.actor_guc).toBe('app.who');
+  });
+
+  it('throws when imports is not a list', () => {
+    const configPath = join(tmpDir, 'config.yaml');
+    writeFileSync(configPath, `imports: '@smplcty/auth'\n`);
+    expect(() => loadConfigFile(configPath)).toThrow(/"imports" must be a list/);
+  });
+
+  it('throws when an import object lacks a package', () => {
+    const configPath = join(tmpDir, 'config.yaml');
+    writeFileSync(configPath, `imports:\n  - params: { a: b }\n`);
+    expect(() => loadConfigFile(configPath)).toThrow(/non-empty "package"/);
+  });
 });

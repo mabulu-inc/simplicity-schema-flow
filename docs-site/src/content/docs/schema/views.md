@@ -62,7 +62,7 @@ options:
 
 Regular views support `INSTEAD OF` triggers, which intercept `INSERT`, `UPDATE`, or `DELETE` operations on the view and redirect them to the underlying tables.
 
-Each trigger entry uses the same format as [table triggers](/schema-flow/schema/tables/#triggers), but the `timing` field must be `INSTEAD OF`.
+Each trigger entry uses the same format as [table triggers](/simplicity-schema-flow/schema/tables/#triggers), but the `timing` field must be `INSTEAD OF`.
 
 ```yaml
 triggers:
@@ -117,4 +117,4 @@ comment: 'Aggregated user order statistics'
 
 - When a materialized view's query changes, the tool drops and recreates it, then refreshes the data
 - Indexes, grants, and comments are applied after creation
-- Index format is the same as [table indexes](/schema-flow/schema/tables/#indexes)
+- Index format is the same as [table indexes](/simplicity-schema-flow/schema/tables/#indexes)

@@ -211,7 +211,7 @@ Creates `GENERATED ALWAYS AS (price * quantity) STORED`.
     batch_size: 5000 # optional: backfill batch size (default: 1000)
 ```
 
-See [expand/contract migrations](/schema-flow/safety/expand-contract/) for details.
+See [expand/contract migrations](/simplicity-schema-flow/safety/expand-contract/) for details.
 
 ## Primary key
 
@@ -435,7 +435,7 @@ seeds:
 seeds_on_conflict: 'DO NOTHING' # optional
 ```
 
-See [Seeds](/schema-flow/schema/seeds/) for match-key resolution, conflict behaviour, SQL-expression values, and the serial/identity sequence caveat.
+See [Seeds](/simplicity-schema-flow/schema/seeds/) for match-key resolution, conflict behaviour, SQL-expression values, and the serial/identity sequence caveat.
 
 ## Bootstrap phase
 
@@ -451,7 +451,7 @@ seeds:
   - { name: app-init }
 ```
 
-See [Bootstrap tables & sessions](/schema-flow/schema/bootstrap/) for the apply ordering, the no-FK-to-non-bootstrap rule, the trigger-vs-function gotcha, and `bootstrapSession`.
+See [Bootstrap tables & sessions](/simplicity-schema-flow/schema/bootstrap/) for the apply ordering, the no-FK-to-non-bootstrap rule, the trigger-vs-function gotcha, and `bootstrapSession`.
 
 ## Description alias
 
@@ -465,4 +465,4 @@ mixins:
   - soft_delete
 ```
 
-See [Mixins](/schema-flow/schema/mixins/) for details.
+See [Mixins](/simplicity-schema-flow/schema/mixins/) for details.

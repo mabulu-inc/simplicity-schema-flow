@@ -60,4 +60,4 @@ Destructive operations are separated into a `blocked` list unless `allowDestruct
 
 ### 6. Execute
 
-Run operations in phased order within transactions. See [execution phases](/schema-flow/architecture/execution-phases/).
+Run operations in phased order within transactions. See [execution phases](/simplicity-schema-flow/architecture/execution-phases/).
