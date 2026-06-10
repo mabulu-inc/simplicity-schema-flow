@@ -40,9 +40,10 @@
     "check": "pnpm lint && pnpm format && pnpm typecheck && pnpm build && pnpm test:coverage",
     "ralph": "npx @smplcty/ralph loop",
     "prepare": "husky",
-    "release:patch": "pnpm version patch && git push && git push --tags && gh release create v$(node -p \"require('./package.json').version\") --generate-notes",
-    "release:minor": "pnpm version minor && git push && git push --tags && gh release create v$(node -p \"require('./package.json').version\") --generate-notes",
-    "release:major": "pnpm version major && git push && git push --tags && gh release create v$(node -p \"require('./package.json').version\") --generate-notes"
+    "release": "GITHUB_TOKEN=$(gh auth token) release-it",
+    "release:patch": "GITHUB_TOKEN=$(gh auth token) release-it patch",
+    "release:minor": "GITHUB_TOKEN=$(gh auth token) release-it minor",
+    "release:major": "GITHUB_TOKEN=$(gh auth token) release-it major"
   },
   "lint-staged": {
     "*.{ts,js}": [
@@ -65,6 +66,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@release-it/keep-a-changelog": "^7.1.0",
     "@types/node": "^25.5.0",
     "@types/pg": "^8.20.0",
     "@vitest/coverage-v8": "^4.1.1",
@@ -73,6 +75,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.1",
+    "release-it": "^20.2.0",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.57.2",
     "vitest": "^4.1.1"
