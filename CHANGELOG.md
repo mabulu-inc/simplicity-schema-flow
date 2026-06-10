@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Corrected 16 internal documentation links that pointed at the wrong base
+  path (`/schema-flow/…` instead of `/simplicity-schema-flow/…`), so
+  cross-page links in the docs site now resolve.
+
 ## [0.11.0] - 2026-06-09
 
 ### Added
