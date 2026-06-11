@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Mixin parameter interpolation no longer treats `{{...}}` tokens inside
+  documentation `comment` text as real parameters. A mixin (or any of its
+  columns, indexes, checks, triggers, or policies) can now describe its own
+  `{{param}}` syntax in a comment without the loader aborting with an "unknown
+  or unset mixin param" error. Substitution applies only to structural fields;
+  comments and the mixin name are left verbatim.
 - Corrected 16 internal documentation links that pointed at the wrong base
   path (`/schema-flow/…` instead of `/simplicity-schema-flow/…`), so
   cross-page links in the docs site now resolve.

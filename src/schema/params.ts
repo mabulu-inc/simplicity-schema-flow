@@ -12,6 +12,14 @@ import type { MixinSchema, FunctionSchema } from './types.js';
 
 const PARAM_RE = /\{\{(\w+)\}\}/g;
 
+/**
+ * Object keys whose string values are documentation/metadata, never structural
+ * SQL. They are left inert at any nesting depth so a comment (or the mixin name)
+ * can mention `{{param}}` syntax in prose without the loader mistaking it for a
+ * real, unresolved placeholder.
+ */
+const METADATA_KEYS = new Set(['comment', 'mixin']);
+
 /** Replace `{{name}}` placeholders in a plain string, throwing on unresolved. */
 export function interpolateParamString(str: string, params: Record<string, string>, context: string): string {
   return str.replace(PARAM_RE, (_m, name: string) => {
@@ -23,32 +31,36 @@ export function interpolateParamString(str: string, params: Record<string, strin
 }
 
 /**
- * Deep-substitute params into every string value of an object via a JSON
- * round-trip. Param values are JSON-escaped so they remain valid inside the
- * serialized string. Object keys never contain placeholders.
+ * Deep-substitute params into every structural string of a value, skipping
+ * metadata keys (`comment`, the mixin name) at any depth. Operating on real
+ * string values means param values need no JSON escaping.
  */
-function interpolateObject<T>(obj: T, params: Record<string, string>, context: string): T {
-  const json = JSON.stringify(obj);
-  const out = json.replace(PARAM_RE, (_m, name: string) => {
-    if (!(name in params)) {
-      throw new Error(`${context}: references unknown or unset mixin param "{{${name}}}"`);
+function interpolateValue<T>(value: T, params: Record<string, string>, context: string): T {
+  if (typeof value === 'string') {
+    return interpolateParamString(value, params, context) as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => interpolateValue(item, params, context)) as T;
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, v] of Object.entries(value)) {
+      out[key] = METADATA_KEYS.has(key) ? v : interpolateValue(v, params, context);
     }
-    // Strip the surrounding quotes JSON.stringify adds — we're already inside a
-    // JSON string literal — keeping any interior escaping.
-    return JSON.stringify(params[name]).slice(1, -1);
-  });
-  return JSON.parse(out) as T;
+    return out as T;
+  }
+  return value;
 }
 
 /**
  * Interpolate a mixin's `{{param}}` placeholders. The `params` field (metadata)
- * is dropped from the result. Returns the mixin unchanged when it declares no
- * params and the body contains no placeholders.
+ * is dropped from the result. `comment` prose and the `mixin` name are left
+ * untouched, so a mixin can document its own params without aborting the run.
  */
 export function interpolateMixin(mixin: MixinSchema, params: Record<string, string>): MixinSchema {
   const rest: MixinSchema = { ...mixin };
   delete rest.params;
-  return interpolateObject(rest, params, `mixin "${mixin.mixin}"`);
+  return interpolateValue(rest, params, `mixin "${mixin.mixin}"`);
 }
 
 /** Interpolate `{{param}}` placeholders in a shipped function's body. */

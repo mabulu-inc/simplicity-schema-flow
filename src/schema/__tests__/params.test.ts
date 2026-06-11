@@ -45,6 +45,34 @@ describe('interpolateMixin', () => {
     const mixin: MixinSchema = { mixin: 'm', columns: [{ name: 'c', type: '{{t}}' }] };
     expect(() => interpolateMixin(mixin, {})).toThrow(/mixin "m": references unknown or unset mixin param "\{\{t\}\}"/);
   });
+
+  it('leaves {{...}} prose in the mixin comment inert', () => {
+    const mixin: MixinSchema = {
+      mixin: 'audit',
+      params: { user_table: { default: 'users' } },
+      comment: 'Interpolates {{user_table}} and {{undeclared}} into columns.',
+      columns: [{ name: 'changed_by', type: 'bigint', references: { table: '{{user_table}}', column: 'user_id' } }],
+    };
+    const result = interpolateMixin(mixin, { user_table: 'accounts' });
+    expect(result.comment).toBe('Interpolates {{user_table}} and {{undeclared}} into columns.');
+    expect(result.columns![0].references).toEqual({ table: 'accounts', column: 'user_id' });
+  });
+
+  it('leaves {{...}} prose in a nested column comment inert', () => {
+    const mixin: MixinSchema = {
+      mixin: 'audit',
+      columns: [{ name: 'changed_by', type: '{{t}}', comment: 'Set via {{actor_guc}}, see docs.' }],
+    };
+    const result = interpolateMixin(mixin, { t: 'bigint' });
+    expect(result.columns![0].type).toBe('bigint');
+    expect(result.columns![0].comment).toBe('Set via {{actor_guc}}, see docs.');
+  });
+
+  it('does not interpolate the mixin name itself', () => {
+    const mixin: MixinSchema = { mixin: '{{nope}}', columns: [{ name: 'c', type: 'text' }] };
+    const result = interpolateMixin(mixin, {});
+    expect(result.mixin).toBe('{{nope}}');
+  });
 });
 
 describe('interpolateFunctionBody', () => {
