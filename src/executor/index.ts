@@ -92,13 +92,44 @@ async function withOpContext<T>(op: Operation, fn: () => Promise<T>): Promise<T>
   }
 }
 
+export interface AdvisoryLockOptions {
+  /** Total time to keep retrying before giving up. Default 30s. */
+  maxWaitMs?: number;
+  /** Initial delay between attempts; doubles each retry. Default 50ms. */
+  baseDelayMs?: number;
+  /** Upper bound on the backoff delay. Default 1s. */
+  maxDelayMs?: number;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
- * Acquire a PostgreSQL advisory lock (non-blocking).
- * Returns true if the lock was acquired, false if already held.
+ * Acquire the global advisory lock, retrying with exponential backoff until
+ * it is free or the budget runs out. Returns true once held, false if the
+ * lock stayed held for the whole `maxWaitMs` window.
+ *
+ * The lock key is global (one per database, not per pgSchema) on purpose: it
+ * serializes the shared `_smplcty_schema_flow` bootstrap that every schema's
+ * migration touches. Keying it per-schema would let two migrations race that
+ * bootstrap, and PG's `CREATE SCHEMA/TABLE IF NOT EXISTS` is not concurrency-
+ * safe. So distinct schemas migrating in parallel (e.g. parallel
+ * `useTestProject` test files) wait their turn here rather than failing — the
+ * old non-blocking variant threw on contention and broke that workflow.
  */
-export async function acquireAdvisoryLock(client: pg.PoolClient): Promise<boolean> {
-  const res = await client.query('SELECT pg_try_advisory_lock($1) AS acquired', [ADVISORY_LOCK_KEY]);
-  return res.rows[0].acquired === true;
+export async function acquireAdvisoryLock(client: pg.PoolClient, opts: AdvisoryLockOptions = {}): Promise<boolean> {
+  const { maxWaitMs = 30_000, baseDelayMs = 50, maxDelayMs = 1_000 } = opts;
+  const deadline = Date.now() + maxWaitMs;
+  let delay = baseDelayMs;
+  for (;;) {
+    const res = await client.query('SELECT pg_try_advisory_lock($1) AS acquired', [ADVISORY_LOCK_KEY]);
+    if (res.rows[0].acquired === true) return true;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    await sleep(Math.min(delay, remaining));
+    delay = Math.min(delay * 2, maxDelayMs);
+  }
 }
 
 /**

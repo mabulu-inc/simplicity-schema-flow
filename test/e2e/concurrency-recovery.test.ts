@@ -19,8 +19,11 @@ describe('E2E: Concurrency and recovery', () => {
     }
   });
 
-  // (1) Advisory lock — migration acquires lock, verify lock exists during execution
-  it('acquires advisory lock during migration and blocks concurrent runs', async () => {
+  // (1) Advisory lock — migration waits for a held lock, then proceeds.
+  // The lock serializes migrations (it does not fail fast on contention):
+  // while another holder has it, the migration retries with backoff and
+  // succeeds once the lock is released, rather than throwing.
+  it('waits for a held advisory lock and succeeds once it is released', async () => {
     ctx = await useTestProject(DATABASE_URL);
 
     writeSchema(ctx.dir, {
@@ -35,19 +38,28 @@ columns:
 `,
     });
 
-    // Hold the advisory lock from a separate client on the test database
+    // Hold the advisory lock from a separate client on the test database.
     const pool = getPool(ctx.config.connectionString);
     const holdClient = await pool.connect();
-    try {
-      const acquired = await acquireAdvisoryLock(holdClient);
-      expect(acquired).toBe(true);
+    const acquired = await acquireAdvisoryLock(holdClient);
+    expect(acquired).toBe(true);
 
-      // Now migration should fail because it cannot acquire the lock
-      await expect(runMigration(ctx)).rejects.toThrow('Could not acquire advisory lock');
-    } finally {
+    // Kick off the migration — it must block on the lock rather than fail.
+    const migrationPromise = runMigration(ctx);
+
+    // Release the lock shortly after; the migration's retry loop then wins it.
+    let released = false;
+    setTimeout(async () => {
+      released = true;
       await releaseAdvisoryLock(holdClient);
       holdClient.release();
-    }
+    }, 300);
+
+    const result = await migrationPromise;
+    // The migration could only have completed after the lock was freed.
+    expect(released).toBe(true);
+    expect(result.executed).toBeGreaterThan(0);
+    await assertTableExists(ctx, 'items');
   });
 
   it('releases advisory lock after successful migration', async () => {

@@ -673,9 +673,16 @@ function diffTables(
  * Wraps an ADD CONSTRAINT statement in a DO block that checks pg_constraint
  * first, making the operation idempotent. PostgreSQL does not support
  * ADD CONSTRAINT IF NOT EXISTS, so we use a PL/pgSQL guard.
+ *
+ * `conname` is unique per-relation, not per-database, so the guard MUST scope
+ * to the target table via `conrelid` — otherwise an identically-named
+ * constraint in a *different* schema (e.g. parallel `useTestProject` schemas
+ * sharing one database) makes the guard skip a constraint that doesn't yet
+ * exist here, and the paired VALIDATE then fails. `qualifiedTable` is the
+ * fully-qualified `"schema"."table"` identifier.
  */
-function wrapConstraintIdempotent(constraintName: string, alterSql: string): string {
-  return `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${constraintName}') THEN ${alterSql}; END IF; END $$`;
+function wrapConstraintIdempotent(constraintName: string, alterSql: string, qualifiedTable: string): string {
+  return `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${constraintName}' AND conrelid = '${qualifiedTable}'::regclass) THEN ${alterSql}; END IF; END $$`;
 }
 
 /**
@@ -695,6 +702,7 @@ function buildTightenNotNullOp(table: string, column: string, pgSchema: string):
     wrapConstraintIdempotent(
       checkName,
       `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${checkName}" CHECK ("${column}" IS NOT NULL) NOT VALID`,
+      `"${pgSchema}"."${table}"`,
     ),
     `ALTER TABLE "${pgSchema}"."${table}" VALIDATE CONSTRAINT "${checkName}"`,
     `ALTER TABLE "${pgSchema}"."${table}" ALTER COLUMN "${column}" SET NOT NULL`,
@@ -868,7 +876,7 @@ function createTableOps(
       type: 'add_foreign_key_not_valid',
       phase: 8,
       objectName: `${table.table}.${col.name}`,
-      sql: wrapConstraintIdempotent(constraintName, fkSql),
+      sql: wrapConstraintIdempotent(constraintName, fkSql, `"${pgSchema}"."${table.table}"`),
       destructive: false,
     });
     ops.push({
@@ -1086,7 +1094,7 @@ function alterTableOps(
           type: 'add_foreign_key_not_valid',
           phase: 8,
           objectName: `${desired.table}.${col.name}`,
-          sql: wrapConstraintIdempotent(constraintName, fkSql),
+          sql: wrapConstraintIdempotent(constraintName, fkSql, `"${pgSchema}"."${desired.table}"`),
           destructive: false,
         });
         ops.push({
@@ -1524,7 +1532,7 @@ function createIndexOps(table: string, idx: IndexDef, pgSchema: string): Operati
     type: 'add_unique_constraint',
     phase: 8,
     objectName: `${table}.${name}`,
-    sql: `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${name}') THEN ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${name}" UNIQUE USING INDEX "${name}"${def}; END IF; END $$`,
+    sql: `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${name}' AND conrelid = '"${pgSchema}"."${table}"'::regclass) THEN ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${name}" UNIQUE USING INDEX "${name}"${def}; END IF; END $$`,
     destructive: false,
     concurrent: true,
   };
@@ -1579,6 +1587,7 @@ function diffChecks(table: string, desired: CheckDef[], existing: CheckDef[], pg
         sql: wrapConstraintIdempotent(
           check.name,
           `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${check.name}" CHECK (${check.expression})`,
+          `"${pgSchema}"."${table}"`,
         ),
         destructive: false,
       });
@@ -1598,6 +1607,7 @@ function diffChecks(table: string, desired: CheckDef[], existing: CheckDef[], pg
         sql: wrapConstraintIdempotent(
           check.name,
           `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${check.name}" CHECK (${check.expression})`,
+          `"${pgSchema}"."${table}"`,
         ),
         destructive: false,
       });
@@ -1697,7 +1707,7 @@ function diffExclusionConstraints(
         type: 'add_exclusion_constraint',
         phase: 6,
         objectName: `${table}.${name}`,
-        sql: `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${name}') THEN ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${name}" ${exclusionClause(ec)}; END IF; END $$`,
+        sql: `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${name}' AND conrelid = '"${pgSchema}"."${table}"'::regclass) THEN ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${name}" ${exclusionClause(ec)}; END IF; END $$`,
         destructive: false,
       });
     }

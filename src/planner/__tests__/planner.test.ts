@@ -836,6 +836,45 @@ describe('Planner', () => {
       expect(valOps).toHaveLength(1);
     });
 
+    it('scopes constraint idempotency guards to the target table via conrelid (#58)', () => {
+      // conname is unique per-relation, not per-database. Two managed schemas
+      // sharing one DB (parallel useTestProject) create identically-named
+      // constraints; an unqualified guard would see the *other* schema's name
+      // and skip the ADD, then the paired VALIDATE fails. Every guard must
+      // scope to the target table's conrelid.
+      // On the ALTER path a FK, a check, and a unique `as_constraint` index
+      // added to an existing table each route through their own guarded op
+      // (planner L678/FK, L1579/check, L1527/unique) — the three sites the
+      // bug touched. On CREATE these are folded inline into CREATE TABLE.
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'orders',
+          columns: [
+            { name: 'id', type: 'uuid', primary_key: true },
+            { name: 'user_id', type: 'uuid', references: { table: 'users', column: 'id' } },
+            { name: 'qty', type: 'int' },
+          ],
+          checks: [{ name: 'qty_positive', expression: 'qty > 0' }],
+          indexes: [{ name: 'uq_orders_user', columns: ['user_id'], unique: true, as_constraint: true }],
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('orders', {
+        table: 'orders',
+        columns: [{ name: 'id', type: 'uuid', primary_key: true }],
+      });
+      const guards = buildPlan(desired, actual, { pgSchema: 'tenant_a' }).operations.filter((o) =>
+        o.sql.includes('IF NOT EXISTS (SELECT 1 FROM pg_constraint'),
+      );
+      // FK, check, and unique-as-constraint guards should all be present...
+      expect(guards.length).toBeGreaterThanOrEqual(3);
+      // ...and every one of them must scope by conrelid to the target schema.
+      for (const op of guards) {
+        expect(op.sql).toContain(`conrelid = '"tenant_a"."orders"'::regclass`);
+      }
+    });
+
     it('creates FK with on_update option', () => {
       const desired = emptyDesired();
       desired.tables = [

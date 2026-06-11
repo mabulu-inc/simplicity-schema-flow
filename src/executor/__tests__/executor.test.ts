@@ -32,19 +32,97 @@ describe('Executor', () => {
       }
     });
 
-    it('should fail to acquire lock if already held by another session', async () => {
+    it('returns false once the retry budget is exhausted while the lock is held', async () => {
       const pool = getPool(DATABASE_URL);
       const client1 = await pool.connect();
       const client2 = await pool.connect();
       try {
         const first = await acquireAdvisoryLock(client1);
         expect(first).toBe(true);
-        const second = await acquireAdvisoryLock(client2);
+        // Bounded wait: with the lock held, the retry loop polls until the
+        // budget runs out, then gives up rather than blocking forever.
+        const second = await acquireAdvisoryLock(client2, { maxWaitMs: 150, baseDelayMs: 10, maxDelayMs: 40 });
         expect(second).toBe(false);
         await releaseAdvisoryLock(client1);
       } finally {
         client1.release();
         client2.release();
+      }
+    });
+
+    it('blocks then acquires the lock once the holder releases it (retry with backoff)', async () => {
+      const pool = getPool(DATABASE_URL);
+      const client1 = await pool.connect();
+      const client2 = await pool.connect();
+      try {
+        expect(await acquireAdvisoryLock(client1)).toBe(true);
+        // Release the lock shortly after client2 starts waiting; client2 must
+        // keep retrying within its budget and succeed rather than failing fast.
+        const release = (async () => {
+          await new Promise((r) => setTimeout(r, 100));
+          await releaseAdvisoryLock(client1);
+        })();
+        const acquired = await acquireAdvisoryLock(client2, { maxWaitMs: 5_000, baseDelayMs: 20, maxDelayMs: 100 });
+        await release;
+        expect(acquired).toBe(true);
+        await releaseAdvisoryLock(client2);
+      } finally {
+        client1.release();
+        client2.release();
+      }
+    });
+
+    it('lets two schemas migrate concurrently against one database (#58 parallel isolation)', async () => {
+      const schemaA = uniqueSchema();
+      const schemaB = uniqueSchema();
+      const pool = getPool(DATABASE_URL);
+      const setup = await pool.connect();
+      try {
+        await setup.query(`CREATE SCHEMA "${schemaA}"`);
+        await setup.query(`CREATE SCHEMA "${schemaB}"`);
+      } finally {
+        setup.release();
+      }
+      try {
+        const opsFor = (schema: string): Operation[] => [
+          {
+            type: 'create_table',
+            phase: 6,
+            objectName: 'widgets',
+            sql: `CREATE TABLE "${schema}"."widgets" ("id" uuid PRIMARY KEY)`,
+            destructive: false,
+          },
+        ];
+        // Both migrations fire at once against the same DB. Under the old
+        // non-blocking lock the loser threw "Could not acquire advisory lock";
+        // now it waits its turn and both succeed.
+        const [resA, resB] = await Promise.all([
+          execute({ connectionString: DATABASE_URL, operations: opsFor(schemaA), pgSchema: schemaA, logger }),
+          execute({ connectionString: DATABASE_URL, operations: opsFor(schemaB), pgSchema: schemaB, logger }),
+        ]);
+        expect(resA.executed).toBe(1);
+        expect(resB.executed).toBe(1);
+
+        const check = await pool.connect();
+        try {
+          const res = await check.query(
+            `SELECT table_schema FROM information_schema.tables
+             WHERE table_name = 'widgets' AND table_schema IN ($1, $2)
+             ORDER BY table_schema`,
+            [schemaA, schemaB],
+          );
+          expect(res.rows.map((r) => r.table_schema).sort()).toEqual([schemaA, schemaB].sort());
+        } finally {
+          check.release();
+        }
+      } finally {
+        const cleanup = await pool.connect();
+        try {
+          await cleanup.query(`DROP SCHEMA IF EXISTS "${schemaA}" CASCADE`);
+          await cleanup.query(`DROP SCHEMA IF EXISTS "${schemaB}" CASCADE`);
+        } finally {
+          cleanup.release();
+        }
       }
     });
   });

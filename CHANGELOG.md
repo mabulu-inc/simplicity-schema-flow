@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Parallel migrations against separate schemas in one database no longer
+  collide. Constraint existence guards (foreign keys, checks, unique-backed
+  and exclusion constraints) now scope their lookup to the target table, not
+  just the constraint name — which is unique per schema, not per database. A
+  same-named constraint living in another schema (e.g. a sibling test schema,
+  or an orphaned `test_*` schema left by a failed run) no longer causes a
+  migration to skip its own `ADD CONSTRAINT` and then fail validating it.
+  Consumers using one schema per parallel test can drop the
+  `fileParallelism: false` workaround. (#58)
 - Mixin parameter interpolation no longer treats `{{...}}` tokens inside
   documentation `comment` text as real parameters. A mixin (or any of its
   columns, indexes, checks, triggers, or policies) can now describe its own
@@ -18,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected 16 internal documentation links that pointed at the wrong base
   path (`/schema-flow/…` instead of `/simplicity-schema-flow/…`), so
   cross-page links in the docs site now resolve.
+
+### Changed
+
+- Migrations now wait for the advisory lock instead of failing immediately
+  when another migration is in progress. Acquisition retries with exponential
+  backoff (up to 30s) and only errors if the lock stays held for the whole
+  window. Two migrations targeting different schemas in the same database now
+  queue and both succeed, rather than the second aborting with "Could not
+  acquire advisory lock."
 
 ## [0.11.0] - 2026-06-09
 
