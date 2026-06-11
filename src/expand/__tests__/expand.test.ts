@@ -1,4 +1,5 @@
 import { describe, it, expect, afterAll, beforeEach } from 'vitest';
+import pg from 'pg';
 import {
   ensureExpandStateTable,
   planExpandColumn,
@@ -57,6 +58,31 @@ describe('Expand/Contract', () => {
         expect(res.rows.length).toBe(1);
       } finally {
         client.release();
+      }
+    });
+
+    // Concurrent first-runs (parallel test files sharing one database) race on
+    // the catalog-level CREATE: one loses with 23505. The bootstrap must
+    // tolerate that and converge — and create the shared schema itself, not
+    // rely on the caller to.
+    it('tolerates many concurrent first-run bootstraps without erroring', async () => {
+      const N = 20;
+      const racePool = new pg.Pool({ connectionString: DATABASE_URL, max: N });
+      try {
+        await racePool.query('DROP SCHEMA IF EXISTS _smplcty_schema_flow CASCADE');
+        const clients = await Promise.all(Array.from({ length: N }, () => racePool.connect()));
+        const results = await Promise.allSettled(clients.map((c) => ensureExpandStateTable(c)));
+        clients.forEach((c) => c.release());
+
+        expect(results.filter((r) => r.status === 'rejected')).toHaveLength(0);
+
+        const res = await racePool.query(
+          `SELECT table_name FROM information_schema.tables
+           WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'expand_state'`,
+        );
+        expect(res.rows.length).toBe(1);
+      } finally {
+        await racePool.end();
       }
     });
   });
@@ -264,6 +290,7 @@ describe('Expand/Contract', () => {
           old_column: 'email',
           transform: 'lower(email)',
           trigger_name: `_smplcty_sf_dw_${testSchema}_users_email_lower`,
+          pg_schema: testSchema,
           status: 'expanded',
           created_at: new Date(),
         };

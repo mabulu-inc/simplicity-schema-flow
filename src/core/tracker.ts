@@ -8,6 +8,7 @@
 import type pg from 'pg';
 import type { Phase } from './files.js';
 import type { Logger } from './logger.js';
+import { runBootstrapDDL } from './db.js';
 
 export interface HistoryEntry {
   filePath: string;
@@ -87,30 +88,38 @@ async function renameLegacyDualWriteObjects(client: pg.PoolClient, logger?: Logg
  */
 export async function ensureHistoryTable(client: pg.PoolClient, logger?: Logger): Promise<void> {
   await migrateLegacySchema(client, logger);
-  await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS _smplcty_schema_flow.history (
-      file_path  text NOT NULL,
-      file_hash  text NOT NULL,
-      phase      text NOT NULL,
-      pg_schema  text NOT NULL DEFAULT 'public',
-      applied_at timestamptz NOT NULL DEFAULT now(),
-      PRIMARY KEY (file_path, pg_schema)
-    )
-  `);
+  // Tolerate concurrent first-runs: parallel migrations against one database
+  // (one schema each) can race on creating this shared schema/table, where
+  // CREATE ... IF NOT EXISTS still throws a catalog duplicate. The block is
+  // idempotent, so runBootstrapDDL re-runs it after a lost race.
+  await runBootstrapDDL(async () => {
+    await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS _smplcty_schema_flow.history (
+        file_path  text NOT NULL,
+        file_hash  text NOT NULL,
+        phase      text NOT NULL,
+        pg_schema  text NOT NULL DEFAULT 'public',
+        applied_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (file_path, pg_schema)
+      )
+    `);
 
-  // Upgrade pre-pgSchema-aware history table in place. The column add and PK
-  // swap are both idempotent: existing rows get pg_schema='public', and the
-  // old single-column PK is replaced with the composite key.
-  const hasColumn = await client.query(
-    `SELECT 1 FROM information_schema.columns
-     WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'history' AND column_name = 'pg_schema'`,
-  );
-  if (hasColumn.rowCount === 0) {
-    await client.query("ALTER TABLE _smplcty_schema_flow.history ADD COLUMN pg_schema text NOT NULL DEFAULT 'public'");
-    await client.query('ALTER TABLE _smplcty_schema_flow.history DROP CONSTRAINT IF EXISTS history_pkey');
-    await client.query('ALTER TABLE _smplcty_schema_flow.history ADD PRIMARY KEY (file_path, pg_schema)');
-  }
+    // Upgrade pre-pgSchema-aware history table in place. The column add and PK
+    // swap are both idempotent: existing rows get pg_schema='public', and the
+    // old single-column PK is replaced with the composite key.
+    const hasColumn = await client.query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'history' AND column_name = 'pg_schema'`,
+    );
+    if (hasColumn.rowCount === 0) {
+      await client.query(
+        "ALTER TABLE _smplcty_schema_flow.history ADD COLUMN pg_schema text NOT NULL DEFAULT 'public'",
+      );
+      await client.query('ALTER TABLE _smplcty_schema_flow.history DROP CONSTRAINT IF EXISTS history_pkey');
+      await client.query('ALTER TABLE _smplcty_schema_flow.history ADD PRIMARY KEY (file_path, pg_schema)');
+    }
+  });
 }
 
 /**

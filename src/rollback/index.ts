@@ -8,7 +8,7 @@
 import type pg from 'pg';
 import type { Operation, OperationType } from '../planner/index.js';
 import type { Logger } from '../core/logger.js';
-import { acquireClient } from '../core/db.js';
+import { acquireClient, runBootstrapDDL } from '../core/db.js';
 import { acquireAdvisoryLock, releaseAdvisoryLock } from '../executor/index.js';
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -37,15 +37,19 @@ export interface RunDownResult {
  * Ensure the _smplcty_schema_flow.snapshots table exists.
  */
 export async function ensureSnapshotsTable(client: pg.PoolClient): Promise<void> {
-  await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS _smplcty_schema_flow.snapshots (
-      id          serial PRIMARY KEY,
-      operations  jsonb NOT NULL,
-      pg_schema   text NOT NULL DEFAULT 'public',
-      created_at  timestamptz NOT NULL DEFAULT now()
-    )
-  `);
+  // Tolerate concurrent first-runs racing on the shared schema/table — see
+  // runBootstrapDDL.
+  await runBootstrapDDL(async () => {
+    await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS _smplcty_schema_flow.snapshots (
+        id          serial PRIMARY KEY,
+        operations  jsonb NOT NULL,
+        pg_schema   text NOT NULL DEFAULT 'public',
+        created_at  timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+  });
 }
 
 /**

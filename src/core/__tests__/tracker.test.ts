@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
 import pg from 'pg';
 import {
   ensureHistoryTable,
@@ -73,6 +73,34 @@ describe('tracker', () => {
       `);
       const columns = result.rows.map((r) => r.column_name);
       expect(columns).toEqual(['file_path', 'file_hash', 'phase', 'pg_schema', 'applied_at']);
+    });
+
+    // `CREATE SCHEMA/TABLE IF NOT EXISTS` is not atomic against the system
+    // catalogs: concurrent first-runs (e.g. parallel test files sharing one
+    // database) both pass the existence check, then one loses with 23505 on
+    // pg_type_typname_nsp_index. ensureHistoryTable must tolerate that and
+    // converge, since its statements are all idempotent.
+    it('tolerates many concurrent first-run bootstraps without erroring', async () => {
+      const N = 20;
+      const racePool = new pg.Pool({ connectionString: DATABASE_URL, max: N });
+      try {
+        await racePool.query('DROP SCHEMA IF EXISTS _smplcty_schema_flow CASCADE');
+        // Pre-connect so every session hits the CREATE in the same tight
+        // window — that maximises the catalog collision the fix must absorb.
+        const clients = await Promise.all(Array.from({ length: N }, () => racePool.connect()));
+        const results = await Promise.allSettled(clients.map((c) => ensureHistoryTable(c)));
+        clients.forEach((c) => c.release());
+
+        expect(results.filter((r) => r.status === 'rejected')).toHaveLength(0);
+
+        const res = await racePool.query(`
+          SELECT table_name FROM information_schema.tables
+          WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'history'
+        `);
+        expect(res.rows).toHaveLength(1);
+      } finally {
+        await racePool.end();
+      }
     });
   });
 

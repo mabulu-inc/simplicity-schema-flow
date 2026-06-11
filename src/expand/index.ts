@@ -21,7 +21,7 @@
 import type pg from 'pg';
 import type { ExpandDef } from '../schema/types.js';
 import type { Logger } from '../core/logger.js';
-import { acquireClient } from '../core/db.js';
+import { acquireClient, runBootstrapDDL } from '../core/db.js';
 import { acquireAdvisoryLock, releaseAdvisoryLock } from '../executor/index.js';
 
 // ─── Operation types for expand/contract ────────────────────────
@@ -79,51 +79,57 @@ export interface ExpandState {
  * created the table under an older schema-flow version.
  */
 export async function ensureExpandStateTable(client: pg.PoolClient): Promise<void> {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS _smplcty_schema_flow.expand_state (
-      id SERIAL PRIMARY KEY,
-      table_name TEXT NOT NULL,
-      new_column TEXT NOT NULL,
-      old_column TEXT NOT NULL,
-      transform TEXT NOT NULL,
-      trigger_name TEXT NOT NULL,
-      pg_schema TEXT NOT NULL DEFAULT 'public',
-      status TEXT NOT NULL DEFAULT 'expanded',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `);
-
-  // Upgrade pre-pgSchema-aware expand_state in place. The `table_name`
-  // column historically encodes the schema as a `"schema.table"` string;
-  // preserve that as the fallback default while making it explicit.
-  const hasColumn = await client.query(
-    `SELECT 1 FROM information_schema.columns
-     WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'expand_state' AND column_name = 'pg_schema'`,
-  );
-  if (hasColumn.rowCount === 0) {
-    await client.query(
-      "ALTER TABLE _smplcty_schema_flow.expand_state ADD COLUMN pg_schema TEXT NOT NULL DEFAULT 'public'",
-    );
+  // Tolerate concurrent first-runs racing on the shared schema/table — see
+  // runBootstrapDDL. Creating the schema here (not in callers) keeps the whole
+  // bootstrap inside the retry.
+  await runBootstrapDDL(async () => {
+    await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
     await client.query(`
-      UPDATE _smplcty_schema_flow.expand_state
-      SET pg_schema = split_part(table_name, '.', 1)
-      WHERE position('.' in table_name) > 0
+      CREATE TABLE IF NOT EXISTS _smplcty_schema_flow.expand_state (
+        id SERIAL PRIMARY KEY,
+        table_name TEXT NOT NULL,
+        new_column TEXT NOT NULL,
+        old_column TEXT NOT NULL,
+        transform TEXT NOT NULL,
+        trigger_name TEXT NOT NULL,
+        pg_schema TEXT NOT NULL DEFAULT 'public',
+        status TEXT NOT NULL DEFAULT 'expanded',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
     `);
-  }
 
-  await client.query(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'uq_expand_state_table_col'
-          AND conrelid = '_smplcty_schema_flow.expand_state'::regclass
-      ) THEN
-        ALTER TABLE _smplcty_schema_flow.expand_state
-          ADD CONSTRAINT uq_expand_state_table_col UNIQUE (table_name, new_column);
-      END IF;
-    END $$;
-  `);
+    // Upgrade pre-pgSchema-aware expand_state in place. The `table_name`
+    // column historically encodes the schema as a `"schema.table"` string;
+    // preserve that as the fallback default while making it explicit.
+    const hasColumn = await client.query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_schema = '_smplcty_schema_flow' AND table_name = 'expand_state' AND column_name = 'pg_schema'`,
+    );
+    if (hasColumn.rowCount === 0) {
+      await client.query(
+        "ALTER TABLE _smplcty_schema_flow.expand_state ADD COLUMN pg_schema TEXT NOT NULL DEFAULT 'public'",
+      );
+      await client.query(`
+        UPDATE _smplcty_schema_flow.expand_state
+        SET pg_schema = split_part(table_name, '.', 1)
+        WHERE position('.' in table_name) > 0
+      `);
+    }
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'uq_expand_state_table_col'
+            AND conrelid = '_smplcty_schema_flow.expand_state'::regclass
+        ) THEN
+          ALTER TABLE _smplcty_schema_flow.expand_state
+            ADD CONSTRAINT uq_expand_state_table_col UNIQUE (table_name, new_column);
+        END IF;
+      END $$;
+    `);
+  });
 }
 
 // ─── Plan Expand ────────────────────────────────────────────────
@@ -268,7 +274,6 @@ CREATE OR REPLACE TRIGGER ${trgName}
  * re-running the migration after the state row already exists is a no-op.
  */
 export async function recordExpandState(client: pg.PoolClient, meta: ExpandMeta): Promise<void> {
-  await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
   await ensureExpandStateTable(client);
   const qualifiedTableName = meta.pgSchema ? `${meta.pgSchema}.${meta.tableName}` : meta.tableName;
   const pgSchema = meta.pgSchema ?? 'public';
@@ -369,7 +374,6 @@ export async function runBackfillAll(options: BackfillAllOptions): Promise<Backf
   const states: ExpandState[] = [];
   const client = await acquireClient(connectionString, { pgSchema });
   try {
-    await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
     await ensureExpandStateTable(client);
     // Restrict to the caller's pgSchema so backfills from other managed
     // schemas in the same database don't bleed in. When no pgSchema is
@@ -489,7 +493,6 @@ export async function runContract(options: ContractOptions): Promise<ContractRes
   const client = await acquireClient(connectionString, { pgSchema });
 
   try {
-    await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
     await ensureExpandStateTable(client);
 
     const stateRes = await client.query(
@@ -615,7 +618,6 @@ export async function runContractAll(options: ContractAllOptions): Promise<Contr
   const states: ExpandState[] = [];
   const listClient = await acquireClient(connectionString, { pgSchema });
   try {
-    await listClient.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
     await ensureExpandStateTable(listClient);
     const res = pgSchema
       ? await listClient.query(

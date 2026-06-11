@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Concurrent first-time migrations against one database (one schema each,
+  running in parallel) no longer crash while setting up schema-flow's internal
+  bookkeeping. Creating the shared `_smplcty_schema_flow` schema and its
+  history / snapshot / expand-state tables is not atomic in PostgreSQL even
+  with `CREATE ... IF NOT EXISTS`, so two parallel first-runs could race and
+  one would fail with a duplicate-object error. The bootstrap now tolerates
+  that race and converges. This closes the last gap for running schema-flow
+  from many parallel test workers against a shared database.
+
 ## [0.11.1] - 2026-06-11
 
 ### Fixed

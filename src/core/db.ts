@@ -60,6 +60,49 @@ export async function removePool(connectionString: string): Promise<void> {
   }
 }
 
+/**
+ * PostgreSQL error codes raised when a concurrent session won a race to create
+ * the same object. `CREATE ... IF NOT EXISTS` is not atomic against the system
+ * catalogs: two sessions can both pass the existence check, then one fails
+ * inserting the catalog row (most commonly 23505 on `pg_type_typname_nsp_index`
+ * for a table's implicit row type).
+ */
+const DUPLICATE_OBJECT_CODES = new Set([
+  '23505', // unique_violation on a catalog index (CREATE ... IF NOT EXISTS race)
+  '42P06', // duplicate_schema
+  '42P07', // duplicate_table
+  '42710', // duplicate_object (e.g. constraint)
+  '42701', // duplicate_column
+]);
+
+/**
+ * Run idempotent bootstrap DDL that may race with a concurrent creator,
+ * retrying the whole block on a duplicate-object error. Because every statement
+ * in `fn` is idempotent (`CREATE ... IF NOT EXISTS`, existence-guarded
+ * `ALTER`s), re-running after a lost race is a no-op for whatever the winner
+ * already created.
+ *
+ * Only safe in autocommit: inside an open transaction a duplicate error aborts
+ * the whole transaction and a retry cannot recover. Callers that bootstrap
+ * inside a transaction must instead hold the advisory lock so the race can't
+ * occur (the migrate path does this); they never reach the retry here.
+ */
+export async function runBootstrapDDL(fn: () => Promise<void>): Promise<void> {
+  const maxAttempts = 6;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await fn();
+      return;
+    } catch (err) {
+      const code = err && typeof err === 'object' && 'code' in err ? (err as { code?: string }).code : undefined;
+      if (attempt >= maxAttempts || !code || !DUPLICATE_OBJECT_CODES.has(code)) throw err;
+      // Brief backoff so the winning session commits its catalog row before we
+      // re-check, then the IF NOT EXISTS guards no-op.
+      await new Promise((r) => setTimeout(r, 10 * attempt));
+    }
+  }
+}
+
 function isTransientError(err: unknown): boolean {
   if (err && typeof err === 'object' && 'code' in err) {
     return TRANSIENT_ERROR_CODES.includes((err as { code: string }).code as (typeof TRANSIENT_ERROR_CODES)[number]);
