@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-06-11
+
 ### Fixed
 
 - Parallel migrations against separate schemas in one database no longer
@@ -61,3 +63,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a generic package ship an `audit` mixin (and its trigger functions) without
   coupling to any app's identity model, while keeping the common case
   param-free. Unknown or unset params fail with a clear error.
+
+[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.11.0...v0.11.1
