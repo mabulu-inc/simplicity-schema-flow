@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The documentation site now shows the released version as a badge in its
+  header, linking to the matching GitHub release. The version is derived from
+  the package version at build time, so it always reflects the current release.
+
 ## [0.11.2] - 2026-06-11
 
 ### Fixed
