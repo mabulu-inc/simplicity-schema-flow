@@ -5,10 +5,6 @@
 Build `@smplcty/schema-flow` — a declarative schema management tool for PostgreSQL.
 Requirements are defined in `docs/PRD.md`.
 
-## Methodology
-
-Follow the Ralph Methodology defined in `docs/RALPH-METHODOLOGY.md`.
-
 ## Project-Specific Config
 
 - **Language**: TypeScript (strict mode)
@@ -29,5 +25,5 @@ Follow the Ralph Methodology defined in `docs/RALPH-METHODOLOGY.md`.
 
 ## Project-Specific Rules
 
-- **Do NOT use TodoWrite** — it wastes turns and provides no value in a stateless loop
+- **Do NOT use TodoWrite** — it wastes turns and provides no value here
 - **Do NOT explore library internals** (node_modules) unless a specific error requires it

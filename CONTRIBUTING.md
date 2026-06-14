@@ -2,19 +2,18 @@
 
 ## Development methodology
 
-This project follows the [Ralph Methodology](docs/RALPH-METHODOLOGY.md) — a PRD-driven, task-based development workflow automated by Claude Code.
+This project is PRD-driven and task-based: work is specified up front and implemented one task at a time.
 
 ### How work is organized
 
 1. **PRD** (`docs/PRD.md`) — the source of truth for what to build, organized into numbered sections with testable requirements
 2. **Task files** (`docs/tasks/T-NNN.md`) — one file per feature or fix, with status tracking, dependencies, and PRD traceability
-3. **Ralph loop** (`pnpm ralph`) — an automated loop that picks up the next eligible task and executes it via Claude Code
 
 Each task follows red/green TDD: write failing tests first, implement the minimum to pass, verify with `pnpm check`, commit.
 
 ### Creating a task
 
-Add a new file in `docs/tasks/` following the format in the [methodology doc](docs/RALPH-METHODOLOGY.md#task-file-format). Key fields:
+Add a new file in `docs/tasks/` following the format of the existing task files. Key fields:
 
 - **Status**: TODO or DONE
 - **Depends**: other tasks that must complete first

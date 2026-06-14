@@ -1,6 +1,6 @@
 # Milestones
 
-> **Auto-generated** by `ralph milestones` — do not edit manually.
+> Generated index of tasks grouped by milestone — not authoritative.
 
 ## 0 — Infrastructure ($0.18)
 
