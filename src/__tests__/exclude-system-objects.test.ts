@@ -18,7 +18,7 @@ import {
 import { useTestProject } from '../testing/index.js';
 import type { TestProject } from '../testing/index.js';
 
-const DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:54329/postgres';
+const DATABASE_URL = process.env.DATABASE_URL!;
 
 describe('exclude extension-owned objects from introspection', () => {
   let project: TestProject;

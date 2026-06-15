@@ -326,7 +326,7 @@ describe('idempotent functions (planner)', () => {
 
 describe('idempotent index comments (E2E)', () => {
   let project: TestProject;
-  const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:54329/postgres';
+  const connectionString = process.env.DATABASE_URL!;
 
   beforeAll(async () => {
     project = await useTestProject(connectionString);
@@ -366,7 +366,7 @@ indexes:
 
 describe('idempotent functions (E2E)', () => {
   let project: TestProject;
-  const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:54329/postgres';
+  const connectionString = process.env.DATABASE_URL!;
 
   beforeAll(async () => {
     project = await useTestProject(connectionString);

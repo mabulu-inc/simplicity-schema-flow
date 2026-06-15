@@ -1062,9 +1062,9 @@ All schema types are exported: `TableSchema`, `ColumnDef`, `IndexDef`, `IndexKey
 ## 14. Testing Requirements
 
 - **Real PostgreSQL only** — Never mock the database; all tests run against real PG instances
-- **Docker-based** — PostgreSQL runs in a Docker container managed by `docker-compose.yml` in the project root. Never assume a locally-installed PostgreSQL server.
-- **Connection** — Tests use the `DATABASE_URL` environment variable. The project provides a `.env.example` with the default; developers copy it to `.env`. The default is `postgresql://postgres:postgres@localhost:54329/postgres` (port 54329 to avoid conflicts with other local Postgres instances).
-- **Isolation** — Each test creates its own PostgreSQL schema via `useTestProject`; schemas are cleaned up after tests
+- **Testcontainers** — `vitest.global-setup.ts` starts an ephemeral `postgres:17` container for the test run (Ryuk reaps it even on a hard crash). The only prerequisite is a reachable Docker daemon; there is no `docker-compose.yml` and no `.env` to manage. Never assume a locally-installed PostgreSQL server.
+- **Connection** — The harness exposes the container as `DATABASE_URL`; tests read it from the environment and never hard-code a connection string.
+- **Isolation** — Each test file gets its own throwaway database (`vitest.setup.ts`) so files run in parallel safely; within a file, `useTestProject` provisions a unique PostgreSQL schema per test, cleaned up afterward
 - **Pattern** — Tests write YAML to temp directories, run the pipeline, then query PG to verify results
 - **Framework** — Vitest
 - **Coverage** — Every feature (migration, drift, lint, rollback, expand, scaffold, ERD, SQL generation) must have integration tests

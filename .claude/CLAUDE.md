@@ -17,11 +17,15 @@ Requirements are defined in `docs/PRD.md`.
 
 ## Database (MANDATORY)
 
-- PostgreSQL runs in Docker via `docker-compose.yml` in the project root
-- **NEVER assume PostgreSQL is installed locally** — always use the container
-- Default connection: `postgresql://postgres:postgres@localhost:54329/postgres`
-- Tests MUST read `DATABASE_URL` from the environment (loaded from `.env`)
-- Before running tests, ensure the container is up: `docker compose up -d --wait`
+- Tests run PostgreSQL via **Testcontainers** — `vitest.global-setup.ts` starts an
+  ephemeral `postgres:17` container automatically; nothing to start by hand.
+- **NEVER assume PostgreSQL is installed locally** — tests always use the container.
+- A reachable Docker daemon is required (Docker Desktop / colima locally; CI runners
+  provide one). That is the only prerequisite — no `docker compose`, no `.env`.
+- Each test file gets its own throwaway database (see `vitest.setup.ts`), so files
+  run in parallel safely; within a file, `useTestProject` isolates per test via a
+  unique schema. Tests read the connection from `DATABASE_URL`, which the harness
+  sets to the container — never hard-code a connection string.
 
 ## Project-Specific Rules
 

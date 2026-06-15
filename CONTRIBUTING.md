@@ -25,16 +25,18 @@ Add a new file in `docs/tasks/` following the format of the existing task files.
 ### Prerequisites
 
 - Node.js 20+
-- Docker (PostgreSQL runs in a container, never locally)
+- A running Docker daemon (tests start PostgreSQL via Testcontainers, never locally)
 - pnpm
 
 ### Setup
 
 ```bash
 pnpm install
-docker compose up -d --wait
-cp .env.example .env  # if needed
 ```
+
+That's it — `pnpm test` starts an ephemeral PostgreSQL container automatically
+(via Testcontainers) and tears it down when the run finishes. There's no
+container to start by hand and no `.env` to configure.
 
 ### Running checks
 

@@ -17,7 +17,7 @@ import {
   introspectTable,
 } from '../introspect/index.js';
 
-const DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:54329/postgres';
+const DATABASE_URL = process.env.DATABASE_URL!;
 
 describe('generateFromDb writes files to disk', () => {
   const minimalInput: GenerateInput = {
