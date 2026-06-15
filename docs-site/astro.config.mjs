@@ -6,9 +6,7 @@ import starlight from '@astrojs/starlight';
 // Single source of truth: the published version from the root package.json.
 // Docs deploy on `release: published`, so the build-time version is always the
 // released version — nothing to bump by hand.
-const { version } = JSON.parse(
-  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
-);
+const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 // https://astro.build/config
 export default defineConfig({
