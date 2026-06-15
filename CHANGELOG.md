@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- When seed rows omit the primary key, schema-flow now also recognises a plain
+  unique index (`CREATE UNIQUE INDEX`, not just a `UNIQUE` constraint) as the
+  match key for de-duplicating inserts. Previously only unique indexes that
+  were also declared as constraints were used, so seeds keyed on an index-only
+  unique column could insert duplicate rows on re-runs. Partial unique indexes
+  (those with a `where:` filter) are still skipped, since they don't enforce
+  uniqueness across the whole table.
+
 ## [0.11.3] - 2026-06-13
 
 ### Added

@@ -44,10 +44,23 @@ The expression is spliced into the upsert verbatim and runs with the column's ty
 To re-apply seeds idempotently, schema-flow needs a way to identify which existing row a seed row corresponds to. The match key is resolved per table, in this order:
 
 1. **Primary key**, if every PK column is present in every seed row.
-2. **The first unique constraint** whose columns are all present in every seed row — column-level `unique: true` first, then table-level `indexes:` entries with `as_constraint: true`.
+2. **The first unique key** whose columns are all present in every seed row — column-level `unique: true` first, then table-level `indexes:` entries with `unique: true`, in declaration order. A plain unique index is enough; it does **not** need `as_constraint: true`, because de-dup is done with `WHERE NOT EXISTS` rather than `ON CONFLICT`. **Partial** unique indexes (those with a `where:` clause) are skipped — they only enforce uniqueness over a subset of rows, so their columns aren't a reliable table-wide identity. Expression-keyed unique indexes are skipped too, since their keys can't be matched against literal seed values.
 3. **No match key.** UPDATE is skipped entirely, and rows are INSERTed only when no existing row in the table already has the same values for every seed-provided column (null-safe via `IS NOT DISTINCT FROM`). Table columns the YAML didn't mention are never consulted.
 
 There is no implicit "treat `id` as the key" behaviour — if your PK is `code` and your seed only supplies `id`, the planner falls through to (2) or (3).
+
+This is what lets you seed by a natural key and omit a serial/identity primary key entirely: drop `id` from the seed rows and, as long as the controlled columns cover a unique key, schema-flow matches on that key instead. (See [Seeds and serial/identity sequences](#seeds-and-serialidentity-sequences) for why omitting the serial id is also the safer choice.)
+
+```yaml
+table: units
+columns:
+  - { name: id, type: serial, primary_key: true }
+  - { name: code, type: text, unique: true } # the natural key
+  - { name: name, type: text }
+seeds:
+  - { code: lb, name: Pounds } # no id — matched on `code`
+  - { code: kg, name: Kilograms }
+```
 
 ## Conflict behaviour
 

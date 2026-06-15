@@ -127,6 +127,46 @@ describe('Batch seeds — planner', () => {
     expect(seedOps[0].seedMatchColumns).toEqual(['tenant_id', 'user_id']);
   });
 
+  it('resolves match columns from a plain unique index (not declared as_constraint)', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'accounts',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'email', type: 'text' },
+          { name: 'name', type: 'text' },
+        ],
+        indexes: [{ columns: ['email'], unique: true }],
+        seeds: [{ email: 'a@example.com', name: 'Alpha' }],
+      },
+    ];
+    const result = buildPlan(desired, emptyActual());
+    const seedOps = result.operations.filter((o) => o.type === 'seed_table');
+    expect(seedOps).toHaveLength(1);
+    expect(seedOps[0].seedMatchColumns).toEqual(['email']);
+  });
+
+  it('skips a partial unique index — it does not enforce table-wide uniqueness', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'accounts',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'email', type: 'text' },
+          { name: 'name', type: 'text' },
+        ],
+        indexes: [{ columns: ['email'], unique: true, where: 'deleted_at IS NULL' }],
+        seeds: [{ email: 'a@example.com', name: 'Alpha' }],
+      },
+    ];
+    const result = buildPlan(desired, emptyActual());
+    const seedOps = result.operations.filter((o) => o.type === 'seed_table');
+    expect(seedOps).toHaveLength(1);
+    expect(seedOps[0].seedMatchColumns).toEqual([]);
+  });
+
   it('leaves match columns empty when no PK or unique constraint is covered by the seed', () => {
     const desired = emptyDesired();
     desired.tables = [

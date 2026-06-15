@@ -91,7 +91,7 @@ schema/
 
 ## Seeds
 
-Keep reference/lookup rows present on every apply. Seeds upsert by the table's primary key (or first matching unique constraint) and converge to zero operations once the rows match — including `jsonb`/`numeric`/array values that Postgres re-formats on storage.
+Keep reference/lookup rows present on every apply. Seeds upsert by the table's primary key, or — when the PK is absent from the rows — by the first unique key the rows cover (a column-level `unique: true`, then any non-partial table-level unique index; `as_constraint` isn't required). This lets you seed by a natural key and drop serial ids from the rows entirely. They converge to zero operations once the rows match — including `jsonb`/`numeric`/array values that Postgres re-formats on storage.
 
 ```yaml
 table: users

@@ -2419,10 +2419,13 @@ function createSeedTableOp(
  * Priority:
  *   1. Primary key (column-level `primary_key: true` or table-level
  *      `primary_key: [...]`), if every PK column is present in every seed row.
- *   2. The first unique constraint — declaration order, column-level
- *      `unique: true` first, then table-level `indexes:` entries with
- *      `as_constraint: true` — whose columns are all present in every seed
- *      row.
+ *   2. The first unique constraint or unique index — declaration order,
+ *      column-level `unique: true` first, then table-level `indexes:` entries
+ *      with `unique: true` — whose columns are all present in every seed row.
+ *      A plain unique index protects the INSERT just as well as a constraint
+ *      (the executor dedupes via `WHERE NOT EXISTS`, not `ON CONFLICT`), so
+ *      `as_constraint` is not required. Partial unique indexes (`where:`) are
+ *      skipped: they don't enforce table-wide uniqueness.
  *   3. Empty array. The executor then skips UPDATE and only INSERTs rows
  *      whose values don't already exist in the table.
  *
@@ -2449,11 +2452,14 @@ function resolveSeedMatchColumns(
     if (col.unique && presentInAll([col.name])) return [col.name];
   }
 
-  // 3. Table-level unique constraints (now declared as `indexes:` entries
-  //    with `as_constraint: true`; bare-column entries only, since
-  //    expression keys can't be wrapped in a unique constraint).
+  // 3. Table-level unique indexes (declared as `indexes:` entries with
+  //    `unique: true`, whether or not they're also `as_constraint`). A unique
+  //    index is enough to protect the seed INSERT's `WHERE NOT EXISTS` from
+  //    duplicates. Bare-column keys only — expression keys can't be matched
+  //    against literal seed values. Partial indexes (`where:`) are skipped
+  //    because they only enforce uniqueness over a row subset.
   for (const idx of table.indexes ?? []) {
-    if (!idx.unique || !idx.as_constraint) continue;
+    if (!idx.unique || idx.where) continue;
     const cols = idx.columns
       .map((k) => (typeof k === 'string' ? k : 'column' in k ? k.column : null))
       .filter((c): c is string => c !== null);
