@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-16
+
 ### Changed
 
 - Seeds are now **insert-only**. A seed row whose key already exists is left
@@ -121,7 +123,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   coupling to any app's identity model, while keeping the common case
   param-free. Unknown or unset params fail with a clear error.
 
-[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.11.3...v0.12.0
 [0.11.3]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.11.1...v0.11.2
