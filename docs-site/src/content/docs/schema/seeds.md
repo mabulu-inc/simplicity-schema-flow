@@ -42,9 +42,17 @@ The expression is spliced into the insert verbatim and runs with the column's ty
 
 To re-apply seeds idempotently, schema-flow needs a way to identify which existing row a seed row corresponds to. The match key is resolved per table, in this order:
 
-1. **Primary key**, if every PK column is present in every seed row.
-2. **The first unique key** whose columns are all present in every seed row — column-level `unique: true` first, then table-level `indexes:` entries with `unique: true`. A plain unique index is enough; it does **not** need `as_constraint: true`, because de-dup is done with `WHERE NOT EXISTS` rather than `ON CONFLICT`. **Partial** unique indexes (those with a `where:` clause) are now used too: their key columns identify the row, but their predicate is **ignored**. Full (table-wide) unique indexes are preferred over partial ones. Because the predicate is ignored, the existence check spans the whole table — so a soft-deleted builtin still counts as present and is never re-inserted as a second live row. Expression-keyed unique indexes are skipped, since their keys can't be matched against literal seed values.
+1. **Primary key**, if every PK column is present in every seed row — the declared canonical identity wins outright.
+2. **The best covered unique key.** Every unique key (column-level `unique: true` or a table-level `indexes:` entry with `unique: true`) whose columns are all present in every seed row is a candidate, ranked by:
+   1. **full before partial** — a **partial** unique index (one with a `where:` clause) is used, matching on its columns with the predicate **ignored**, but it only enforces uniqueness over a subset of rows, so it's a weaker table-wide identity and loses to any full unique key;
+   2. then **fewest columns** — since every candidate is unique, the narrowest key is the most fundamental and avoids the case where a wider key's INSERT would trip a narrower unique constraint;
+   3. then **declaration order**, as a deterministic tiebreaker.
+
+   A plain unique index is enough; it does **not** need `as_constraint: true`, because de-dup is done with `WHERE NOT EXISTS` rather than `ON CONFLICT`. Because a partial index's predicate is ignored, its existence check spans the whole table — so a soft-deleted builtin still counts as present and is never re-inserted as a second live row. Expression-keyed unique indexes are skipped, since their keys can't be matched against literal seed values.
+
 3. **No match key.** Rows are inserted only when no existing row in the table already has the same values for every seed-provided column (null-safe via `IS NOT DISTINCT FROM`). Table columns the YAML didn't mention are never consulted.
+
+A column only counts as "present" when it appears in **every** seed row — a key column missing from some rows can't identify them.
 
 There is no implicit "treat `id` as the key" behaviour — if your PK is `code` and your seed only supplies `id`, the planner falls through to (2) or (3).
 

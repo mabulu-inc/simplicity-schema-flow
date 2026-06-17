@@ -2391,7 +2391,7 @@ function createSeedTableOp(table: TableSchema, seeds: Record<string, unknown>[],
     };
   });
 
-  const seedMatchColumns = resolveSeedMatchColumns(table, seeds, seedKeySet);
+  const seedMatchColumns = resolveSeedMatchColumns(table, seeds);
 
   return {
     type: 'seed_table',
@@ -2411,59 +2411,67 @@ function createSeedTableOp(table: TableSchema, seeds: Record<string, unknown>[],
  * Priority:
  *   1. Primary key (column-level `primary_key: true` or table-level
  *      `primary_key: [...]`), if every PK column is present in every seed row.
- *   2. A column-level unique constraint whose column is present.
- *   3. A table-level unique index whose columns are all present — full
- *      (table-wide) indexes first, then partial (`where:`) ones. A unique index
- *      protects the seed INSERT's `WHERE NOT EXISTS` just as well as a
- *      constraint (the executor dedupes via `WHERE NOT EXISTS`, not
- *      `ON CONFLICT`), so `as_constraint` is not required. A partial index
- *      contributes its key columns but NOT its predicate: the executor matches
- *      on the columns across the whole table, so a soft-deleted builtin still
- *      counts as present and is not re-inserted as a second live row. Bare
- *      column keys only — expression keys can't be matched against literal
- *      seed values.
- *   4. Empty array. The executor then INSERTs only rows whose seed-provided
+ *      The PK is the declared canonical identity, so it wins outright.
+ *   2. The best covered unique key, choosing among column-level `unique: true`
+ *      columns and table-level unique `indexes:` entries. Every covered unique
+ *      key is a valid identity, so they're ranked by:
+ *        a. full before partial — a partial (`where:`) index only enforces
+ *           uniqueness over a subset, so it's a weaker table-wide identity even
+ *           though we match on its columns ignoring the predicate (which is
+ *           what lets a soft-deleted builtin still count as present);
+ *        b. then fewest columns — since every candidate is unique, the
+ *           narrowest key is the most fundamental and avoids the case where a
+ *           wider key's INSERT would violate a narrower unique constraint;
+ *        c. then declaration order, as a deterministic tiebreaker.
+ *      A unique index dedupes the `WHERE NOT EXISTS` just as well as a
+ *      constraint, so `as_constraint` is not required. Bare-column keys only —
+ *      expression keys can't be matched against literal seed values.
+ *   3. Empty array. The executor then INSERTs only rows whose seed-provided
  *      columns don't already exist in the table.
  *
- * "Present in every seed row" means the key is literally present, not just
- * defaulted away by the column's `default`. A null-valued key is fine for
- * unique constraints (they're treated as distinct unless
- * `nulls_not_distinct`), so we don't filter those out here.
+ * Eligibility is "present in every seed row" — the column must literally appear
+ * in each row, not be defaulted away. That requires the *intersection* of the
+ * rows' columns (a column present in only some rows can't key the others), so
+ * we compute it once up front rather than re-scanning per candidate.
  */
-function resolveSeedMatchColumns(
-  table: TableSchema,
-  seeds: Record<string, unknown>[],
-  seedKeySet: Set<string>,
-): string[] {
-  const presentInAll = (cols: string[]): boolean =>
-    cols.length > 0 && cols.every((c) => seedKeySet.has(c)) && seeds.every((row) => cols.every((c) => c in row));
+function resolveSeedMatchColumns(table: TableSchema, seeds: Record<string, unknown>[]): string[] {
+  // Columns present in EVERY seed row — one pass, intersection of all rows.
+  let commonCols: Set<string> | null = null;
+  for (const row of seeds) {
+    const keys = Object.keys(row);
+    if (commonCols === null) commonCols = new Set(keys);
+    else for (const c of [...commonCols]) if (!(c in row)) commonCols.delete(c);
+  }
+  const common = commonCols ?? new Set<string>();
+  const covered = (cols: string[]): boolean => cols.length > 0 && cols.every((c) => common.has(c));
 
   // 1. Primary key
   const pkFromColumns = table.columns.filter((c) => c.primary_key).map((c) => c.name);
   const pkCols = pkFromColumns.length > 0 ? pkFromColumns : (table.primary_key ?? []);
-  if (presentInAll(pkCols)) return pkCols;
+  if (covered(pkCols)) return pkCols;
 
-  // 2. Column-level unique constraints
+  // 2. Best covered unique key. Collect column-level uniques (single column)
+  //    and bare-column table-level unique indexes, then pick by
+  //    (full before partial, fewest columns, declaration order). Array.sort is
+  //    stable, so equal-rank candidates keep their collection order.
+  const candidates: { cols: string[]; partial: boolean }[] = [];
   for (const col of table.columns) {
-    if (col.unique && presentInAll([col.name])) return [col.name];
+    if (col.unique) candidates.push({ cols: [col.name], partial: false });
   }
-
-  // 3. Table-level unique indexes. Full indexes are a stronger (table-wide)
-  //    identity, so they win over partial ones regardless of declaration order;
-  //    the predicate of a partial index is deliberately ignored here.
-  const bareColumns = (idx: IndexDef): string[] | null => {
+  for (const idx of table.indexes ?? []) {
+    if (!idx.unique) continue;
     const cols = idx.columns
       .map((k) => (typeof k === 'string' ? k : 'column' in k ? k.column : null))
       .filter((c): c is string => c !== null);
-    return cols.length === idx.columns.length ? cols : null;
-  };
-  const uniqueIndexes = (table.indexes ?? []).filter((idx) => idx.unique);
-  for (const idx of [...uniqueIndexes.filter((i) => !i.where), ...uniqueIndexes.filter((i) => i.where)]) {
-    const cols = bareColumns(idx);
-    if (cols && presentInAll(cols)) return cols;
+    if (cols.length !== idx.columns.length) continue; // expression key — skip
+    candidates.push({ cols, partial: Boolean(idx.where) });
   }
 
-  return [];
+  const best = candidates
+    .filter((c) => covered(c.cols))
+    .sort((a, b) => Number(a.partial) - Number(b.partial) || a.cols.length - b.cols.length)[0];
+
+  return best ? best.cols : [];
 }
 
 // ─── Helpers ───────────────────────────────────────────────────

@@ -19,7 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   match-key de-duplication, matching on the index's columns while ignoring its
   predicate. Because the existence check spans the whole table, a soft-deleted
   builtin still counts as present and is never re-inserted as a second live row.
-  Full unique indexes are preferred over partial ones.
+- When more than one unique key could match a seed, schema-flow now picks the
+  best one deterministically — full (table-wide) keys before partial ones, then
+  the fewest columns, then declaration order — instead of just the first one
+  declared. This makes the chosen key independent of `indexes:` ordering and
+  favours the most fundamental identity.
 
 ### Removed
 

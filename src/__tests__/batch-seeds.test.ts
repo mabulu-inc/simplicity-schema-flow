@@ -191,6 +191,82 @@ describe('Batch seeds — planner', () => {
     expect(seedOps[0].seedMatchColumns).toEqual(['handle']);
   });
 
+  it('prefers a wider full unique index over a narrower partial one (full beats fewest-columns)', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'accounts',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'email', type: 'text' },
+          { name: 'tenant_id', type: 'integer' },
+          { name: 'name', type: 'text' },
+        ],
+        // 1-col partial vs 2-col full — the full (table-wide) identity wins
+        // despite having more columns.
+        indexes: [
+          { columns: ['email'], unique: true, where: 'deleted_at IS NULL' },
+          { columns: ['tenant_id', 'name'], unique: true },
+        ],
+        seeds: [{ email: 'a@example.com', tenant_id: 1, name: 'Alpha' }],
+      },
+    ];
+    const result = buildPlan(desired, emptyActual());
+    const seedOps = result.operations.filter((o) => o.type === 'seed_table');
+    expect(seedOps).toHaveLength(1);
+    expect(seedOps[0].seedMatchColumns).toEqual(['tenant_id', 'name']);
+  });
+
+  it('among full unique keys, prefers the one with the fewest columns', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'accounts',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'email', type: 'text' },
+          { name: 'tenant_id', type: 'integer' },
+          { name: 'name', type: 'text' },
+        ],
+        // Composite declared first, single second — the single-column key wins.
+        indexes: [
+          { columns: ['tenant_id', 'name'], unique: true },
+          { columns: ['email'], unique: true },
+        ],
+        seeds: [{ email: 'a@example.com', tenant_id: 1, name: 'Alpha' }],
+      },
+    ];
+    const result = buildPlan(desired, emptyActual());
+    const seedOps = result.operations.filter((o) => o.type === 'seed_table');
+    expect(seedOps).toHaveLength(1);
+    expect(seedOps[0].seedMatchColumns).toEqual(['email']);
+  });
+
+  it('only considers unique keys present in every seed row (intersection, not union)', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'accounts',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'email', type: 'text' },
+          { name: 'handle', type: 'text' },
+        ],
+        indexes: [
+          { columns: ['email'], unique: true },
+          { columns: ['handle'], unique: true },
+        ],
+        // 'email' is missing from the second row, so it can't key it; only
+        // 'handle' is present in every row.
+        seeds: [{ email: 'a@example.com', handle: 'alpha' }, { handle: 'bravo' }],
+      },
+    ];
+    const result = buildPlan(desired, emptyActual());
+    const seedOps = result.operations.filter((o) => o.type === 'seed_table');
+    expect(seedOps).toHaveLength(1);
+    expect(seedOps[0].seedMatchColumns).toEqual(['handle']);
+  });
+
   it('leaves match columns empty when no PK or unique constraint is covered by the seed', () => {
     const desired = emptyDesired();
     desired.tables = [
