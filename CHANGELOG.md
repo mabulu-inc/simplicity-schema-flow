@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Seeds are now **insert-only**. A seed row whose key already exists is left
+  exactly as it is in the database — schema-flow no longer updates existing rows
+  to match the YAML. This keeps reference data that an application edits after
+  install (a renamed status, a soft-deleted builtin) safe from being clobbered
+  or resurrected on the next apply. To change an already-seeded value, use a
+  migration pre/post-script.
+- Seeds now use **partial** unique indexes (those with a `where:` clause) for
+  match-key de-duplication, matching on the index's columns while ignoring its
+  predicate. Because the existence check spans the whole table, a soft-deleted
+  builtin still counts as present and is never re-inserted as a second live row.
+  Full unique indexes are preferred over partial ones.
+
+### Removed
+
+- The `seeds_on_conflict` table field has been removed. It only toggled the old
+  seed UPDATE behaviour, which no longer exists now that seeds are insert-only;
+  remove it from your YAML (the parser now rejects it).
+
 ## [0.12.0] - 2026-06-15
 
 ### Changed

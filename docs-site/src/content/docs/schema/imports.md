@@ -99,8 +99,7 @@ indexes:
 ```
 
 `extend:` merges `columns`, `indexes`, `checks`, `triggers`, `policies`,
-`grants`, `mixins`, `seeds`, `seeds_on_conflict`, `rls`, and `force_rls` into
-the named table.
+`grants`, `mixins`, `seeds`, `rls`, and `force_rls` into the named table.
 
 - **Multiple `extend:` files for one table are allowed** — they merge in source
   order (imports first, then local).

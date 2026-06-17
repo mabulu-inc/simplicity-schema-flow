@@ -47,7 +47,7 @@ seeds:
     expect(result.rows[0].name).toBe('Admin');
   });
 
-  it('(2) seed upsert — re-run changes values', async () => {
+  it('(2) seeds are insert-only — re-run does not overwrite changed values', async () => {
     ctx = await useTestProject(DATABASE_URL);
 
     writeSchema(ctx.dir, {
@@ -75,7 +75,8 @@ seeds:
     );
     expect(r1.rows[0].setting_value).toBe('My Site');
 
-    // Update the seed value and re-run
+    // Change the seed value and re-run. The row's key already exists, so an
+    // insert-only seed leaves the existing value untouched.
     writeSchema(ctx.dir, {
       'tables/settings.yaml': `
 table: settings
@@ -99,10 +100,10 @@ seeds:
       ctx,
       `SELECT setting_value FROM "${ctx.schema}".settings WHERE id = '00000000-0000-0000-0000-000000000010'`,
     );
-    expect(r2.rows[0].setting_value).toBe('Updated Site');
+    expect(r2.rows[0].setting_value).toBe('My Site');
   });
 
-  it('(3) seeds_on_conflict DO NOTHING — skips existing rows', async () => {
+  it('(3) seeds never overwrite manually-changed rows', async () => {
     ctx = await useTestProject(DATABASE_URL);
 
     writeSchema(ctx.dir, {
@@ -119,7 +120,6 @@ columns:
 seeds:
   - id: '00000000-0000-0000-0000-000000000020'
     config_value: 'production'
-seeds_on_conflict: 'DO NOTHING'
 `,
     });
 
@@ -277,8 +277,9 @@ seeds:
       { slug: 'b', label: 'Bravo' },
     ]);
 
-    // Update label for 'a' through the seed — should be applied via slug match,
-    // not duplicated.
+    // Change the label for 'a' in the seed and re-run. The slug 'a' already
+    // exists, so the insert-only seed matches on it and leaves the row alone —
+    // no overwrite, no duplicate.
     writeSchema(ctx.dir, {
       'tables/tags.yaml': `
 table: tags
@@ -305,9 +306,45 @@ seeds:
 
     const r2 = await queryDb(ctx, `SELECT slug, label FROM "${ctx.schema}".tags ORDER BY slug`);
     expect(r2.rows).toEqual([
-      { slug: 'a', label: 'Alpha Prime' },
+      { slug: 'a', label: 'Alpha' },
       { slug: 'b', label: 'Bravo' },
     ]);
+  });
+
+  it('(11) seeds keyed on a partial unique index do not resurrect a soft-deleted builtin', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/roles.yaml': `
+table: roles
+columns:
+  - name: id
+    type: serial
+    primary_key: true
+  - name: code
+    type: text
+    nullable: false
+  - name: deleted_at
+    type: timestamptz
+indexes:
+  - columns: [code]
+    unique: true
+    where: 'deleted_at IS NULL'
+seeds:
+  - code: 'admin'
+`,
+    });
+
+    await runMigration(ctx);
+
+    // The app soft-deletes the builtin role.
+    await queryDb(ctx, `UPDATE "${ctx.schema}".roles SET deleted_at = now() WHERE code = 'admin'`);
+
+    // Re-running the seed must not add a second, live 'admin' row.
+    await runMigration(ctx);
+
+    const r = await queryDb(ctx, `SELECT count(*)::int AS n FROM "${ctx.schema}".roles WHERE code = 'admin'`);
+    expect(r.rows[0].n).toBe(1);
   });
 
   it('(9) seeds with no PK/unique match insert once and are idempotent on re-apply', async () => {

@@ -335,7 +335,6 @@ seeds:
     name: green
   - color_id: 3
     name: blue
-seeds_on_conflict: 'DO NOTHING'
 `,
     });
 
@@ -363,7 +362,6 @@ columns:
 seeds:
   - color_id: 1
     name: red
-seeds_on_conflict: 'DO NOTHING'
 `,
     });
 
@@ -385,7 +383,6 @@ seeds:
     name: red
   - color_id: 2
     name: green
-seeds_on_conflict: 'DO NOTHING'
 `,
     });
 

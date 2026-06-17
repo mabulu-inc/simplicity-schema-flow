@@ -1140,25 +1140,6 @@ describe('Planner', () => {
       expect(ops[0].seedColumns).toBeDefined();
     });
 
-    it('seeds with seeds_on_conflict DO NOTHING is propagated', () => {
-      const desired = emptyDesired();
-      desired.tables = [
-        {
-          table: 'statuses',
-          columns: [
-            { name: 'id', type: 'integer', primary_key: true },
-            { name: 'name', type: 'text' },
-          ],
-          seeds: [{ id: 1, name: 'active' }],
-          seeds_on_conflict: 'DO NOTHING',
-        },
-      ];
-      const result = buildPlan(desired, emptyActual());
-      const ops = findOps(result.operations, 'seed_table');
-      expect(ops).toHaveLength(1);
-      expect(ops[0].seedOnConflict).toBe('DO NOTHING');
-    });
-
     it('seeds with !sql expression are carried in seedRows', () => {
       const desired = emptyDesired();
       desired.tables = [

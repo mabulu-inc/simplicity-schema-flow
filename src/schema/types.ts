@@ -203,8 +203,6 @@ export interface SqlExpression {
 
 export type SeedRow = Record<string, unknown>;
 
-export type SeedOnConflict = 'DO NOTHING';
-
 // ─── Table ──────────────────────────────────────────────────────
 
 export interface TableSchema {
@@ -222,7 +220,6 @@ export interface TableSchema {
   grants?: GrantDef[];
   prechecks?: PrecheckDef[];
   seeds?: SeedRow[];
-  seeds_on_conflict?: SeedOnConflict;
   mixins?: string[];
   comment?: string;
   /**
@@ -256,7 +253,6 @@ export interface ExtendSchema {
   rls?: boolean;
   force_rls?: boolean;
   seeds?: SeedRow[];
-  seeds_on_conflict?: SeedOnConflict;
 }
 
 // ─── Enum ───────────────────────────────────────────────────────

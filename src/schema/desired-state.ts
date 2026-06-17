@@ -77,7 +77,6 @@ function mergeExtend(target: TableSchema, ext: ExtendSchema, extLabel: string, t
   if (ext.grants) target.grants = [...(target.grants ?? []), ...ext.grants];
   if (ext.mixins) target.mixins = [...(target.mixins ?? []), ...ext.mixins];
   if (ext.seeds) target.seeds = [...(target.seeds ?? []), ...ext.seeds];
-  if (ext.seeds_on_conflict !== undefined) target.seeds_on_conflict = ext.seeds_on_conflict;
   if (ext.rls === true) target.rls = true;
   if (ext.force_rls === true) target.force_rls = true;
 }

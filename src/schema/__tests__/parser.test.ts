@@ -493,7 +493,7 @@ indexes:
     expect(() => parseTable(yaml)).toThrow(/expression/i);
   });
 
-  it('parses seeds_on_conflict field', () => {
+  it('rejects the removed seeds_on_conflict field', () => {
     const yaml = `
 table: statuses
 columns:
@@ -507,9 +507,7 @@ seeds:
     name: active
 seeds_on_conflict: 'DO NOTHING'
 `;
-    const result = parseTable(yaml);
-    expect(result.seeds_on_conflict).toBe('DO NOTHING');
-    expect(result.seeds).toHaveLength(1);
+    expect(() => parseTable(yaml)).toThrow(/seeds_on_conflict/);
   });
 
   it('parses !sql YAML tag in seed values', () => {

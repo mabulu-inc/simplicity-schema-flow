@@ -216,7 +216,6 @@ seeds:
   - id: '00000000-0000-0000-0000-000000000001'
     email: 'admin@example.com'
     name: 'Admin'
-seeds_on_conflict: 'DO NOTHING' # "DO NOTHING" for insert-only; omit for default upsert
 
 comment: 'Core user accounts table'
 ```
@@ -291,10 +290,13 @@ seeds:
     created_at: !sql now() # SQL expression (not a string literal)
 ```
 
-The `seeds_on_conflict` field controls conflict behavior:
-
-- **Omitted (default)**: `INSERT ... ON CONFLICT (pk) DO UPDATE SET ...` — upsert
-- **`"DO NOTHING"`**: `INSERT ... ON CONFLICT (pk) DO NOTHING` — insert-only, skip existing rows
+Seeds are **insert-only**: a seed row that matches an existing row by its key is
+left untouched — existing rows are never overwritten. Rows are inserted with a
+`WHERE NOT EXISTS` guard on the resolved match key (primary key, or the first
+unique constraint/index whose columns the seed supplies). A **partial** unique
+index contributes its key columns but not its `where` predicate, so a
+soft-deleted builtin still counts as present and is never re-inserted as a
+second live row.
 
 ### 4.2 Enums
 
@@ -639,7 +641,7 @@ Operations execute in strict dependency order:
 | 12    | RLS policies       | `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, `CREATE POLICY`                          |
 | 13    | Grants             | `GRANT`/`REVOKE` on tables, columns, sequences, functions, schemas                    |
 | 14    | Comments           | `COMMENT ON` for all object types                                                     |
-| 15    | Seeds              | `INSERT ... ON CONFLICT` (upsert or DO NOTHING)                                       |
+| 15    | Seeds              | `INSERT ... WHERE NOT EXISTS` (insert-only, match-key dedup)                          |
 | 16    | Post-scripts       | SQL scripts in `post/`, alphabetical order                                            |
 
 ### 7.3 Operation Types

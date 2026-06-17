@@ -147,7 +147,7 @@ describe('Batch seeds — planner', () => {
     expect(seedOps[0].seedMatchColumns).toEqual(['email']);
   });
 
-  it('skips a partial unique index — it does not enforce table-wide uniqueness', () => {
+  it('matches on a partial unique index by its columns, ignoring the where', () => {
     const desired = emptyDesired();
     desired.tables = [
       {
@@ -164,7 +164,31 @@ describe('Batch seeds — planner', () => {
     const result = buildPlan(desired, emptyActual());
     const seedOps = result.operations.filter((o) => o.type === 'seed_table');
     expect(seedOps).toHaveLength(1);
-    expect(seedOps[0].seedMatchColumns).toEqual([]);
+    expect(seedOps[0].seedMatchColumns).toEqual(['email']);
+  });
+
+  it('prefers a full unique index over a partial one', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'accounts',
+        columns: [
+          { name: 'id', type: 'integer', primary_key: true },
+          { name: 'email', type: 'text' },
+          { name: 'handle', type: 'text' },
+        ],
+        // Partial declared first, full second — full still wins.
+        indexes: [
+          { columns: ['email'], unique: true, where: 'deleted_at IS NULL' },
+          { columns: ['handle'], unique: true },
+        ],
+        seeds: [{ email: 'a@example.com', handle: 'alpha' }],
+      },
+    ];
+    const result = buildPlan(desired, emptyActual());
+    const seedOps = result.operations.filter((o) => o.type === 'seed_table');
+    expect(seedOps).toHaveLength(1);
+    expect(seedOps[0].seedMatchColumns).toEqual(['handle']);
   });
 
   it('leaves match columns empty when no PK or unique constraint is covered by the seed', () => {
@@ -202,25 +226,6 @@ describe('Batch seeds — planner', () => {
     const seedOps = result.operations.filter((o) => o.type === 'seed_table');
     expect(seedOps).toHaveLength(1);
     expect(seedOps[0].seedMatchColumns).toEqual([]);
-  });
-
-  it('propagates seeds_on_conflict DO NOTHING', () => {
-    const desired = emptyDesired();
-    desired.tables = [
-      {
-        table: 'statuses',
-        columns: [
-          { name: 'id', type: 'integer', primary_key: true },
-          { name: 'name', type: 'text' },
-        ],
-        seeds: [{ id: 1, name: 'active' }],
-        seeds_on_conflict: 'DO NOTHING',
-      },
-    ];
-    const result = buildPlan(desired, emptyActual());
-    const seedOps = result.operations.filter((o) => o.type === 'seed_table');
-    expect(seedOps).toHaveLength(1);
-    expect(seedOps[0].seedOnConflict).toBe('DO NOTHING');
   });
 
   it('emits seed_table for alter path too', () => {
@@ -334,15 +339,16 @@ describe('Batch seeds — executor', () => {
 
     // Check seed result counts
     const seedOp = result.executedOperations.find((o) => o.type === 'seed_table')!;
-    expect(seedOp.seedResult).toEqual({ inserted: 3, updated: 0, unchanged: 0 });
+    expect(seedOp.seedResult).toEqual({ inserted: 3, unchanged: 0 });
   });
 
-  it('reports correct counts for mixed insert/update/unchanged', async () => {
+  it('inserts only new keys and never modifies existing rows', async () => {
     const pool = getPool(DATABASE_URL);
     const client = await pool.connect();
     try {
       await client.query(`CREATE TABLE "${testSchema}"."statuses" ("id" integer PRIMARY KEY, "name" text NOT NULL)`);
-      // Pre-populate: id=1 with same data (will be unchanged), id=2 with different data (will be updated)
+      // Pre-populate: id=1 matches the seed; id=2 has a different name but the
+      // same key — INSERT-only must leave it untouched, not reconcile it.
       await client.query(`INSERT INTO "${testSchema}"."statuses" ("id", "name") VALUES (1, 'active'), (2, 'old_name')`);
     } finally {
       client.release();
@@ -356,8 +362,8 @@ describe('Batch seeds — executor', () => {
         sql: '',
         destructive: false,
         seedRows: [
-          { id: 1, name: 'active' }, // unchanged
-          { id: 2, name: 'inactive' }, // updated
+          { id: 1, name: 'active' }, // unchanged (key present)
+          { id: 2, name: 'inactive' }, // key present → left as 'old_name', NOT updated
           { id: 3, name: 'pending' }, // inserted
         ],
         seedColumns: [
@@ -377,13 +383,13 @@ describe('Batch seeds — executor', () => {
 
     expect(result.executed).toBe(1);
 
-    // Verify data
+    // id=2 keeps its existing name — seeds never overwrite.
     const client2 = await pool.connect();
     try {
       const res = await client2.query(`SELECT id, name FROM "${testSchema}"."statuses" ORDER BY id`);
       expect(res.rows).toHaveLength(3);
       expect(res.rows[0]).toEqual({ id: 1, name: 'active' });
-      expect(res.rows[1]).toEqual({ id: 2, name: 'inactive' });
+      expect(res.rows[1]).toEqual({ id: 2, name: 'old_name' });
       expect(res.rows[2]).toEqual({ id: 3, name: 'pending' });
     } finally {
       client2.release();
@@ -391,15 +397,22 @@ describe('Batch seeds — executor', () => {
 
     // Check counts
     const seedOp = result.executedOperations.find((o) => o.type === 'seed_table')!;
-    expect(seedOp.seedResult).toEqual({ inserted: 1, updated: 1, unchanged: 1 });
+    expect(seedOp.seedResult).toEqual({ inserted: 1, unchanged: 2 });
   });
 
-  it('handles DO NOTHING conflict — inserts only, skips existing', async () => {
+  it('does not re-insert a soft-deleted builtin matched by a partial unique index', async () => {
     const pool = getPool(DATABASE_URL);
     const client = await pool.connect();
     try {
-      await client.query(`CREATE TABLE "${testSchema}"."statuses" ("id" integer PRIMARY KEY, "name" text NOT NULL)`);
-      await client.query(`INSERT INTO "${testSchema}"."statuses" ("id", "name") VALUES (1, 'original')`);
+      await client.query(
+        `CREATE TABLE "${testSchema}"."roles" (
+           "id" serial PRIMARY KEY,
+           "code" text NOT NULL,
+           "deleted_at" timestamptz)`,
+      );
+      await client.query(`CREATE UNIQUE INDEX ON "${testSchema}"."roles" ("code") WHERE deleted_at IS NULL`);
+      // The builtin 'admin' role was soft-deleted by the app.
+      await client.query(`INSERT INTO "${testSchema}"."roles" ("code", "deleted_at") VALUES ('admin', now())`);
     } finally {
       client.release();
     }
@@ -408,19 +421,13 @@ describe('Batch seeds — executor', () => {
       {
         type: 'seed_table',
         phase: 15,
-        objectName: 'statuses',
+        objectName: 'roles',
         sql: '',
         destructive: false,
-        seedRows: [
-          { id: 1, name: 'changed' }, // should be skipped
-          { id: 2, name: 'new' }, // should be inserted
-        ],
-        seedColumns: [
-          { name: 'id', type: 'integer' },
-          { name: 'name', type: 'text' },
-        ],
-        seedMatchColumns: ['id'],
-        seedOnConflict: 'DO NOTHING',
+        seedRows: [{ code: 'admin' }],
+        seedColumns: [{ name: 'code', type: 'text' }],
+        // Matched on the partial index's columns, predicate ignored.
+        seedMatchColumns: ['code'],
       },
     ];
 
@@ -431,19 +438,17 @@ describe('Batch seeds — executor', () => {
       logger,
     });
 
-    // Verify original is preserved, new is inserted
+    // The soft-deleted row counts as present: no second live 'admin' is added.
     const client2 = await pool.connect();
     try {
-      const res = await client2.query(`SELECT id, name FROM "${testSchema}"."statuses" ORDER BY id`);
-      expect(res.rows).toHaveLength(2);
-      expect(res.rows[0]).toEqual({ id: 1, name: 'original' }); // NOT changed
-      expect(res.rows[1]).toEqual({ id: 2, name: 'new' });
+      const res = await client2.query(`SELECT count(*)::int AS n FROM "${testSchema}"."roles" WHERE code = 'admin'`);
+      expect(res.rows[0].n).toBe(1);
     } finally {
       client2.release();
     }
 
     const seedOp = result.executedOperations.find((o) => o.type === 'seed_table')!;
-    expect(seedOp.seedResult).toEqual({ inserted: 1, updated: 0, unchanged: 1 });
+    expect(seedOp.seedResult).toEqual({ inserted: 0, unchanged: 1 });
   });
 
   it('handles SQL expressions in seed values', async () => {
@@ -676,14 +681,15 @@ describe('Batch seeds — executor', () => {
       logger,
     });
 
+    // slug 'a' already exists → left untouched ('old-alpha'); 'b' inserted.
     const seedOp = result.executedOperations.find((o) => o.type === 'seed_table')!;
-    expect(seedOp.seedResult).toEqual({ inserted: 1, updated: 1, unchanged: 0 });
+    expect(seedOp.seedResult).toEqual({ inserted: 1, unchanged: 1 });
 
     const client2 = await pool.connect();
     try {
       const res = await client2.query(`SELECT slug, label FROM "${testSchema}"."tags" ORDER BY slug`);
       expect(res.rows).toEqual([
-        { slug: 'a', label: 'Alpha' },
+        { slug: 'a', label: 'old-alpha' },
         { slug: 'b', label: 'Bravo' },
       ]);
     } finally {
@@ -691,7 +697,7 @@ describe('Batch seeds — executor', () => {
     }
   });
 
-  it('with no match key, skips UPDATE and inserts only rows whose seed columns are not already present', async () => {
+  it('with no match key, inserts only rows whose seed columns are not already present', async () => {
     const pool = getPool(DATABASE_URL);
     const client = await pool.connect();
     try {
@@ -724,7 +730,7 @@ describe('Batch seeds — executor', () => {
     });
 
     const seedOp = result.executedOperations.find((o) => o.type === 'seed_table')!;
-    expect(seedOp.seedResult).toEqual({ inserted: 1, updated: 0, unchanged: 1 });
+    expect(seedOp.seedResult).toEqual({ inserted: 1, unchanged: 1 });
 
     const client2 = await pool.connect();
     try {
@@ -745,7 +751,7 @@ describe('Batch seeds — executor', () => {
       logger,
     });
     const seedOp2 = result2.executedOperations.find((o) => o.type === 'seed_table')!;
-    expect(seedOp2.seedResult).toEqual({ inserted: 0, updated: 0, unchanged: 2 });
+    expect(seedOp2.seedResult).toEqual({ inserted: 0, unchanged: 2 });
   });
 });
 
@@ -759,10 +765,10 @@ describe('Batch seeds — format', () => {
       objectName: 'statuses',
       sql: '',
       destructive: false,
-      seedResult: { inserted: 3, updated: 2, unchanged: 1 },
+      seedResult: { inserted: 3, unchanged: 1 },
     };
     const msg = formatOperationMessage(op);
-    expect(msg).toBe('Seeded: statuses (3 inserted, 2 updated, 1 unchanged)');
+    expect(msg).toBe('Seeded: statuses (3 inserted, 1 unchanged)');
   });
 
   it('formats seed_table without counts as fallback', () => {
@@ -784,7 +790,7 @@ describe('Batch seeds — format', () => {
       objectName: 'units',
       sql: '',
       destructive: false,
-      seedResult: { inserted: 5, updated: 0, unchanged: 0 },
+      seedResult: { inserted: 5, unchanged: 0 },
     };
     const msg = formatOperationMessage(op);
     expect(msg).toBe('Seeded: units (5 inserted)');

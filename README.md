@@ -102,10 +102,9 @@ seeds:
   - id: '00000000-0000-0000-0000-000000000001'
     email: 'admin@example.com'
     created_at: !sql now() # SQL expression via the !sql tag
-seeds_on_conflict: 'DO NOTHING' # optional — skip UPDATE, only INSERT new rows
 ```
 
-Note: seeding an explicit value into a `serial`/identity key does **not** advance the sequence. See the [Seeds docs](https://mabulu-inc.github.io/simplicity-schema-flow/schema/seeds/).
+Seeds are insert-only — existing rows are never overwritten. Note: seeding an explicit value into a `serial`/identity key does **not** advance the sequence. See the [Seeds docs](https://mabulu-inc.github.io/simplicity-schema-flow/schema/seeds/).
 
 ## Bootstrap tables
 

@@ -36,7 +36,6 @@ import type {
   MixinSchema,
   MixinParam,
   ExtendSchema,
-  SeedOnConflict,
 } from './types.js';
 
 const sqlTag = {
@@ -460,7 +459,6 @@ const TABLE_KEYS = [
   'grants',
   'prechecks',
   'seeds',
-  'seeds_on_conflict',
   'mixins',
   'bootstrap',
   'comment',
@@ -525,7 +523,6 @@ export function parseTable(yamlStr: string): TableSchema {
   if (raw.rls !== undefined) table.rls = Boolean(raw.rls);
   if (raw.force_rls !== undefined) table.force_rls = Boolean(raw.force_rls);
   if (raw.seeds !== undefined) table.seeds = raw.seeds as Record<string, unknown>[];
-  if (raw.seeds_on_conflict !== undefined) table.seeds_on_conflict = raw.seeds_on_conflict as SeedOnConflict;
   if (raw.mixins !== undefined) table.mixins = raw.mixins as string[];
   if (raw.bootstrap !== undefined) table.bootstrap = Boolean(raw.bootstrap);
   const tableComment = resolveComment(raw);
@@ -831,7 +828,6 @@ const EXTEND_KEYS = [
   'rls',
   'force_rls',
   'seeds',
-  'seeds_on_conflict',
 ] as const;
 
 export function parseExtend(yamlStr: string): ExtendSchema {
@@ -865,7 +861,6 @@ export function parseExtend(yamlStr: string): ExtendSchema {
   if (raw.rls !== undefined) ext.rls = Boolean(raw.rls);
   if (raw.force_rls !== undefined) ext.force_rls = Boolean(raw.force_rls);
   if (raw.seeds !== undefined) ext.seeds = raw.seeds as Record<string, unknown>[];
-  if (raw.seeds_on_conflict !== undefined) ext.seeds_on_conflict = raw.seeds_on_conflict as SeedOnConflict;
 
   return ext;
 }

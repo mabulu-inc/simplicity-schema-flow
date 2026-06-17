@@ -111,7 +111,6 @@ seeds:
     email: 'admin@example.com'
     name: 'Admin'
     created_at: !sql now()
-seeds_on_conflict: 'DO NOTHING'
 
 mixins:
   - timestamps
@@ -432,10 +431,9 @@ seeds:
     email: 'admin@example.com'
     name: 'Admin'
     created_at: !sql now() # SQL expression
-seeds_on_conflict: 'DO NOTHING' # optional
 ```
 
-See [Seeds](/simplicity-schema-flow/schema/seeds/) for match-key resolution, conflict behaviour, SQL-expression values, and the serial/identity sequence caveat.
+Seeds are insert-only. See [Seeds](/simplicity-schema-flow/schema/seeds/) for match-key resolution, SQL-expression values, and the serial/identity sequence caveat.
 
 ## Bootstrap phase
 

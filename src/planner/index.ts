@@ -22,7 +22,6 @@ import type {
   MaterializedViewSchema,
   RoleSchema,
   ExtensionsSchema,
-  SeedOnConflict,
 } from '../schema/types.js';
 import { planExpandColumn } from '../expand/index.js';
 import type { ExpandMeta } from '../expand/index.js';
@@ -126,18 +125,17 @@ export interface Operation {
   /** Column metadata for seed_table operations */
   seedColumns?: { name: string; type: string }[];
   /**
-   * Columns used to match existing rows during seed upsert. Resolved from the
+   * Columns used to match existing rows during seed INSERT. Resolved from the
    * table's primary key, or — if the PK isn't fully present in every seed row
-   * — from the first unique constraint whose columns are. Empty when no such
-   * key exists: the executor then skips the UPDATE step and INSERTs only when
-   * no row already matches the seed-provided columns. Columns the YAML didn't
-   * mention are not consulted.
+   * — from the first unique constraint or unique index whose columns are
+   * (partial indexes contribute their columns but never their `where`). Empty
+   * when no such key exists: the executor then INSERTs only when no row already
+   * matches every seed-provided column. Columns the YAML didn't mention are not
+   * consulted.
    */
   seedMatchColumns?: string[];
-  /** Conflict strategy for seed_table operations */
-  seedOnConflict?: SeedOnConflict;
   /** Result counts filled by executor after seed_table execution */
-  seedResult?: { inserted: number; updated: number; unchanged: number };
+  seedResult?: { inserted: number; unchanged: number };
   /** Expand metadata — populated for expand_column and create_dual_write_trigger ops */
   expandMeta?: ExpandMeta;
 }
@@ -1001,7 +999,7 @@ function createTableOps(
 
   // Seeds (phase 15)
   if (table.seeds && table.seeds.length > 0) {
-    ops.push(createSeedTableOp(table, table.seeds, pgSchema, table.seeds_on_conflict));
+    ops.push(createSeedTableOp(table, table.seeds, pgSchema));
   }
 
   // Tighten NOT NULL on declared non-null columns. Runs in its own phase
@@ -1203,7 +1201,7 @@ function alterTableOps(
 
   // Seeds
   if (desired.seeds && desired.seeds.length > 0) {
-    ops.push(createSeedTableOp(desired, desired.seeds, pgSchema, desired.seeds_on_conflict));
+    ops.push(createSeedTableOp(desired, desired.seeds, pgSchema));
   }
 
   return ops;
@@ -2376,12 +2374,7 @@ function diffMaterializedViews(
 
 // ─── Seeds ─────────────────────────────────────────────────────
 
-function createSeedTableOp(
-  table: TableSchema,
-  seeds: Record<string, unknown>[],
-  pgSchema: string,
-  onConflict?: SeedOnConflict,
-): Operation {
+function createSeedTableOp(table: TableSchema, seeds: Record<string, unknown>[], pgSchema: string): Operation {
   const columns = table.columns;
 
   // Collect column names used across seed rows (preserve first-seen order)
@@ -2409,25 +2402,28 @@ function createSeedTableOp(
     seedRows: seeds,
     seedColumns,
     seedMatchColumns,
-    seedOnConflict: onConflict,
   };
 }
 
 /**
- * Pick the columns used to match existing rows during seed upsert.
+ * Pick the columns used to match existing rows during a seed INSERT.
  *
  * Priority:
  *   1. Primary key (column-level `primary_key: true` or table-level
  *      `primary_key: [...]`), if every PK column is present in every seed row.
- *   2. The first unique constraint or unique index — declaration order,
- *      column-level `unique: true` first, then table-level `indexes:` entries
- *      with `unique: true` — whose columns are all present in every seed row.
- *      A plain unique index protects the INSERT just as well as a constraint
- *      (the executor dedupes via `WHERE NOT EXISTS`, not `ON CONFLICT`), so
- *      `as_constraint` is not required. Partial unique indexes (`where:`) are
- *      skipped: they don't enforce table-wide uniqueness.
- *   3. Empty array. The executor then skips UPDATE and only INSERTs rows
- *      whose values don't already exist in the table.
+ *   2. A column-level unique constraint whose column is present.
+ *   3. A table-level unique index whose columns are all present — full
+ *      (table-wide) indexes first, then partial (`where:`) ones. A unique index
+ *      protects the seed INSERT's `WHERE NOT EXISTS` just as well as a
+ *      constraint (the executor dedupes via `WHERE NOT EXISTS`, not
+ *      `ON CONFLICT`), so `as_constraint` is not required. A partial index
+ *      contributes its key columns but NOT its predicate: the executor matches
+ *      on the columns across the whole table, so a soft-deleted builtin still
+ *      counts as present and is not re-inserted as a second live row. Bare
+ *      column keys only — expression keys can't be matched against literal
+ *      seed values.
+ *   4. Empty array. The executor then INSERTs only rows whose seed-provided
+ *      columns don't already exist in the table.
  *
  * "Present in every seed row" means the key is literally present, not just
  * defaulted away by the column's `default`. A null-valued key is fine for
@@ -2452,18 +2448,19 @@ function resolveSeedMatchColumns(
     if (col.unique && presentInAll([col.name])) return [col.name];
   }
 
-  // 3. Table-level unique indexes (declared as `indexes:` entries with
-  //    `unique: true`, whether or not they're also `as_constraint`). A unique
-  //    index is enough to protect the seed INSERT's `WHERE NOT EXISTS` from
-  //    duplicates. Bare-column keys only — expression keys can't be matched
-  //    against literal seed values. Partial indexes (`where:`) are skipped
-  //    because they only enforce uniqueness over a row subset.
-  for (const idx of table.indexes ?? []) {
-    if (!idx.unique || idx.where) continue;
+  // 3. Table-level unique indexes. Full indexes are a stronger (table-wide)
+  //    identity, so they win over partial ones regardless of declaration order;
+  //    the predicate of a partial index is deliberately ignored here.
+  const bareColumns = (idx: IndexDef): string[] | null => {
     const cols = idx.columns
       .map((k) => (typeof k === 'string' ? k : 'column' in k ? k.column : null))
       .filter((c): c is string => c !== null);
-    if (cols.length === idx.columns.length && presentInAll(cols)) return cols;
+    return cols.length === idx.columns.length ? cols : null;
+  };
+  const uniqueIndexes = (table.indexes ?? []).filter((idx) => idx.unique);
+  for (const idx of [...uniqueIndexes.filter((i) => !i.where), ...uniqueIndexes.filter((i) => i.where)]) {
+    const cols = bareColumns(idx);
+    if (cols && presentInAll(cols)) return cols;
   }
 
   return [];

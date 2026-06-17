@@ -58,7 +58,6 @@ export type {
   PrecheckDef,
   SqlExpression,
   SeedRow,
-  SeedOnConflict,
   TableSchema,
   EnumSchema,
   FunctionSecurity,

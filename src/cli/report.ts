@@ -79,5 +79,5 @@ export function reportMigrationResult(options: ReportOptions): void {
 function isNoOpSeed(op: Operation): boolean {
   if (op.type !== 'seed_table') return false;
   if (!op.seedResult) return false;
-  return op.seedResult.inserted === 0 && op.seedResult.updated === 0;
+  return op.seedResult.inserted === 0;
 }

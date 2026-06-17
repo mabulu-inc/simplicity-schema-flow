@@ -3,7 +3,7 @@ title: Seeds
 description: YAML reference for seeding reference/lookup data idempotently.
 ---
 
-`seeds:` declares rows that schema-flow keeps present in a table on every apply. It's for reference and lookup data — enum-like status tables, a service user, default settings — not for bulk fixtures. Seeds are applied idempotently: re-running a migration converges to zero operations once the rows match.
+`seeds:` declares rows that schema-flow keeps present in a table on every apply. It's for reference and lookup data — enum-like status tables, a service user, default settings — not for bulk fixtures. Seeds are **insert-only** and idempotent: a row is created if its key isn't already present and otherwise left untouched, so re-running a migration converges to zero operations and never overwrites existing data.
 
 ## Example
 
@@ -19,7 +19,6 @@ seeds:
     email: 'admin@example.com'
     name: 'Admin'
     created_at: !sql now() # SQL expression
-seeds_on_conflict: 'DO NOTHING' # optional — see below
 ```
 
 Each entry is a `SeedRow` — a map of column name to value. You only list the columns you want to control; columns the YAML omits keep their database defaults and are never consulted when matching.
@@ -37,15 +36,15 @@ seeds:
     created_at: !sql now()
 ```
 
-The expression is spliced into the upsert verbatim and runs with the column's type. Seeds whose stored value already equals the expression's result — including `jsonb`, `numeric`, and array values that Postgres re-formats on storage — are detected as unchanged and produce no operation in the plan.
+The expression is spliced into the insert verbatim and runs with the column's type. Seeds whose stored value already equals the expression's result — including `jsonb`, `numeric`, and array values that Postgres re-formats on storage — are detected as unchanged and produce no operation in the plan.
 
 ## Match-key resolution
 
 To re-apply seeds idempotently, schema-flow needs a way to identify which existing row a seed row corresponds to. The match key is resolved per table, in this order:
 
 1. **Primary key**, if every PK column is present in every seed row.
-2. **The first unique key** whose columns are all present in every seed row — column-level `unique: true` first, then table-level `indexes:` entries with `unique: true`, in declaration order. A plain unique index is enough; it does **not** need `as_constraint: true`, because de-dup is done with `WHERE NOT EXISTS` rather than `ON CONFLICT`. **Partial** unique indexes (those with a `where:` clause) are skipped — they only enforce uniqueness over a subset of rows, so their columns aren't a reliable table-wide identity. Expression-keyed unique indexes are skipped too, since their keys can't be matched against literal seed values.
-3. **No match key.** UPDATE is skipped entirely, and rows are INSERTed only when no existing row in the table already has the same values for every seed-provided column (null-safe via `IS NOT DISTINCT FROM`). Table columns the YAML didn't mention are never consulted.
+2. **The first unique key** whose columns are all present in every seed row — column-level `unique: true` first, then table-level `indexes:` entries with `unique: true`. A plain unique index is enough; it does **not** need `as_constraint: true`, because de-dup is done with `WHERE NOT EXISTS` rather than `ON CONFLICT`. **Partial** unique indexes (those with a `where:` clause) are now used too: their key columns identify the row, but their predicate is **ignored**. Full (table-wide) unique indexes are preferred over partial ones. Because the predicate is ignored, the existence check spans the whole table — so a soft-deleted builtin still counts as present and is never re-inserted as a second live row. Expression-keyed unique indexes are skipped, since their keys can't be matched against literal seed values.
+3. **No match key.** Rows are inserted only when no existing row in the table already has the same values for every seed-provided column (null-safe via `IS NOT DISTINCT FROM`). Table columns the YAML didn't mention are never consulted.
 
 There is no implicit "treat `id` as the key" behaviour — if your PK is `code` and your seed only supplies `id`, the planner falls through to (2) or (3).
 
@@ -62,10 +61,11 @@ seeds:
   - { code: kg, name: Kilograms }
 ```
 
-## Conflict behaviour
+## Insert-only — existing rows are never overwritten
 
-- **Default (no `seeds_on_conflict`)** — upsert via the resolved match key: rows whose non-key columns differ are UPDATEd, rows that don't yet exist are INSERTed.
-- **`seeds_on_conflict: 'DO NOTHING'`** — skips the UPDATE step even when a match key exists, so existing rows are never overwritten. New rows are still INSERTed.
+Seeds only ever **insert**. A seed row whose key already exists is left exactly as it is in the database; schema-flow never updates it to match the YAML. This keeps seeds safe for reference data an application may edit after install (renaming a status, soft-deleting a builtin) — re-applying a migration won't clobber those changes or resurrect a removed row.
+
+If you need to change a value that's already been seeded, do it with a migration pre/post-script, not by editing the seed.
 
 ## Seeds and serial/identity sequences
 

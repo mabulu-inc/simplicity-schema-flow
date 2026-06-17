@@ -185,7 +185,6 @@ export async function reindexInvalid(client: pg.PoolClient, schema = 'public', l
 
 interface SeedResult {
   inserted: number;
-  updated: number;
   unchanged: number;
 }
 
@@ -196,26 +195,26 @@ function isSqlExpression(val: unknown): val is { __sql: string } {
 }
 
 /**
- * Execute a seed_table operation using bulk JSONB upsert.
+ * Execute a seed_table operation as a bulk INSERT — seeds are insert-only.
  *
- * With a resolvable match key (PK or unique constraint, in `seedMatchColumns`):
- * two round-trips per table — UPDATE rows whose non-key columns differ, then
- * INSERT rows that don't match the key. With no match key, the UPDATE is
- * skipped entirely and the INSERT only fires for rows where at least one of
- * the seed-provided columns already differs (null-safe via
- * `IS NOT DISTINCT FROM`). Columns the YAML didn't mention are ignored.
+ * With a resolvable match key (PK, or a unique constraint/index, in
+ * `seedMatchColumns`): INSERT rows whose key isn't already present. A partial
+ * unique index contributes its key columns but never its `where` predicate, so
+ * a soft-deleted builtin still counts as present and is not re-inserted. With
+ * no match key, "new" means no existing row has every seed-provided column
+ * equal (null-safe via `IS NOT DISTINCT FROM`). Existing rows are never
+ * modified, and columns the YAML didn't mention are never read.
  */
 async function executeSeedTable(client: pg.PoolClient, op: Operation, pgSchema: string): Promise<SeedResult> {
-  const { seedRows, seedColumns, seedMatchColumns, seedOnConflict } = op;
+  const { seedRows, seedColumns, seedMatchColumns } = op;
   if (!seedRows || !seedColumns || seedRows.length === 0) {
-    return { inserted: 0, updated: 0, unchanged: 0 };
+    return { inserted: 0, unchanged: 0 };
   }
 
   const table = op.objectName;
   const matchCols = seedMatchColumns ?? [];
   const matchColSet = new Set(matchCols);
   const keyCols = seedColumns.filter((c) => matchColSet.has(c.name));
-  const nonKeyCols = seedColumns.filter((c) => !matchColSet.has(c.name));
 
   // Check if any values contain SQL expressions
   const sqlExpressions = new Map<string, Map<number, string>>(); // col -> (rowIdx -> sql)
@@ -267,27 +266,6 @@ async function executeSeedTable(client: pg.PoolClient, op: Operation, pgSchema: 
   FROM jsonb_array_elements($1::jsonb) AS elem
 )`;
 
-  let updated = 0;
-
-  // UPDATE changed rows. Skipped when there's nothing to key on (no idempotent
-  // update is possible without a stable identity), when seeds_on_conflict says
-  // DO NOTHING, or when every seed column is part of the match key.
-  if (matchCols.length > 0 && seedOnConflict !== 'DO NOTHING' && nonKeyCols.length > 0) {
-    const setClauses = nonKeyCols.map((c) => `"${c.name}" = d."${c.name}"`).join(', ');
-    const keyJoin = keyCols.map((c) => `t."${c.name}" IS NOT DISTINCT FROM d."${c.name}"`).join(' AND ');
-    const distinctChecks = nonKeyCols.map((c) => `t."${c.name}" IS DISTINCT FROM d."${c.name}"`).join(' OR ');
-
-    const updateSql = `${dataCte}
-UPDATE "${pgSchema}"."${table}" t
-SET ${setClauses}
-FROM data d
-WHERE ${keyJoin}
-AND (${distinctChecks})`;
-
-    const updateRes = await client.query(updateSql, [JSON.stringify(jsonbData)]);
-    updated = updateRes.rowCount ?? 0;
-  }
-
   // INSERT new rows. With a match key, "new" means no row shares the key.
   // Without one, "new" means no row already has every seed-provided column
   // equal to the seed values — table columns the YAML didn't mention are
@@ -308,9 +286,9 @@ WHERE NOT EXISTS (
   const insertRes = await client.query(insertSql, [JSON.stringify(jsonbData)]);
   const inserted = insertRes.rowCount ?? 0;
 
-  const unchanged = seedRows.length - inserted - updated;
+  const unchanged = seedRows.length - inserted;
 
-  return { inserted, updated, unchanged };
+  return { inserted, unchanged };
 }
 
 /**

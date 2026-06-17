@@ -34,7 +34,7 @@ describe('reportMigrationResult', () => {
         objectName: 'timezones',
         sql: 'INSERT ...',
         destructive: false,
-        seedResult: { inserted: 0, updated: 0, unchanged: 418 },
+        seedResult: { inserted: 0, unchanged: 418 },
       },
     ];
     const { write, lines } = capture();
@@ -90,7 +90,7 @@ describe('reportMigrationResult', () => {
         objectName: 'timezones',
         sql: 'INSERT ...',
         destructive: false,
-        seedResult: { inserted: 0, updated: 0, unchanged: 418 },
+        seedResult: { inserted: 0, unchanged: 418 },
       },
     ];
     const { write, lines } = capture();
@@ -111,7 +111,7 @@ describe('reportMigrationResult', () => {
         objectName: 'api_types',
         sql: 'INSERT ...',
         destructive: false,
-        seedResult: { inserted: 2, updated: 0, unchanged: 1 },
+        seedResult: { inserted: 2, unchanged: 1 },
       },
     ];
     const { write, lines } = capture();
