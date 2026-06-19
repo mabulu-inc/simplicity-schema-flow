@@ -27,6 +27,21 @@ Requirements are defined in `docs/PRD.md`.
   unique schema. Tests read the connection from `DATABASE_URL`, which the harness
   sets to the container — never hard-code a connection string.
 
+## Releases
+
+- The agent session has **no TTY**: interactive `release-it` prompts hang and
+  get force-closed. **NEVER** run bare `pnpm release` (or any interactive
+  release-it invocation) in-session.
+- Always cut releases non-interactively with `--ci`:
+  `pnpm release:<bump> --ci` (release-it + `@release-it/keep-a-changelog`).
+  The `--ci` flag is **mandatory** here.
+- Bump (pre-1.0): new features → `release:minor`, fixes/non-breaking →
+  `release:patch`. Do not use `release:major` until the package is ≥1.0.
+- Release only from `main` with `CHANGELOG.md` `## [Unreleased]` populated
+  (release-it refuses an empty `[Unreleased]`). release-it commits, tags,
+  pushes, and creates the published GitHub release; the GitHub Action
+  (`publish.yml`) runs the npm publish — release-it itself does not.
+
 ## Project-Specific Rules
 
 - **Do NOT use TodoWrite** — it wastes turns and provides no value here
