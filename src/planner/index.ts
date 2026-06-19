@@ -18,6 +18,7 @@ import type {
   GrantDef,
   EnumSchema,
   FunctionSchema,
+  FunctionArg,
   ViewSchema,
   MaterializedViewSchema,
   RoleSchema,
@@ -500,7 +501,7 @@ function diffRoleAttributes(desired: RoleSchema, actual: RoleSchema): string | n
 function functionNeedsUpdate(desired: FunctionSchema, existing: FunctionSchema): boolean {
   if (normalizeWhitespace(desired.body) !== normalizeWhitespace(existing.body)) return true;
   if ((desired.language || 'plpgsql') !== (existing.language || 'plpgsql')) return true;
-  if (desired.returns !== existing.returns) return true;
+  if (normalizeFunctionType(desired.returns) !== normalizeFunctionType(existing.returns)) return true;
   if ((desired.security || 'invoker') !== (existing.security || 'invoker')) return true;
   if ((desired.volatility || 'volatile') !== (existing.volatility || 'volatile')) return true;
   if ((desired.parallel || 'unsafe') !== (existing.parallel || 'unsafe')) return true;
@@ -511,8 +512,8 @@ function functionNeedsUpdate(desired: FunctionSchema, existing: FunctionSchema):
   const desiredSet = JSON.stringify(desired.set || {});
   const existingSet = JSON.stringify(existing.set || {});
   if (desiredSet !== existingSet) return true;
-  const desiredArgs = JSON.stringify(desired.args || []);
-  const existingArgs = JSON.stringify(existing.args || []);
+  const desiredArgs = JSON.stringify(normalizeArgTypes(desired.args));
+  const existingArgs = JSON.stringify(normalizeArgTypes(existing.args));
   if (desiredArgs !== existingArgs) return true;
   return false;
 }
@@ -2518,6 +2519,76 @@ function normalizeTypeName(t: string): string {
   };
   const canonicalBase = aliases[base] || base;
   return `${canonicalBase}${params}`;
+}
+
+/** Split on top-level commas, ignoring commas inside parentheses. */
+function splitTopLevelCommas(s: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if (ch === ',' && depth === 0) {
+      out.push(s.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(s.slice(start));
+  return out;
+}
+
+/**
+ * Canonicalise a single scalar/array type, preserving a `SETOF` prefix and
+ * any `[]` array suffix while normalising the underlying base type through
+ * `normalizeTypeName` (so `int8[]` → `bigint[]`, `setof timestamptz` →
+ * `SETOF timestamp with time zone`).
+ */
+function normalizeScalarFunctionType(t: string): string {
+  let s = t.trim();
+  let prefix = '';
+  const setof = s.match(/^setof\s+/i);
+  if (setof) {
+    prefix = 'SETOF ';
+    s = s.slice(setof[0].length).trim();
+  }
+  let suffix = '';
+  const arr = s.match(/((?:\s*\[\s*\d*\s*\])+)\s*$/);
+  if (arr) {
+    suffix = arr[1].replace(/\s+/g, '');
+    s = s.slice(0, arr.index).trim();
+  }
+  return `${prefix}${normalizeTypeName(s)}${suffix}`;
+}
+
+/**
+ * Canonicalise a function return type or argument type so declared aliases
+ * (`timestamptz`, `int8`, `varchar`, …) compare equal to the canonical form
+ * Postgres stores and reports via `pg_get_function_result` /
+ * `pg_get_function_arguments`. Without this, a function whose signature uses
+ * an alias re-emits `CREATE OR REPLACE` on every plan and never converges
+ * (issue #63). Handles scalar types, array suffixes, and `TABLE(...)` returns.
+ */
+export function normalizeFunctionType(t: string): string {
+  const trimmed = t.trim();
+  const tableMatch = trimmed.match(/^TABLE\s*\((.*)\)$/is);
+  if (tableMatch) {
+    const cols = splitTopLevelCommas(tableMatch[1]).map((col) => {
+      const c = col.trim();
+      // Each entry is `name type` — split on the first whitespace run.
+      const sp = c.match(/^(\S+)\s+([\s\S]+)$/);
+      if (!sp) return c;
+      return `${sp[1]} ${normalizeScalarFunctionType(sp[2])}`;
+    });
+    return `TABLE(${cols.join(', ')})`;
+  }
+  return normalizeScalarFunctionType(trimmed);
+}
+
+/** Normalise the `type` of each function arg so alias comparison is stable. */
+function normalizeArgTypes(args: FunctionArg[] | undefined): FunctionArg[] {
+  return (args || []).map((a) => ({ ...a, type: normalizeFunctionType(a.type) }));
 }
 
 function normalizeWhitespace(s: string): string {

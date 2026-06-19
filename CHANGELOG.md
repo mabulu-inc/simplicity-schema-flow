@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Functions whose signature uses a type **alias** — `timestamptz`, `int8`,
+  `varchar`, `bool`, and friends — no longer re-appear in every plan. Postgres
+  stores these under their canonical names (`timestamp with time zone`, …), so
+  schema-flow now canonicalises the declared return type, `TABLE(...)` columns,
+  and argument types before comparing, instead of matching the raw string.
+  A function declared with aliases now converges to zero operations after its
+  first apply, and drift no longer reports a phantom difference for it.
+
 ## [0.13.0] - 2026-06-16
 
 ### Changed

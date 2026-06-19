@@ -7,7 +7,13 @@
 
 import type { PoolClient } from 'pg';
 import type { DesiredState, ActualState } from '../planner/index.js';
-import { defaultIndexName, indexKeysIdentity, normalizeGrants, normalizeIndexClause } from '../planner/index.js';
+import {
+  defaultIndexName,
+  indexKeysIdentity,
+  normalizeFunctionType,
+  normalizeGrants,
+  normalizeIndexClause,
+} from '../planner/index.js';
 import type {
   TableSchema,
   ColumnDef,
@@ -229,7 +235,7 @@ function driftFunctions(desired: FunctionSchema[], actual: Map<string, FunctionS
     } else {
       const diffs: string[] = [];
       if (normalizeWhitespace(df.body) !== normalizeWhitespace(af.body)) diffs.push('body');
-      if (df.returns !== af.returns) diffs.push('returns');
+      if (normalizeFunctionType(df.returns) !== normalizeFunctionType(af.returns)) diffs.push('returns');
       if ((df.security || 'invoker') !== (af.security || 'invoker')) diffs.push('security');
       if ((df.volatility || 'volatile') !== (af.volatility || 'volatile')) diffs.push('volatility');
       if ((df.parallel || 'unsafe') !== (af.parallel || 'unsafe')) diffs.push('parallel');
@@ -240,8 +246,8 @@ function driftFunctions(desired: FunctionSchema[], actual: Map<string, FunctionS
       const dSet = JSON.stringify(df.set || {});
       const aSet = JSON.stringify(af.set || {});
       if (dSet !== aSet) diffs.push('set');
-      const dArgs = (df.args || []).map((a) => `${a.name}:${a.type}`).join(',');
-      const aArgs = (af.args || []).map((a) => `${a.name}:${a.type}`).join(',');
+      const dArgs = (df.args || []).map((a) => `${a.name}:${normalizeFunctionType(a.type)}`).join(',');
+      const aArgs = (af.args || []).map((a) => `${a.name}:${normalizeFunctionType(a.type)}`).join(',');
       if (dArgs !== aArgs) diffs.push('args');
       if (diffs.length > 0) {
         items.push({
