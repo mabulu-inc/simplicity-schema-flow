@@ -200,7 +200,7 @@ export function buildPlan(desired: DesiredState, actual: ActualState, options: P
   allOps.push(...diffFunctions(desired.functions, actual.functions, pgSchema, allowDestructive));
 
   // Diff tables (without FKs first)
-  allOps.push(...diffTables(desired.tables, actual.tables, pgSchema, actual.sequenceGrants));
+  allOps.push(...diffTables(desired.tables, actual.tables, pgSchema, actual.sequenceGrants, allowDestructive));
 
   // Diff views
   allOps.push(...diffViews(desired.views, actual.views, pgSchema));
@@ -669,6 +669,7 @@ function diffTables(
   actual: Map<string, TableSchema>,
   pgSchema: string,
   sequenceGrants?: Map<string, Map<string, Set<string>>>,
+  allowDestructive = false,
 ): Operation[] {
   validateBootstrapForeignKeys(desired);
 
@@ -677,7 +678,7 @@ function diffTables(
   for (const desiredTable of desired) {
     const existing = actual.get(desiredTable.table);
     const tableOps = existing
-      ? alterTableOps(desiredTable, existing, pgSchema, sequenceGrants)
+      ? alterTableOps(desiredTable, existing, pgSchema, sequenceGrants, allowDestructive)
       : createTableOps(desiredTable, pgSchema, sequenceGrants);
     // A bootstrap table's entire op set (create, indexes, constraints, seeds)
     // runs in the bootstrap transaction. Tag here so the executor can route
@@ -1058,6 +1059,7 @@ function alterTableOps(
   existing: TableSchema,
   pgSchema: string,
   sequenceGrants?: Map<string, Map<string, Set<string>>>,
+  allowDestructive = false,
 ): Operation[] {
   const ops: Operation[] = [];
 
@@ -1196,6 +1198,7 @@ function alterTableOps(
       pgSchema,
       droppedColNames,
       existing.columns,
+      allowDestructive,
     ),
   );
 
@@ -1415,6 +1418,7 @@ function diffIndexes(
   pgSchema: string,
   droppedColNames: Set<string> = new Set(),
   existingColumns: ColumnDef[] = [],
+  allowDestructive = false,
 ): Operation[] {
   const ops: Operation[] = [];
   const existingByName = new Map<string, IndexDef>();
@@ -1449,6 +1453,26 @@ function diffIndexes(
     }
     const existingIdx = existingByName.get(name);
     if (!existingIdx) {
+      if (columnLevelUniqueNames.has(name)) {
+        // The name is taken by an existing UNIQUE constraint (folded into a
+        // column-level unique by introspection, so it isn't in existingByName)
+        // whose definition differs from this declared index — typically the
+        // declared one is partial (`where:`), which is why the exact-match skip
+        // above didn't fire. A bare `CREATE … IF NOT EXISTS` would silently
+        // no-op against that name and the plan would never converge (#61).
+        // Reconcile by dropping the constraint, then creating the index.
+        ops.push({
+          type: 'drop_unique_constraint',
+          phase: 6,
+          objectName: `${table}.${name}`,
+          sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${name}"`,
+          destructive: true,
+        });
+        // The create only succeeds once the constraint is dropped. If the drop
+        // is blocked (no --allow-destructive), skip the create so the blocked
+        // drop is surfaced instead of a "create" that silently does nothing.
+        if (!allowDestructive) continue;
+      }
       ops.push(...createIndexOps(table, { ...idx, name }, pgSchema));
     } else if (indexNeedsRecreate(idx, existingIdx)) {
       // Keys, where-clause, include-list, uniqueness, nulls-not-distinct,

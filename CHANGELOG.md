@@ -25,6 +25,14 @@ existing function`. The drop is gated behind `--allow-destructive` (the
 
 ### Fixed
 
+- A declared **partial unique index** (`unique: true` + `where:`) whose name
+  matches an existing plain `UNIQUE` constraint is now built correctly. Before,
+  schema-flow emitted a `CREATE … IF NOT EXISTS` that silently did nothing
+  (the name was already taken by the constraint), logged "Added index", and
+  never converged — the partial predicate was never applied. It now drops the
+  conflicting constraint and creates the partial index (gated behind
+  `--allow-destructive`); without the flag the change is reported as blocked
+  instead of a create that does nothing.
 - Functions whose signature uses a type **alias** — `timestamptz`, `int8`,
   `varchar`, `bool`, and friends — no longer re-appear in every plan. Postgres
   stores these under their canonical names (`timestamp with time zone`, …), so
