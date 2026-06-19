@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A function whose **return type** changes (e.g. `integer` → `bigint`, or a
+  changed `TABLE(...)`/`OUT` column) is now applied with a `DROP FUNCTION …
+CASCADE` + `CREATE` instead of failing with `cannot change return type of
+existing function`. The drop is gated behind `--allow-destructive` (the
+  CASCADE removes dependent policies/views); without the flag the change is
+  reported as blocked rather than attempting a create that can't succeed.
+- After a CASCADE drop, schema-flow runs a **post-apply convergence pass**: it
+  re-plans against the live database, recreates declared policies/views the
+  CASCADE removed, and warns if anything is still pending — so a single `run`
+  converges instead of silently leaving the schema short of the declared state.
+- Before a `DROP FUNCTION … CASCADE`, schema-flow now lists the dependents it
+  will drop and **warns about any not declared in the schema** (an ad-hoc view
+  or policy a consumer created), so they aren't removed silently.
+
 ### Fixed
 
 - Functions whose signature uses a type **alias** — `timestamptz`, `int8`,

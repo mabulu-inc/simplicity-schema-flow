@@ -16,8 +16,10 @@ import {
   getExistingMaterializedViews,
   getExistingRoles,
   getSequenceGrants,
+  getFunctionDependents,
   introspectTable,
 } from '../introspect/index.js';
+import type { Operation } from '../planner/index.js';
 import { buildPlan } from '../planner/index.js';
 import type { DesiredState, ActualState } from '../planner/index.js';
 import {
@@ -116,6 +118,14 @@ export async function runPipeline(
     if (!config.dryRun) {
       logger.info(`Plan: ${operations.length} operations (${blocked.length} blocked)`);
     }
+
+    // Surface what a planned `DROP FUNCTION … CASCADE` will take out before it
+    // runs — declared dependents are recreated by the convergence re-plan, but
+    // undeclared ones (an ad-hoc view/policy a consumer created) would be lost
+    // silently. Warn so that's an explicit signal, not silent drift. (#62)
+    if (operations.some((op) => op.type === 'drop_function')) {
+      await warnCascadeFunctionDrops(config, logger, operations, desired);
+    }
   }
 
   // Re-plan against the post-pre-script DB state. Pre-scripts can mutate the
@@ -151,6 +161,15 @@ export async function runPipeline(
     perTxSqlPath: config.perTxSqlPath,
     bootstrapSession: config.bootstrapSession,
   });
+
+  // 6b. Post-apply convergence. A CASCADE drop (e.g. a function return-type
+  //     change) can drop declared policies/views the original plan — built
+  //     from a pre-drop snapshot — didn't know to recreate. Re-plan against
+  //     the post-apply DB, re-apply to recreate them, and warn on any residual
+  //     so a single `run` converges instead of silently leaving drift. (#62)
+  if (!config.dryRun && !validateOnly && shouldMigrate && desired) {
+    await convergeAfterApply(config, logger, desired, result.executedOperations);
+  }
 
   // 7. Record schema files in history after successful migration
   if (!config.dryRun && !validateOnly && shouldMigrate && discovered.schema.length > 0) {
@@ -224,6 +243,91 @@ async function introspectDatabase(config: SimplicitySchemaConfig, logger: Logger
     };
   } finally {
     client.release();
+  }
+}
+
+/**
+ * Warn about objects a planned `DROP FUNCTION … CASCADE` will drop. Declared
+ * dependents (in YAML) are logged at debug — the convergence re-plan recreates
+ * them. Anything not in the declared set is a hard warning: CASCADE will drop
+ * it and nothing will bring it back.
+ */
+async function warnCascadeFunctionDrops(
+  config: SimplicitySchemaConfig,
+  logger: Logger,
+  operations: Operation[],
+  desired: DesiredState,
+): Promise<void> {
+  const dropFns = operations.filter((op) => op.type === 'drop_function');
+  if (dropFns.length === 0) return;
+
+  const declaredViews = new Set<string>([
+    ...desired.views.map((v) => v.name),
+    ...desired.materializedViews.map((v) => v.name),
+  ]);
+  const declaredPolicies = new Set<string>(desired.tables.flatMap((t) => (t.policies ?? []).map((p) => p.name)));
+
+  const client = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
+  try {
+    for (const op of dropFns) {
+      const dependents = await getFunctionDependents(client, config.pgSchema, op.objectName);
+      for (const dep of dependents) {
+        const isDeclared =
+          ((dep.type === 'view' || dep.type === 'materialized view') && declaredViews.has(dep.name)) ||
+          (dep.type === 'policy' && declaredPolicies.has(dep.name));
+        if (isDeclared) {
+          logger.debug(
+            `CASCADE drop of function ${op.objectName} will drop declared ${dep.type} ${dep.identity} — it will be recreated`,
+          );
+        } else {
+          logger.warn(
+            `CASCADE drop of function ${op.objectName} will drop ${dep.type} ${dep.identity}, which is not declared in the schema — it will be lost and not recreated`,
+          );
+        }
+      }
+    }
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * After a CASCADE drop ran, re-plan against the live DB and re-apply so
+ * declared dependents the snapshot-based plan couldn't recreate get rebuilt in
+ * the same `run`. Warn on any residual operations that still don't converge.
+ */
+async function convergeAfterApply(
+  config: SimplicitySchemaConfig,
+  logger: Logger,
+  desired: DesiredState,
+  executedOperations: Operation[],
+): Promise<void> {
+  // Only the wide destructive case needs this — keep ordinary applies untouched.
+  if (!executedOperations.some((op) => op.type === 'drop_function')) return;
+
+  const replan = async (): Promise<Operation[]> => {
+    const actual = await introspectDatabase(config, logger);
+    return buildPlan(desired, actual, { allowDestructive: config.allowDestructive, pgSchema: config.pgSchema })
+      .operations;
+  };
+
+  let residual = await replan();
+  if (residual.length > 0) {
+    logger.info(`Post-apply convergence: recreating ${residual.length} object(s) dropped by CASCADE`);
+    await execute({
+      connectionString: config.connectionString,
+      operations: residual,
+      pgSchema: config.pgSchema,
+      lockTimeout: config.lockTimeout,
+      statementTimeout: config.statementTimeout,
+      perTxSqlPath: config.perTxSqlPath,
+      logger,
+    });
+    residual = await replan();
+  }
+
+  if (residual.length > 0) {
+    logger.warn(`Apply complete, but ${residual.length} operation(s) still pending — run \`plan\` to inspect.`);
   }
 }
 

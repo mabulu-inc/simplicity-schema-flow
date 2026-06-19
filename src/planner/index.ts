@@ -57,6 +57,7 @@ export type OperationType =
   | 'remove_enum_value'
   // Functions
   | 'create_function'
+  | 'drop_function'
   // Triggers
   | 'create_trigger'
   | 'drop_trigger'
@@ -196,7 +197,7 @@ export function buildPlan(desired: DesiredState, actual: ActualState, options: P
   allOps.push(...diffRoles(desired.roles, actual.roles));
 
   // Diff functions
-  allOps.push(...diffFunctions(desired.functions, actual.functions, pgSchema));
+  allOps.push(...diffFunctions(desired.functions, actual.functions, pgSchema, allowDestructive));
 
   // Diff tables (without FKs first)
   allOps.push(...diffTables(desired.tables, actual.tables, pgSchema, actual.sequenceGrants));
@@ -518,7 +519,24 @@ function functionNeedsUpdate(desired: FunctionSchema, existing: FunctionSchema):
   return false;
 }
 
-function diffFunctions(desired: FunctionSchema[], actual: Map<string, FunctionSchema>, pgSchema: string): Operation[] {
+/**
+ * A change `CREATE OR REPLACE FUNCTION` cannot apply — Postgres forbids
+ * changing the return type (and the names/types of OUT/TABLE columns, which
+ * are part of the return signature) and raises 42P13. Such a change requires
+ * `DROP FUNCTION` + `CREATE`. Compared after canonicalisation so an alias
+ * (`timestamptz` vs `timestamp with time zone`) is never mistaken for a real
+ * change (issue #62, building on #63).
+ */
+function functionReturnTypeChanged(desired: FunctionSchema, existing: FunctionSchema): boolean {
+  return normalizeFunctionType(desired.returns) !== normalizeFunctionType(existing.returns);
+}
+
+function diffFunctions(
+  desired: FunctionSchema[],
+  actual: Map<string, FunctionSchema>,
+  pgSchema: string,
+  allowDestructive: boolean,
+): Operation[] {
   const ops: Operation[] = [];
 
   for (const fn of desired) {
@@ -536,6 +554,25 @@ function diffFunctions(desired: FunctionSchema[], actual: Map<string, FunctionSc
       : '';
 
     const existing = actual.get(fn.name);
+
+    // A return-type change can't go through CREATE OR REPLACE — plan a
+    // CASCADE drop (which also clears dependent policies/views; those declared
+    // in YAML are recreated by the post-apply convergence re-plan) followed by
+    // a fresh create. The drop is destructive, so without --allow-destructive
+    // we emit only the (blocked) drop and skip the create — otherwise the
+    // CREATE OR REPLACE would run and fail 42P13.
+    if (existing && functionReturnTypeChanged(fn, existing)) {
+      const dropArgTypes = (existing.args || []).map((a) => a.type).join(', ');
+      ops.push({
+        type: 'drop_function',
+        phase: 4,
+        objectName: fn.name,
+        sql: `DROP FUNCTION IF EXISTS "${pgSchema}"."${fn.name}"(${dropArgTypes}) CASCADE`,
+        destructive: true,
+      });
+      if (!allowDestructive) continue;
+    }
+
     const needsUpdate = !existing || functionNeedsUpdate(fn, existing);
 
     if (needsUpdate) {

@@ -244,6 +244,48 @@ function parseArgList(arglist: string): FunctionArg[] {
   return args;
 }
 
+export interface FunctionDependent {
+  /** pg_identify_object type, e.g. 'view', 'materialized view', 'policy', 'function'. */
+  type: string;
+  /** pg_identify_object short name (view/policy name, etc.). */
+  name: string;
+  /** pg_identify_object fully-qualified identity, for display. */
+  identity: string;
+}
+
+/**
+ * List the objects that depend on a function (by unqualified name, covering
+ * overloads) — RLS policies, views/matviews, other functions, generated
+ * columns, etc. Used to warn what a `DROP FUNCTION … CASCADE` will take out
+ * before it runs, so undeclared dependents aren't dropped silently (issue
+ * #62). Uses `pg_identify_object` so every catalog kind is rendered uniformly.
+ */
+export async function getFunctionDependents(
+  client: Client,
+  schema: string,
+  fnName: string,
+): Promise<FunctionDependent[]> {
+  const result = await client.query(
+    `SELECT DISTINCT obj.type AS type, obj.name AS name, obj.identity AS identity
+     FROM pg_catalog.pg_depend d,
+       LATERAL pg_catalog.pg_identify_object(d.classid, d.objid, d.objsubid) AS obj
+     WHERE d.refclassid = 'pg_proc'::regclass
+       AND d.deptype IN ('n', 'a')
+       AND d.refobjid IN (
+         SELECT p.oid FROM pg_catalog.pg_proc p
+         JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = $1 AND p.proname = $2
+       )
+     ORDER BY type, identity`,
+    [schema, fnName],
+  );
+  return result.rows.map((r: Record<string, unknown>) => ({
+    type: r.type as string,
+    name: r.name as string,
+    identity: r.identity as string,
+  }));
+}
+
 /** Get all regular views in a schema, excluding extension-owned views. */
 export async function getExistingViews(client: Client, schema: string): Promise<ViewSchema[]> {
   const result = await client.query(

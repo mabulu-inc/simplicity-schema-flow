@@ -32,6 +32,7 @@ const DESCRIPTIONS: Record<OperationType, string> = {
   remove_enum_value: 'Removed enum value',
   // Functions
   create_function: 'Created function',
+  drop_function: 'Dropped function',
   // Triggers
   create_trigger: 'Created trigger',
   drop_trigger: 'Dropped trigger',
@@ -102,6 +103,7 @@ const PRESENT_DESCRIPTIONS: Record<OperationType, string> = {
   add_enum_value: 'Add enum value',
   remove_enum_value: 'Remove enum value',
   create_function: 'Create function',
+  drop_function: 'Drop function',
   create_trigger: 'Create trigger',
   drop_trigger: 'Drop trigger',
   enable_rls: 'Enable RLS',
