@@ -34,6 +34,16 @@ Operations execute in strict dependency order. This ensures PostgreSQL dependenc
 - Ops belonging to a [bootstrap table](/simplicity-schema-flow/schema/tables/#bootstrap-phase) (`bootstrap: true`) are split into a separate transaction that commits **before** the main apply tx, so per-tx hooks opening the main tx can resolve the rows seeded there. The bootstrap tx additionally sets `smplcty.bootstrap = 'true'` plus any `bootstrapSession` GUCs
 - `--per-tx-sql <path>` (if set) is injected as the first statement after `BEGIN` in every executor transaction — pre-scripts, the bootstrap tx, the main migrate+seeds tx, post-scripts, and tighten — so `SET LOCAL` values are visible to everything that runs in the same tx
 
+## Post-apply convergence
+
+When an apply performs a wide `CASCADE` drop (e.g. a function return-type
+change), it can remove declared policies or views the plan — built from a
+pre-drop snapshot — didn't know to recreate. After such an apply, schema-flow
+re-plans against the live database and recreates those declared objects, then
+re-plans once more and warns about anything still outstanding. This makes a
+single `run` converge rather than exit successfully while leaving the schema
+short of the declared state.
+
 ## Operation types
 
 ### Tables & columns
@@ -54,7 +64,11 @@ Operations execute in strict dependency order. This ensures PostgreSQL dependenc
 
 ### Functions
 
-`create_function`
+`create_function`, `drop_function`
+
+A return-type change is applied as `drop_function` (`CASCADE`) followed by
+`create_function`, since `CREATE OR REPLACE` cannot alter a function's return
+type. The drop is destructive and sorts ahead of the recreate.
 
 ### Triggers
 

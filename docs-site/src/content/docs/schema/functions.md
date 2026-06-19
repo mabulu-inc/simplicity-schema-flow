@@ -83,4 +83,16 @@ grants:
 
 ## Behavior
 
-Functions are created with `CREATE OR REPLACE FUNCTION`. When any property changes (body, args, return type, security, volatility, etc.), the function is replaced.
+Functions are created and updated with `CREATE OR REPLACE FUNCTION`. When a property changes — body, arguments, security, volatility, cost, `SET` config, and so on — the function is replaced in place.
+
+### Type normalization
+
+Declared types are compared against Postgres's canonical type names, so aliases never cause spurious churn. `timestamptz`, `int8`, `varchar`, and `bool` compare equal to `timestamp with time zone`, `bigint`, `character varying`, and `boolean`. Normalization covers the return type, every `TABLE(...)` column, and each argument type — including array (`int8[]`) and `SETOF` forms. A function declared with aliases reaches zero pending operations after its first apply, and never re-emits a no-op `CREATE OR REPLACE`.
+
+### Return-type changes
+
+Postgres cannot change a function's return type — or the names and types of its `OUT`/`TABLE` columns — through `CREATE OR REPLACE`. When the declared return type changes, schema-flow drops and recreates the function:
+
+- The drop is `DROP FUNCTION … CASCADE` and is [destructive](/simplicity-schema-flow/safety/destructive-protection/) — it requires `--allow-destructive`. Without the flag the change is reported as blocked instead of attempting a replace that cannot succeed.
+- The `CASCADE` also removes objects that depend on the function (RLS policies, views, generated columns). Before running it, schema-flow lists those dependents and warns about any **not declared in your schema** — an ad-hoc view or policy created outside it — so they aren't dropped silently.
+- After the drop, a post-apply convergence pass re-plans against the database and recreates the declared policies and views the cascade removed, so a single `run` converges. Any operation still outstanding afterwards is surfaced as a warning.

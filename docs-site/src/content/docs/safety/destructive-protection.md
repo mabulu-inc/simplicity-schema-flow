@@ -13,6 +13,7 @@ These operations are **blocked by default** and require `--allow-destructive`:
 - `drop_foreign_key` -- dropping foreign key constraints
 - `drop_check` -- dropping check constraints
 - `drop_unique_constraint` -- dropping unique constraints
+- `drop_function` -- dropping a function to recreate it with a changed return type
 - `drop_view` -- dropping views
 - `drop_materialized_view` -- dropping materialized views
 - `drop_extension` -- dropping extensions
@@ -37,6 +38,31 @@ npx @smplcty/schema-flow plan
 # Allow destructive operations
 npx @smplcty/schema-flow run --allow-destructive
 ```
+
+## Cascading drops and convergence
+
+Some declared changes can only be applied by dropping an object that other
+objects depend on. The drop is gated like any other destructive operation, and
+schema-flow takes two extra precautions around it:
+
+- **Dependents are surfaced first.** Before a `DROP … CASCADE` runs, schema-flow
+  lists what the cascade will remove and warns about anything **not declared in
+  your schema**, so an ad-hoc view or policy isn't dropped silently.
+- **The apply re-plans afterwards.** A cascade can drop declared objects the
+  original plan — built from a pre-drop snapshot — didn't know to recreate.
+  After such an apply, schema-flow re-plans against the live database, recreates
+  the declared policies and views the cascade removed, and warns if anything is
+  still pending. A single `run` converges instead of leaving silent drift.
+
+The two cases that use this today:
+
+- A **function return-type change** (`integer` → `bigint`, a changed
+  `TABLE(...)`/`OUT` signature) — `CREATE OR REPLACE` can't alter a return type,
+  so the function is dropped (`CASCADE`, taking dependent policies/views) and
+  recreated. See [Functions](/simplicity-schema-flow/schema/functions/#return-type-changes).
+- A declared **partial unique index** whose name matches an existing plain
+  `UNIQUE` constraint — the constraint is dropped and the partial index built in
+  its place. See [Tables → Indexes](/simplicity-schema-flow/schema/tables/#reconciling-a-same-named-constraint).
 
 ## Advisory locking
 

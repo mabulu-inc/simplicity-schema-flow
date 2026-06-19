@@ -48,6 +48,13 @@ Query `pg_catalog` and `information_schema` filtered to the target `pgSchema` to
 
 ### 5. Plan
 
+Before diffing, declared SQL expressions are normalized to the form Postgres
+stores so they don't read as spurious changes: policy `USING`/`WITH CHECK` and
+table `CHECK` expressions, partial-index `WHERE` clauses, column defaults, and
+view bodies are round-tripped through the database, and function return/argument
+types are resolved to their canonical names (`timestamptz` →
+`timestamp with time zone`).
+
 Diff desired (YAML) state vs actual (DB) state. Produce an ordered list of typed `Operation` objects, each with:
 
 - `type`: the operation type (e.g., `create_table`, `add_column`)
@@ -61,3 +68,10 @@ Destructive operations are separated into a `blocked` list unless `allowDestruct
 ### 6. Execute
 
 Run operations in phased order within transactions. See [execution phases](/simplicity-schema-flow/architecture/execution-phases/).
+
+Pre-scripts can mutate the database in ways the plan can't express (e.g. a
+column rename), so after they run the plan is recomputed against the new state
+before the main apply. After an apply that performed a wide `CASCADE` drop, the
+plan is recomputed again to recreate declared objects the cascade removed and to
+report anything still pending — so a single run converges. See
+[post-apply convergence](/simplicity-schema-flow/architecture/execution-phases/#post-apply-convergence).

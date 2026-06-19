@@ -296,6 +296,19 @@ indexes:
 
 Useful when an index is meant to satisfy a specific `ORDER BY` (Postgres can use a non-default-ordered index to skip an external sort). Writing the default modifiers explicitly is a no-op; the diff resolves both sides to the same canonical (order, nulls) pair before comparing, so an explicit `ASC NULLS LAST` doesn't churn against an introspected bare column.
 
+### Reconciling a same-named constraint
+
+When a declared index's name matches an object already in the database whose
+definition differs, schema-flow drops the existing object and builds the
+declared one. The common case is migrating a plain `UNIQUE` constraint to a
+**partial** unique index — declaring `unique: true` with a `where:` predicate
+(for example `where: 'deleted_at IS NULL'`, so a name frees up after a
+soft-delete) under the same name as an existing `UNIQUE (col)` constraint.
+
+The drop is [destructive](/simplicity-schema-flow/safety/destructive-protection/)
+and requires `--allow-destructive`. Without the flag the change is reported as
+blocked rather than left silently unapplied.
+
 ## Check constraints
 
 ```yaml
