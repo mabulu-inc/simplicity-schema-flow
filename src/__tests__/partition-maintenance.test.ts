@@ -4,7 +4,8 @@ import { parseTable, parseExtensions } from '../schema/parser.js';
 import { buildPlan, type DesiredState, type ActualState } from '../planner/index.js';
 import { introspectTable, getPartitionMaintenance } from '../introspect/index.js';
 import { generateFromDb } from '../scaffold/index.js';
-import type { ExtensionsSchema, TableSchema } from '../schema/types.js';
+import { detectDrift } from '../drift/index.js';
+import type { ExtensionsSchema, PartitionsDef, TableSchema } from '../schema/types.js';
 
 const TEST_URL = process.env.DATABASE_URL!;
 const TEST_SCHEMA = `test_partmaint_${Date.now()}`;
@@ -178,6 +179,17 @@ describe('planner: partition-maintenance SQL', () => {
     expect(cron).toHaveLength(1);
     expect(cron[0].sql).toContain("cron.schedule('schema_flow_partman_maintenance', '@hourly'");
     expect(cron[0].sql).toContain('"partman".run_maintenance_proc()');
+  });
+
+  it('re-emits the schedule when it changes', () => {
+    const plan = buildPlan(
+      desired([parseTable(TABLE_YAML)], parseExtensions(EXT_YAML)),
+      { ...emptyActual(), partitionMaintenance: { schedule: '@daily' } },
+      { pgSchema: TEST_SCHEMA },
+    );
+    const cron = plan.operations.filter((o) => o.type === 'schedule_partition_maintenance');
+    expect(cron).toHaveLength(1);
+    expect(cron[0].sql).toContain("'@hourly'");
   });
 
   it('omits the cron job when pg_cron is not declared', () => {
@@ -372,5 +384,133 @@ describe('scaffold: partitions: round-trip', () => {
       window: [-12, 4],
       retention_keep_table: false,
     });
+  });
+});
+
+// ─── Drift detection ─────────────────────────────────────────────
+
+describe('drift: partition config + maintenance schedule', () => {
+  function actualPartitioned(name: string, partitions: PartitionsDef): TableSchema {
+    return {
+      table: name,
+      columns: [
+        { name: 'id', type: 'uuid' },
+        { name: 'as_of_date', type: 'date' },
+      ],
+      partition_by: { strategy: 'range', key: ['as_of_date'] },
+      partitions,
+    };
+  }
+
+  function partitionItems(desiredState: DesiredState, actualState: ActualState) {
+    return detectDrift(desiredState, actualState).items.filter((i) => i.type === 'partition');
+  }
+
+  it('reports drift when a partition window changes', () => {
+    const d = desired([parseTable(TABLE_YAML)], parseExtensions(EXT_YAML));
+    const a: ActualState = {
+      ...emptyActual(),
+      tables: new Map([
+        [
+          'kpi_daily_facts',
+          actualPartitioned('kpi_daily_facts', {
+            granularity: 'month',
+            window: [-12, 3],
+            default: true,
+            retention_keep_table: true,
+          }),
+        ],
+      ]),
+      partitionMaintenance: { schedule: '@hourly' },
+    };
+    const items = partitionItems(d, a);
+    expect(items).toContainEqual(
+      expect.objectContaining({ type: 'partition', object: 'kpi_daily_facts', status: 'different' }),
+    );
+  });
+
+  it('reports a parent not yet registered with pg_partman', () => {
+    const d = desired([parseTable(TABLE_YAML)], parseExtensions(EXT_YAML));
+    const a: ActualState = {
+      ...emptyActual(),
+      tables: new Map([['kpi_daily_facts', { table: 'kpi_daily_facts', columns: [{ name: 'id', type: 'uuid' }] }]]),
+      partitionMaintenance: { schedule: '@hourly' },
+    };
+    const items = partitionItems(d, a);
+    expect(items).toContainEqual(
+      expect.objectContaining({ type: 'partition', object: 'kpi_daily_facts', status: 'missing_in_db' }),
+    );
+  });
+
+  it('reports maintenance schedule drift', () => {
+    const d = desired([parseTable(TABLE_YAML)], parseExtensions(EXT_YAML)); // wants @hourly
+    const a: ActualState = {
+      ...emptyActual(),
+      tables: new Map([
+        [
+          'kpi_daily_facts',
+          actualPartitioned('kpi_daily_facts', {
+            granularity: 'month',
+            window: [-24, 3],
+            default: true,
+            retention_keep_table: true,
+          }),
+        ],
+      ]),
+      partitionMaintenance: { schedule: '@daily' },
+    };
+    const items = partitionItems(d, a);
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        type: 'partition',
+        object: 'maintenance_schedule',
+        status: 'different',
+        expected: '@hourly',
+        actual: '@daily',
+      }),
+    );
+  });
+
+  it('reports a missing maintenance schedule', () => {
+    const d = desired([parseTable(TABLE_YAML)], parseExtensions(EXT_YAML));
+    const a: ActualState = {
+      ...emptyActual(),
+      tables: new Map([
+        [
+          'kpi_daily_facts',
+          actualPartitioned('kpi_daily_facts', {
+            granularity: 'month',
+            window: [-24, 3],
+            default: true,
+            retention_keep_table: true,
+          }),
+        ],
+      ]),
+      partitionMaintenance: null,
+    };
+    const items = partitionItems(d, a);
+    expect(items).toContainEqual(
+      expect.objectContaining({ type: 'partition', object: 'maintenance_schedule', status: 'missing_in_db' }),
+    );
+  });
+
+  it('reports no partition drift when fully converged', () => {
+    const d = desired([parseTable(TABLE_YAML)], parseExtensions(EXT_YAML));
+    const a: ActualState = {
+      ...emptyActual(),
+      tables: new Map([
+        [
+          'kpi_daily_facts',
+          actualPartitioned('kpi_daily_facts', {
+            granularity: 'month',
+            window: [-24, 3],
+            default: true,
+            retention_keep_table: true,
+          }),
+        ],
+      ]),
+      partitionMaintenance: { schedule: '@hourly' },
+    };
+    expect(partitionItems(d, a)).toHaveLength(0);
   });
 });

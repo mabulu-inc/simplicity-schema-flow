@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`drift` now reports partition-maintenance drift.** The read-only `drift`
+  command flags when a partitioned table's pg_partman window/retention or the
+  pg_cron maintenance schedule no longer matches the YAML (previously only `run`
+  would reconcile these). `drift --apply` corrects them.
 - **pg_partman config is now introspected and diffed.** schema-flow reads back a
   partitioned table's pg_partman `part_config` and the pg_cron maintenance job,
   so re-running against an already-configured database is a clean no-op (the

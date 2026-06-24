@@ -13,6 +13,7 @@ import {
   normalizeFunctionType,
   normalizeGrants,
   normalizeIndexClause,
+  partitionsConverged,
 } from '../planner/index.js';
 import type {
   TableSchema,
@@ -28,6 +29,8 @@ import type {
   ViewSchema,
   MaterializedViewSchema,
   RoleSchema,
+  PartitionsDef,
+  ExtensionsSchema,
 } from '../schema/types.js';
 
 // ─── Types ──────────────────────────────────────────────────────
@@ -47,7 +50,8 @@ export type DriftItemType =
   | 'policy'
   | 'comment'
   | 'seed'
-  | 'extension';
+  | 'extension'
+  | 'partition';
 
 export type DriftStatus = 'missing_in_db' | 'missing_in_yaml' | 'different';
 
@@ -119,6 +123,8 @@ export function detectDrift(desired: DesiredState, actual: ActualState): DriftRe
   items.push(...driftRoles(desired.roles, actual.roles));
   items.push(...driftFunctions(desired.functions, actual.functions));
   items.push(...driftTables(desired.tables, actual.tables));
+  items.push(...driftPartitions(desired.tables, actual.tables));
+  items.push(...driftPartitionSchedule(desired.tables, desired.extensions, actual.partitionMaintenance));
   items.push(...driftViews(desired.views, actual.views));
   items.push(...driftMaterializedViews(desired.materializedViews, actual.materializedViews));
 
@@ -148,6 +154,69 @@ function driftExtensions(desired: DesiredState['extensions'], actual: string[]):
     }
   }
   return items;
+}
+
+// ─── Partition maintenance ──────────────────────────────────────
+
+function describePartitions(p: PartitionsDef): string {
+  return `granularity=${p.granularity} window=[${p.window[0]}, ${p.window[1]}] default=${p.default !== false} keep=${p.retention_keep_table !== false}`;
+}
+
+/** Drift in a partitioned table's pg_partman config (window / retention / default). */
+function driftPartitions(desired: TableSchema[], actual: Map<string, TableSchema>): DriftItem[] {
+  const items: DriftItem[] = [];
+  for (const dt of desired) {
+    if (!dt.partitions) continue;
+    const at = actual.get(dt.table);
+    if (!at) continue; // the table itself is missing — driftTables already reports it
+    if (!at.partitions) {
+      items.push({
+        type: 'partition',
+        object: dt.table,
+        status: 'missing_in_db',
+        expected: describePartitions(dt.partitions),
+        detail: 'not registered with pg_partman',
+      });
+      continue;
+    }
+    if (!partitionsConverged(dt.partitions, at.partitions)) {
+      items.push({
+        type: 'partition',
+        object: dt.table,
+        status: 'different',
+        expected: describePartitions(dt.partitions),
+        actual: describePartitions(at.partitions),
+      });
+    }
+  }
+  return items;
+}
+
+/**
+ * Drift in the global pg_cron maintenance schedule. Mirrors the planner: only
+ * relevant when a partitioned table is managed and pg_cron is declared; the
+ * schedule defaults to '@daily'.
+ */
+function driftPartitionSchedule(
+  desiredTables: TableSchema[],
+  extensions: ExtensionsSchema | null,
+  actualMaintenance: { schedule: string } | null | undefined,
+): DriftItem[] {
+  if (!desiredTables.some((t) => t.partitions)) return [];
+  if (!(extensions?.extensions ?? []).some((e) => e.name === 'pg_cron')) return [];
+
+  const expected = extensions?.partition_maintenance?.schedule ?? '@daily';
+  const actual = actualMaintenance?.schedule;
+  if (actual === expected) return [];
+  return [
+    {
+      type: 'partition',
+      object: 'maintenance_schedule',
+      status: actual ? 'different' : 'missing_in_db',
+      expected,
+      ...(actual ? { actual } : {}),
+    },
+  ];
 }
 
 // ─── Enums ──────────────────────────────────────────────────────

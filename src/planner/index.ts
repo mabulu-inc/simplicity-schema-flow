@@ -311,19 +311,12 @@ const GRANULARITY_INTERVAL: Record<PartitionGranularity, string> = {
 };
 
 /**
- * Translates each partitioned parent's `partitions:` block into pg_partman
- * config (create_parent + part_config) and, when pg_cron is declared, a single
- * global maintenance schedule. Validates that the required extensions are
- * declared so the failure is a clear plan-time error rather than a runtime SQL
- * error.
- */
-/**
  * True when the live pg_partman config already matches the declared block, so
  * the configure op can be skipped (clean no-op re-run). Compares the fields that
  * map onto part_config / the DEFAULT partition; `default` and
- * `retention_keep_table` both default to true.
+ * `retention_keep_table` both default to true. Shared with drift detection.
  */
-function partitionsConverged(desired: PartitionsDef, actual: PartitionsDef | undefined): boolean {
+export function partitionsConverged(desired: PartitionsDef, actual: PartitionsDef | undefined): boolean {
   if (!actual) return false;
   return (
     desired.granularity === actual.granularity &&
@@ -334,6 +327,13 @@ function partitionsConverged(desired: PartitionsDef, actual: PartitionsDef | und
   );
 }
 
+/**
+ * Translates each partitioned parent's `partitions:` block into pg_partman
+ * config (create_parent + part_config) and, when pg_cron is declared, a single
+ * global maintenance schedule. Validates that the required extensions are
+ * declared so the failure is a clear plan-time error rather than a runtime SQL
+ * error.
+ */
 function diffPartitionMaintenance(
   tables: TableSchema[],
   actualTables: Map<string, TableSchema>,
