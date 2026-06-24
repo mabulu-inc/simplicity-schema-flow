@@ -1,4 +1,5 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { GenericContainer } from 'testcontainers';
 import type { GlobalSetupContext } from 'vitest/node';
 
 /**
@@ -17,8 +18,12 @@ import type { GlobalSetupContext } from 'vitest/node';
  * schema, which lives once per database. Giving every file its own database
  * keeps those drops from racing the rest of the suite.
  *
- * Pinned to postgres:17. A generous `max_connections` covers the pools that
- * parallel test files open at once.
+ * Built from `test/pg/Dockerfile` (postgres:17 + pg_partman + pg_cron) so the
+ * partitioned-table maintenance path is exercised against the real extensions,
+ * not mocked. The build is cached after the first run. `pg_cron` is loaded via
+ * `shared_preload_libraries` and runs its jobs against the default `postgres`
+ * database (`cron.database_name`'s default). A generous `max_connections`
+ * covers the pools that parallel test files open at once.
  *
  * Requires a reachable Docker daemon (local Docker Desktop / colima; GitHub
  * `ubuntu-latest` and AWS CodeBuild/EC2 all provide one).
@@ -26,11 +31,15 @@ import type { GlobalSetupContext } from 'vitest/node';
 let container: StartedPostgreSqlContainer | undefined;
 
 export default async function setup({ provide }: GlobalSetupContext): Promise<() => Promise<void>> {
-  container = await new PostgreSqlContainer('postgres:17')
+  // Build (or reuse cached) the extension-bearing image, then run it through
+  // PostgreSqlContainer for its readiness wait + connection-URI helpers.
+  await GenericContainer.fromDockerfile('test/pg').build('schema-flow-pg:test', { deleteOnExit: false });
+
+  container = await new PostgreSqlContainer('schema-flow-pg:test')
     .withDatabase('postgres')
     .withUsername('postgres')
     .withPassword('postgres')
-    .withCommand(['postgres', '-c', 'max_connections=300'])
+    .withCommand(['postgres', '-c', 'max_connections=300', '-c', 'shared_preload_libraries=pg_cron'])
     .start();
 
   provide('adminUrl', container.getConnectionUri());

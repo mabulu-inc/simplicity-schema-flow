@@ -12,6 +12,7 @@ import type {
   IndexKey,
   CheckDef,
   PartitionByDef,
+  PartitionGranularity,
   DeferrableMode,
   ExclusionConstraintDef,
   TriggerDef,
@@ -78,6 +79,9 @@ export type OperationType =
   // Extensions
   | 'create_extension'
   | 'drop_extension'
+  // Partition maintenance (pg_partman / pg_cron)
+  | 'configure_partitions'
+  | 'schedule_partition_maintenance'
   // Roles & Grants
   | 'create_role'
   | 'alter_role'
@@ -203,6 +207,9 @@ export function buildPlan(desired: DesiredState, actual: ActualState, options: P
   // Diff tables (without FKs first)
   allOps.push(...diffTables(desired.tables, actual.tables, pgSchema, actual.sequenceGrants, allowDestructive));
 
+  // Partition maintenance (pg_partman config + pg_cron schedule)
+  allOps.push(...diffPartitionMaintenance(desired.tables, desired.extensions, pgSchema));
+
   // Diff views
   allOps.push(...diffViews(desired.views, actual.views, pgSchema));
 
@@ -236,12 +243,15 @@ function diffExtensions(desired: ExtensionsSchema | null, actual: string[]): Ope
 
   for (const ext of desiredExts) {
     if (!actual.includes(ext.name)) {
+      // A pinned schema must exist before CREATE EXTENSION … SCHEMA can target
+      // it, so ensure it in the same op.
+      const schemaPrep = ext.schema ? `CREATE SCHEMA IF NOT EXISTS "${ext.schema}";\n` : '';
       const schemaClause = ext.schema ? ` SCHEMA "${ext.schema}"` : '';
       ops.push({
         type: 'create_extension',
         phase: 2,
         objectName: ext.name,
-        sql: `CREATE EXTENSION IF NOT EXISTS "${ext.name}"${schemaClause}`,
+        sql: `${schemaPrep}CREATE EXTENSION IF NOT EXISTS "${ext.name}"${schemaClause}`,
         destructive: false,
       });
     }
@@ -273,6 +283,125 @@ function diffExtensions(desired: ExtensionsSchema | null, actual: string[]): Ope
         });
       }
     }
+  }
+
+  return ops;
+}
+
+// ─── Partition maintenance (pg_partman / pg_cron) ──────────────
+
+const GRANULARITY_INTERVAL: Record<PartitionGranularity, string> = {
+  day: '1 day',
+  week: '1 week',
+  month: '1 month',
+  year: '1 year',
+};
+
+/**
+ * Translates each partitioned parent's `partitions:` block into pg_partman
+ * config (create_parent + part_config) and, when pg_cron is declared, a single
+ * global maintenance schedule. Validates that the required extensions are
+ * declared so the failure is a clear plan-time error rather than a runtime SQL
+ * error.
+ */
+function diffPartitionMaintenance(
+  tables: TableSchema[],
+  extensions: ExtensionsSchema | null,
+  pgSchema: string,
+): Operation[] {
+  const managed = tables.filter((t) => t.partitions);
+  if (managed.length === 0) return [];
+
+  const exts = extensions?.extensions ?? [];
+  const partman = exts.find((e) => e.name === 'pg_partman');
+  if (!partman) {
+    throw new Error(
+      `table(s) ${managed.map((t) => `"${t.table}"`).join(', ')} declare partitions: but pg_partman is not in extensions. ` +
+        `Add it (with a schema), e.g.\n  extensions:\n    - name: pg_partman\n      schema: partman`,
+    );
+  }
+  if (!partman.schema) {
+    throw new Error(
+      `pg_partman must be declared with an explicit schema: so its functions can be referenced. ` +
+        `e.g.\n  extensions:\n    - name: pg_partman\n      schema: partman`,
+    );
+  }
+  const pm = partman.schema;
+
+  const ops: Operation[] = [];
+
+  for (const table of managed) {
+    const p = table.partitions!;
+    if (!table.partition_by) {
+      throw new Error(`table "${table.table}" declares partitions: but is not partitioned (missing partition_by:).`);
+    }
+    if (table.partition_by.key.length !== 1) {
+      throw new Error(
+        `table "${table.table}": pg_partman partitions on a single control column, but partition_by.key has ${table.partition_by.key.length}.`,
+      );
+    }
+
+    const parent = `${pgSchema}.${table.table}`;
+    const control = table.partition_by.key[0];
+    const interval = GRANULARITY_INTERVAL[p.granularity];
+    const premake = p.window[1];
+    const defaultTable = p.default !== false;
+    const keepTable = p.retention_keep_table !== false;
+    const retentionUnits = Math.abs(p.window[0]);
+    const retention = retentionUnits > 0 ? `'${retentionUnits} ${p.granularity}s'` : 'NULL';
+
+    // Idempotent: create_parent only on first run (it errors if the parent is
+    // already registered), then always reconcile part_config to the declared
+    // window/retention.
+    const sql = `DO $do$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "${pm}".part_config WHERE parent_table = '${parent}') THEN
+    PERFORM "${pm}".create_parent(
+      p_parent_table := '${parent}',
+      p_control := '${control}',
+      p_interval := '${interval}',
+      p_type := '${table.partition_by.strategy}',
+      p_premake := ${premake},
+      p_default_table := ${defaultTable}
+    );
+  END IF;
+  UPDATE "${pm}".part_config
+     SET retention = ${retention},
+         retention_keep_table = ${keepTable},
+         premake = ${premake}
+   WHERE parent_table = '${parent}';
+END
+$do$`;
+
+    ops.push({
+      type: 'configure_partitions',
+      phase: 16,
+      objectName: table.table,
+      sql,
+      destructive: false,
+    });
+  }
+
+  // Global maintenance schedule — one pg_cron job for all parents. Only emitted
+  // when pg_cron is declared; otherwise the schedule is left to infra (the
+  // pg_partman background worker, an external scheduler, etc.).
+  const pgCron = exts.find((e) => e.name === 'pg_cron');
+  const maintenance = extensions?.partition_maintenance;
+  if (maintenance && !pgCron) {
+    throw new Error(
+      `partition_maintenance is declared but pg_cron is not in extensions. ` +
+        `Add pg_cron, or remove partition_maintenance and schedule run_maintenance_proc() via infra.`,
+    );
+  }
+  if (pgCron) {
+    const schedule = maintenance?.schedule ?? '@daily';
+    ops.push({
+      type: 'schedule_partition_maintenance',
+      phase: 16,
+      objectName: 'schema_flow_partman_maintenance',
+      sql: `SELECT cron.schedule('schema_flow_partman_maintenance', '${schedule}', $$CALL "${pm}".run_maintenance_proc()$$)`,
+      destructive: false,
+    });
   }
 
   return ops;

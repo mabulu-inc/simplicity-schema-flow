@@ -22,6 +22,8 @@ import type {
   ForeignKeyAction,
   PartitionByDef,
   PartitionStrategy,
+  PartitionsDef,
+  PartitionGranularity,
   ExpandDef,
   EnumSchema,
   FunctionSchema,
@@ -467,10 +469,34 @@ function parsePartitionBy(raw: Record<string, unknown>, context: string, columnN
   return { strategy, key };
 }
 
+const PARTITIONS_KEYS = ['granularity', 'window', 'default', 'retention_keep_table'] as const;
+const PARTITION_GRANULARITIES: readonly PartitionGranularity[] = ['day', 'week', 'month', 'year'];
+
+function parsePartitions(raw: Record<string, unknown>, context: string): PartitionsDef {
+  checkKeys(raw, PARTITIONS_KEYS, context);
+  const granularity = requireString(raw, 'granularity', context).toLowerCase() as PartitionGranularity;
+  if (!PARTITION_GRANULARITIES.includes(granularity)) {
+    throw new Error(
+      `${context}.granularity: must be one of ${PARTITION_GRANULARITIES.join(', ')} (got "${granularity}")`,
+    );
+  }
+  const win = requireArray<number>(raw, 'window', context);
+  if (win.length !== 2 || typeof win[0] !== 'number' || typeof win[1] !== 'number') {
+    throw new Error(`${context}.window: must be a two-number array [back, forward], e.g. [-24, 3]`);
+  }
+  if (win[0] > 0) throw new Error(`${context}.window: the first element (history) must be <= 0, e.g. -24`);
+  if (win[1] < 0) throw new Error(`${context}.window: the second element (future) must be >= 0, e.g. 3`);
+  const def: PartitionsDef = { granularity, window: [win[0], win[1]] };
+  if (raw.default !== undefined) def.default = Boolean(raw.default);
+  if (raw.retention_keep_table !== undefined) def.retention_keep_table = Boolean(raw.retention_keep_table);
+  return def;
+}
+
 const TABLE_KEYS = [
   'table',
   'columns',
   'partition_by',
+  'partitions',
   'primary_key',
   'primary_key_name',
   'indexes',
@@ -509,6 +535,9 @@ export function parseTable(yamlStr: string): TableSchema {
       `${ctx}.partition_by`,
       columnNames,
     );
+  }
+  if (raw.partitions !== undefined) {
+    table.partitions = parsePartitions(raw.partitions as Record<string, unknown>, `${ctx}.partitions`);
   }
   if (raw.primary_key !== undefined) table.primary_key = raw.primary_key as string[];
   if (raw.primary_key_name !== undefined) table.primary_key_name = String(raw.primary_key_name);
@@ -754,9 +783,10 @@ export function parseRole(yamlStr: string): RoleSchema {
   return role;
 }
 
-const EXTENSIONS_KEYS = ['extensions', 'schema_grants'] as const;
+const EXTENSIONS_KEYS = ['extensions', 'schema_grants', 'partition_maintenance'] as const;
 const SCHEMA_GRANT_KEYS = ['to', 'schemas'] as const;
 const EXTENSION_REF_KEYS = ['name', 'schema'] as const;
+const PARTITION_MAINTENANCE_KEYS = ['schedule'] as const;
 
 function parseExtensionRef(raw: unknown, context: string): ExtensionRef {
   // Sugar: a bare string entry (`- pg_partman`) means "ensure this extension".
@@ -790,6 +820,13 @@ export function parseExtensions(yamlStr: string): ExtensionsSchema {
         schemas: requireArray<string>(sg, 'schemas', `${ctx}.schema_grants[${i}]`),
       } satisfies SchemaGrant;
     });
+  }
+
+  if (raw.partition_maintenance !== undefined) {
+    const pm = raw.partition_maintenance as Record<string, unknown>;
+    checkKeys(pm, PARTITION_MAINTENANCE_KEYS, `${ctx}.partition_maintenance`);
+    ext.partition_maintenance = {};
+    if (pm.schedule !== undefined) ext.partition_maintenance.schedule = String(pm.schedule);
   }
 
   return ext;

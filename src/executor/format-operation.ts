@@ -52,6 +52,9 @@ const DESCRIPTIONS: Record<OperationType, string> = {
   // Extensions
   create_extension: 'Created extension',
   drop_extension: 'Dropped extension',
+  // Partition maintenance
+  configure_partitions: 'Configured partition maintenance',
+  schedule_partition_maintenance: 'Scheduled partition maintenance',
   // Roles & Grants
   create_role: 'Created role',
   alter_role: 'Altered role',
@@ -119,6 +122,8 @@ const PRESENT_DESCRIPTIONS: Record<OperationType, string> = {
   refresh_materialized_view: 'Refresh materialized view',
   create_extension: 'Create extension',
   drop_extension: 'Drop extension',
+  configure_partitions: 'Configure partition maintenance',
+  schedule_partition_maintenance: 'Schedule partition maintenance',
   create_role: 'Create role',
   alter_role: 'Alter role',
   grant_table: 'Grant',

@@ -220,12 +220,53 @@ export interface PartitionByDef {
   key: string[];
 }
 
+export type PartitionGranularity = 'day' | 'week' | 'month' | 'year';
+
+/**
+ * Declarative rolling-partition maintenance, delegated to pg_partman. Attaching
+ * this to a partitioned parent registers it with pg_partman (`create_parent`)
+ * and sets its `part_config` so the rolling window is reconciled on each
+ * maintenance run. Requires `pg_partman` declared under `extensions:` and a
+ * single-column `partition_by.key` (pg_partman partitions on one control
+ * column).
+ */
+export interface PartitionsDef {
+  /** Partition size — maps to pg_partman's interval (e.g. month → '1 month'). */
+  granularity: PartitionGranularity;
+  /**
+   * Rolling window around now() in `granularity` units, as `[back, forward]`.
+   * `back` (≤ 0) becomes the retention horizon; `forward` (≥ 0) becomes the
+   * number of future partitions premade. E.g. `[-24, 3]` = keep 24 months of
+   * history, premake 3 months ahead.
+   */
+  window: [number, number];
+  /** Ensure a DEFAULT catch-all partition. Defaults to true. */
+  default?: boolean;
+  /**
+   * On aging out of the window, detach the partition but keep its table
+   * (true, default — data-safe) versus drop it (false — destructive).
+   */
+  retention_keep_table?: boolean;
+}
+
+/**
+ * Global pg_partman maintenance schedule. pg_partman's `run_maintenance_proc()`
+ * services every configured parent in one call, so the cadence is database-wide,
+ * not per-table. Emitted as a single pg_cron job — only when `pg_cron` is
+ * declared under `extensions:`.
+ */
+export interface PartitionMaintenanceDef {
+  /** Cron expression for the maintenance job. Defaults to '@daily'. */
+  schedule?: string;
+}
+
 // ─── Table ──────────────────────────────────────────────────────
 
 export interface TableSchema {
   table: string;
   columns: ColumnDef[];
   partition_by?: PartitionByDef;
+  partitions?: PartitionsDef;
   primary_key?: string[];
   primary_key_name?: string;
   indexes?: IndexDef[];
@@ -372,6 +413,7 @@ export interface ExtensionRef {
 export interface ExtensionsSchema {
   extensions: ExtensionRef[];
   schema_grants?: SchemaGrant[];
+  partition_maintenance?: PartitionMaintenanceDef;
 }
 
 // ─── Mixin ──────────────────────────────────────────────────────

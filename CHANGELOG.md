@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Rolling-partition maintenance via pg_partman.** A partitioned table can add a
+  `partitions:` block (`granularity`, a `[history, future]` `window`, `default`,
+  `retention_keep_table`) and schema-flow registers it with pg_partman and
+  reconciles its retention/premake on every run — retiring the hand-written cron
+  script. The maintenance cadence is declared once, database-wide, via
+  `partition_maintenance: { schedule }` in `extensions:` and emitted as a single
+  pg_cron job (only when `pg_cron` is declared). schema-flow validates that
+  `pg_partman` (with an explicit schema) and, if scheduling, `pg_cron` are
+  declared, so a missing extension is a clear plan-time error.
 - **Pin an extension's install schema.** Entries under `extensions:` now accept a
   `{ name, schema }` object in addition to a bare name, emitting
   `CREATE EXTENSION IF NOT EXISTS "name" SCHEMA "schema"`. Useful for extensions

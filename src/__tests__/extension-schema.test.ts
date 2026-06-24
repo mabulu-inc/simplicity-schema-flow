@@ -73,7 +73,8 @@ describe('planner: CREATE EXTENSION … SCHEMA', () => {
     const plan = buildPlan(desiredWith({ extensions: [{ name: 'pg_partman', schema: 'partman' }] }), emptyActual());
     const op = plan.operations.find((o) => o.type === 'create_extension' && o.objectName === 'pg_partman');
     expect(op).toBeDefined();
-    expect(op!.sql).toBe('CREATE EXTENSION IF NOT EXISTS "pg_partman" SCHEMA "partman"');
+    expect(op!.sql).toContain('CREATE SCHEMA IF NOT EXISTS "partman"');
+    expect(op!.sql).toContain('CREATE EXTENSION IF NOT EXISTS "pg_partman" SCHEMA "partman"');
   });
 
   it('omits SCHEMA clause for the bare form', () => {

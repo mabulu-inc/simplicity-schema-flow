@@ -248,16 +248,73 @@ first-class: its columns, primary key, indexes, RLS, policies, grants, and
 comment are all diffed and reconciled exactly like an ordinary table
 (introspection recognizes `relkind = 'p'` parents).
 
-**Child partitions are not modeled here.** They are created out-of-band — for
-example by [`pg_partman`](https://github.com/pgpartman/pg_partman) with a
-`pg_cron` job calling `partman.run_maintenance_proc()` to roll the time window
-forward. schema-flow deliberately **ignores child partitions** during
-introspection, so a re-run never tries to drop them and the parent converges to
-a clean no-op.
+**Child partitions are not modeled here.** They are created out-of-band by
+[`pg_partman`](https://github.com/pgpartman/pg_partman). schema-flow deliberately
+**ignores child partitions** during introspection, so a re-run never tries to
+drop them and the parent converges to a clean no-op.
 
 PostgreSQL cannot turn an ordinary table into a partitioned one (or change the
 partition strategy/key) in place. Changing `partition_by` on an existing table
 is rejected at plan time — recreate the table in a pre-script instead.
+
+##### Rolling-partition maintenance (`partitions:`)
+
+Add a `partitions:` block to delegate the rolling window to pg_partman
+declaratively — no companion cron script:
+
+```yaml
+table: kpi_daily_facts
+partition_by:
+  strategy: range
+  key: [as_of_date] # pg_partman partitions on ONE control column
+partitions:
+  granularity: month # day | week | month | year → pg_partman interval
+  window: [-24, 3] # [history, future] in granularity units:
+  #   -24 → retention horizon (24 months kept)
+  #    3  → premake 3 partitions ahead
+  default: true # ensure a DEFAULT catch-all partition
+  retention_keep_table: true # aged-out partitions are DETACHED (data-safe),
+  #   not dropped. Set false to drop them.
+columns: [...]
+primary_key: [id, as_of_date]
+```
+
+On each `run`, schema-flow registers the parent with pg_partman
+(`create_parent`, idempotent) and reconciles its `part_config` to the declared
+window/retention. **Requires `pg_partman` declared under `extensions:` with an
+explicit schema** (so its functions can be referenced):
+
+```yaml
+extensions:
+  - name: pg_partman
+    schema: partman
+```
+
+The maintenance **schedule is database-global** — pg_partman's
+`run_maintenance_proc()` services every parent in one call, so it's declared once
+(not per table) and emitted as a single pg_cron job, only when `pg_cron` is
+declared:
+
+```yaml
+extensions:
+  - name: pg_partman
+    schema: partman
+  - pg_cron
+partition_maintenance:
+  schedule: '@daily' # any cron expression; defaults to @daily
+```
+
+If `pg_cron` is omitted, schema-flow emits no schedule — wire
+`run_maintenance_proc()` via the pg_partman background worker or another
+scheduler instead.
+
+**Operational prerequisites (infra, not schema-flow):**
+
+- `pg_cron` must be in the cluster's `shared_preload_libraries` (a parameter-group
+  change requiring a reboot) before `CREATE EXTENSION pg_cron` succeeds. On
+  Aurora/RDS it runs on the writer against the `cron.database_name` database
+  (default `postgres`) — point that at your application database.
+- pg_partman must be installed in the database `run_maintenance_proc()` runs in.
 
 #### Column Types
 
