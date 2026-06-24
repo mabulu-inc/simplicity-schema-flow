@@ -13,6 +13,7 @@ import type {
   CheckDef,
   PartitionByDef,
   PartitionGranularity,
+  PartitionsDef,
   DeferrableMode,
   ExclusionConstraintDef,
   TriggerDef,
@@ -173,6 +174,10 @@ export interface ActualState {
    *  Used to suppress repeat grant_sequence ops when the live ACL already
    *  carries USAGE+SELECT for the role. */
   sequenceGrants?: Map<string, Map<string, Set<string>>>;
+  /** The live pg_cron partman-maintenance job, if scheduled. Null/absent when
+   *  pg_cron isn't installed in this database or no such job exists. Lets the
+   *  planner skip re-emitting an unchanged schedule. */
+  partitionMaintenance?: { schedule: string } | null;
 }
 
 export interface PlanOptions {
@@ -208,7 +213,15 @@ export function buildPlan(desired: DesiredState, actual: ActualState, options: P
   allOps.push(...diffTables(desired.tables, actual.tables, pgSchema, actual.sequenceGrants, allowDestructive));
 
   // Partition maintenance (pg_partman config + pg_cron schedule)
-  allOps.push(...diffPartitionMaintenance(desired.tables, desired.extensions, pgSchema));
+  allOps.push(
+    ...diffPartitionMaintenance(
+      desired.tables,
+      actual.tables,
+      desired.extensions,
+      actual.partitionMaintenance,
+      pgSchema,
+    ),
+  );
 
   // Diff views
   allOps.push(...diffViews(desired.views, actual.views, pgSchema));
@@ -304,9 +317,28 @@ const GRANULARITY_INTERVAL: Record<PartitionGranularity, string> = {
  * declared so the failure is a clear plan-time error rather than a runtime SQL
  * error.
  */
+/**
+ * True when the live pg_partman config already matches the declared block, so
+ * the configure op can be skipped (clean no-op re-run). Compares the fields that
+ * map onto part_config / the DEFAULT partition; `default` and
+ * `retention_keep_table` both default to true.
+ */
+function partitionsConverged(desired: PartitionsDef, actual: PartitionsDef | undefined): boolean {
+  if (!actual) return false;
+  return (
+    desired.granularity === actual.granularity &&
+    desired.window[0] === actual.window[0] &&
+    desired.window[1] === actual.window[1] &&
+    (desired.default !== false) === (actual.default !== false) &&
+    (desired.retention_keep_table !== false) === (actual.retention_keep_table !== false)
+  );
+}
+
 function diffPartitionMaintenance(
   tables: TableSchema[],
+  actualTables: Map<string, TableSchema>,
   extensions: ExtensionsSchema | null,
+  actualMaintenance: { schedule: string } | null | undefined,
   pgSchema: string,
 ): Operation[] {
   const managed = tables.filter((t) => t.partitions);
@@ -340,6 +372,9 @@ function diffPartitionMaintenance(
         `table "${table.table}": pg_partman partitions on a single control column, but partition_by.key has ${table.partition_by.key.length}.`,
       );
     }
+
+    // Skip when the live part_config already matches — keeps a re-run clean.
+    if (partitionsConverged(p, actualTables.get(table.table)?.partitions)) continue;
 
     const parent = `${pgSchema}.${table.table}`;
     const control = table.partition_by.key[0];
@@ -395,13 +430,16 @@ $do$`;
   }
   if (pgCron) {
     const schedule = maintenance?.schedule ?? '@daily';
-    ops.push({
-      type: 'schedule_partition_maintenance',
-      phase: 16,
-      objectName: 'schema_flow_partman_maintenance',
-      sql: `SELECT cron.schedule('schema_flow_partman_maintenance', '${schedule}', $$CALL "${pm}".run_maintenance_proc()$$)`,
-      destructive: false,
-    });
+    // Skip when the live cron job already has this schedule.
+    if (actualMaintenance?.schedule !== schedule) {
+      ops.push({
+        type: 'schedule_partition_maintenance',
+        phase: 16,
+        objectName: 'schema_flow_partman_maintenance',
+        sql: `SELECT cron.schedule('schema_flow_partman_maintenance', '${schedule}', $$CALL "${pm}".run_maintenance_proc()$$)`,
+        destructive: false,
+      });
+    }
   }
 
   return ops;

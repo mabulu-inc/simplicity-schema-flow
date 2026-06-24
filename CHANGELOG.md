@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **pg_partman config is now introspected and diffed.** schema-flow reads back a
+  partitioned table's pg_partman `part_config` and the pg_cron maintenance job,
+  so re-running against an already-configured database is a clean no-op (the
+  partition-maintenance steps are only emitted when the live window, retention,
+  or schedule actually differs). `schema-flow generate` also round-trips the
+  `partitions:` block from an existing pg_partman-managed table.
 - **Rolling-partition maintenance via pg_partman.** A partitioned table can add a
   `partitions:` block (`granularity`, a `[history, future]` `window`, `default`,
   `retention_keep_table`) and schema-flow registers it with pg_partman and

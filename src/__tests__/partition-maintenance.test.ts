@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pg from 'pg';
 import { parseTable, parseExtensions } from '../schema/parser.js';
 import { buildPlan, type DesiredState, type ActualState } from '../planner/index.js';
+import { introspectTable, getPartitionMaintenance } from '../introspect/index.js';
+import { generateFromDb } from '../scaffold/index.js';
 import type { ExtensionsSchema, TableSchema } from '../schema/types.js';
 
 const TEST_URL = process.env.DATABASE_URL!;
@@ -239,6 +241,45 @@ primary_key: [id, as_of_date]
     // Idempotent: applying the configure op again does not error.
     const cfgOp = plan.operations.find((o) => o.type === 'configure_partitions')!;
     await expect(client.query(cfgOp.sql)).resolves.toBeDefined();
+
+    // Round-trip: introspection reconstructs the partitions: block from part_config.
+    const introspected = await introspectTable(client, 'kpi_e2e', TEST_SCHEMA);
+    expect(introspected.partitions).toEqual({
+      granularity: 'month',
+      window: [-6, 2],
+      default: true,
+      retention_keep_table: true,
+    });
+
+    // No-op convergence: re-planning against the introspected state emits no
+    // configure_partitions op for this table.
+    const replan = buildPlan(
+      desired([table], ext),
+      { ...emptyActual(), tables: new Map([['kpi_e2e', introspected]]) },
+      { pgSchema: TEST_SCHEMA },
+    );
+    expect(
+      replan.operations.filter((o) => o.type === 'configure_partitions' && o.objectName === 'kpi_e2e'),
+    ).toHaveLength(0);
+
+    // A changed window re-emits the configure op.
+    const changed = parseTable(`
+table: kpi_e2e
+partition_by: { strategy: range, key: [as_of_date] }
+partitions: { granularity: month, window: [-12, 2] }
+columns:
+  - { name: id, type: uuid, nullable: false }
+  - { name: as_of_date, type: date, nullable: false }
+primary_key: [id, as_of_date]
+`);
+    const changedPlan = buildPlan(
+      desired([changed], ext),
+      { ...emptyActual(), tables: new Map([['kpi_e2e', introspected]]) },
+      { pgSchema: TEST_SCHEMA },
+    );
+    expect(
+      changedPlan.operations.filter((o) => o.type === 'configure_partitions' && o.objectName === 'kpi_e2e'),
+    ).toHaveLength(1);
   });
 });
 
@@ -276,9 +317,60 @@ describe('E2E: pg_cron accepts the generated maintenance schedule', () => {
       ]);
       expect(again.rows[0].n).toBe(1);
 
+      // No-op convergence: introspect the live job, re-plan → no schedule op.
+      const actualMaintenance = await getPartitionMaintenance(admin);
+      expect(actualMaintenance).toEqual({ schedule: '@hourly' });
+      const replan = buildPlan(
+        desired([parseTable(TABLE_YAML)], ext),
+        { ...emptyActual(), partitionMaintenance: actualMaintenance },
+        { pgSchema: TEST_SCHEMA },
+      );
+      expect(replan.operations.filter((o) => o.type === 'schedule_partition_maintenance')).toHaveLength(0);
+
       await admin.query(`SELECT cron.unschedule('schema_flow_partman_maintenance')`);
     } finally {
       await admin.end();
     }
+  });
+});
+
+// ─── Scaffold round-trip ─────────────────────────────────────────
+
+describe('scaffold: partitions: round-trip', () => {
+  it('emits the partitions block from an introspected pg_partman table', async () => {
+    await client.query(`
+      CREATE TABLE "${TEST_SCHEMA}".scaffold_p (
+        id uuid NOT NULL, as_of_date date NOT NULL, PRIMARY KEY (id, as_of_date)
+      ) PARTITION BY RANGE (as_of_date)
+    `);
+    await client.query(
+      `SELECT partman.create_parent(p_parent_table := $1, p_control := 'as_of_date', p_interval := '1 month', p_type := 'range', p_premake := 4, p_default_table := true)`,
+      [`${TEST_SCHEMA}.scaffold_p`],
+    );
+    await client.query(
+      `UPDATE partman.part_config SET retention = '12 months', retention_keep_table = false WHERE parent_table = $1`,
+      [`${TEST_SCHEMA}.scaffold_p`],
+    );
+
+    const table = await introspectTable(client, 'scaffold_p', TEST_SCHEMA);
+    const files = generateFromDb({
+      tables: [table],
+      enums: [],
+      functions: [],
+      views: [],
+      materializedViews: [],
+      roles: [],
+    });
+    const yaml = files.find((f) => f.filename === 'tables/scaffold_p.yaml')!.content;
+    expect(yaml).toContain('partitions:');
+    expect(yaml).toContain('granularity: month');
+    expect(yaml).toContain('retention_keep_table: false');
+
+    // And it parses back to the introspected shape.
+    expect(parseTable(yaml).partitions).toEqual({
+      granularity: 'month',
+      window: [-12, 4],
+      retention_keep_table: false,
+    });
   });
 });

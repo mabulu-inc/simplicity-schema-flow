@@ -33,6 +33,7 @@ import {
   getExistingMaterializedViews,
   getExistingRoles,
   introspectTable,
+  getPartitionMaintenance,
 } from '../introspect/index.js';
 import { detectDrift, hydrateActualSeeds } from '../drift/index.js';
 import type { DriftReport } from '../drift/index.js';
@@ -182,6 +183,7 @@ async function introspectActual(connectionString: string, pgSchema: string): Pro
 
     const extResult = await client.query("SELECT extname FROM pg_extension WHERE extname != 'plpgsql'");
     const extensions = extResult.rows.map((r: { extname: string }) => r.extname);
+    const partitionMaintenance = await getPartitionMaintenance(client);
 
     return {
       tables: tablesMap,
@@ -191,6 +193,7 @@ async function introspectActual(connectionString: string, pgSchema: string): Pro
       materializedViews: matViewsMap,
       roles: rolesMap,
       extensions,
+      partitionMaintenance,
     };
   } finally {
     client.release();

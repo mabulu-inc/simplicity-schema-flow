@@ -84,6 +84,7 @@ export {
   getExistingMaterializedViews,
   getExistingRoles,
   introspectTable,
+  getPartitionMaintenance,
 } from './introspect/index.js';
 
 // Planner

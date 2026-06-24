@@ -139,6 +139,14 @@ function buildTableYaml(table: TableSchema): Record<string, unknown> {
   if (table.partition_by) {
     result.partition_by = { strategy: table.partition_by.strategy, key: table.partition_by.key };
   }
+  if (table.partitions) {
+    const p: Record<string, unknown> = { granularity: table.partitions.granularity, window: table.partitions.window };
+    // Only emit the booleans when they deviate from their defaults (both true),
+    // keeping scaffolded YAML terse while round-tripping cleanly.
+    if (table.partitions.default === false) p.default = false;
+    if (table.partitions.retention_keep_table === false) p.retention_keep_table = false;
+    result.partitions = p;
+  }
   if (table.primary_key) result.primary_key = table.primary_key;
   if (table.indexes && table.indexes.length > 0) result.indexes = table.indexes;
   if (table.checks && table.checks.length > 0) result.checks = table.checks;

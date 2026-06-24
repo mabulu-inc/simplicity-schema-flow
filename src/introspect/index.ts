@@ -25,6 +25,7 @@ import type {
   ForeignKeyRef,
   PartitionByDef,
   PartitionStrategy,
+  PartitionsDef,
   TriggerTiming,
   TriggerEvent,
   TriggerForEach,
@@ -481,6 +482,7 @@ export async function introspectTable(client: Client, tableName: string, schema:
   const rlsInfo = await getRlsStatus(client, tableName, schema);
   const exclusionConstraints = await getExclusionConstraints(client, tableName, schema);
   const partitionBy = await getPartitionBy(client, tableName, schema);
+  const partitions = partitionBy ? await getPartitions(client, tableName, schema) : undefined;
 
   // Merge FK info into columns
   for (const fk of fkInfo) {
@@ -545,6 +547,7 @@ export async function introspectTable(client: Client, tableName: string, schema:
   };
 
   if (partitionBy) result.partition_by = partitionBy;
+  if (partitions) result.partitions = partitions;
   if (compositePk.columns.length > 1) result.primary_key = compositePk.columns;
   if (compositePk.constraintName) result.primary_key_name = compositePk.constraintName;
   if (indexesAfterColumnMerge.length > 0) result.indexes = indexesAfterColumnMerge;
@@ -1217,6 +1220,68 @@ async function getPartitionBy(client: Client, table: string, schema: string): Pr
   const strategy = PARTITION_STRATEGY_MAP[row.strategy];
   if (!strategy || !row.keys || row.keys.length === 0) return undefined;
   return { strategy, key: row.keys };
+}
+
+/**
+ * Reconstructs a table's `partitions:` block from pg_partman's `part_config`,
+ * so a pg_partman-managed parent round-trips and a re-run converges. Returns
+ * undefined when pg_partman isn't installed, the table isn't registered, or its
+ * interval doesn't map to a granularity the model can express.
+ */
+async function getPartitions(client: Client, table: string, schema: string): Promise<PartitionsDef | undefined> {
+  const pmRes = await client.query(
+    `SELECT n.nspname FROM pg_catalog.pg_extension e
+       JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace
+      WHERE e.extname = 'pg_partman'`,
+  );
+  if (pmRes.rows.length === 0) return undefined;
+  const pmSchema = pmRes.rows[0].nspname as string;
+
+  const res = await client.query(
+    `SELECT
+       CASE
+         WHEN pc.partition_interval::interval = interval '1 day'   THEN 'day'
+         WHEN pc.partition_interval::interval = interval '1 week'  THEN 'week'
+         WHEN pc.partition_interval::interval = interval '1 month' THEN 'month'
+         WHEN pc.partition_interval::interval = interval '1 year'  THEN 'year'
+         ELSE NULL
+       END AS granularity,
+       pc.premake,
+       CASE WHEN pc.retention IS NULL OR pc.retention = '' THEN 0
+            ELSE round(extract(epoch FROM pc.retention::interval) / extract(epoch FROM pc.partition_interval::interval))::int
+       END AS retention_units,
+       pc.retention_keep_table,
+       EXISTS (
+         SELECT 1 FROM pg_catalog.pg_inherits i
+           JOIN pg_catalog.pg_class c ON c.oid = i.inhrelid
+          WHERE i.inhparent = pc.parent_table::regclass
+            AND pg_catalog.pg_get_expr(c.relpartbound, c.oid) = 'DEFAULT'
+       ) AS has_default
+     FROM "${pmSchema}".part_config pc
+     WHERE pc.parent_table = $1`,
+    [`${schema}.${table}`],
+  );
+  if (res.rows.length === 0) return undefined;
+  const r = res.rows[0];
+  if (!r.granularity) return undefined;
+  return {
+    granularity: r.granularity as PartitionsDef['granularity'],
+    window: [-Number(r.retention_units), Number(r.premake)],
+    default: r.has_default === true,
+    retention_keep_table: r.retention_keep_table === true,
+  };
+}
+
+/**
+ * The live pg_cron partman-maintenance job's schedule, or null when pg_cron
+ * isn't installed in this database or the job isn't scheduled.
+ */
+export async function getPartitionMaintenance(client: Client): Promise<{ schedule: string } | null> {
+  const hasCron = await client.query(`SELECT to_regclass('cron.job') AS t`);
+  if (!hasCron.rows[0]?.t) return null;
+  const res = await client.query(`SELECT schedule FROM cron.job WHERE jobname = 'schema_flow_partman_maintenance'`);
+  if (res.rows.length === 0) return null;
+  return { schedule: res.rows[0].schedule as string };
 }
 
 async function getRlsStatus(

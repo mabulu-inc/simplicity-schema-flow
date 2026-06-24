@@ -16,6 +16,7 @@ import {
   getExistingMaterializedViews,
   getExistingRoles,
   getSequenceGrants,
+  getPartitionMaintenance,
   getFunctionDependents,
   introspectTable,
 } from '../introspect/index.js';
@@ -228,6 +229,7 @@ async function introspectDatabase(config: SimplicitySchemaConfig, logger: Logger
     const extensions = extResult.rows.map((r: { extname: string }) => r.extname);
 
     const sequenceGrants = await getSequenceGrants(client, config.pgSchema);
+    const partitionMaintenance = await getPartitionMaintenance(client);
 
     logger.debug(`Introspected: ${tableNames.length} tables, ${enumList.length} enums, ${fnList.length} functions`);
 
@@ -240,6 +242,7 @@ async function introspectDatabase(config: SimplicitySchemaConfig, logger: Logger
       roles: rolesMap,
       extensions,
       sequenceGrants,
+      partitionMaintenance,
     };
   } finally {
     client.release();
