@@ -359,8 +359,18 @@ export interface SchemaGrant {
   schemas: string[];
 }
 
+/**
+ * An extension to ensure. A bare string in YAML (`- pg_partman`) is normalized
+ * to `{ name }`; the object form pins the install schema
+ * (`{ name: pg_partman, schema: partman }` → `CREATE EXTENSION … SCHEMA …`).
+ */
+export interface ExtensionRef {
+  name: string;
+  schema?: string;
+}
+
 export interface ExtensionsSchema {
-  extensions: string[];
+  extensions: ExtensionRef[];
   schema_grants?: SchemaGrant[];
 }
 

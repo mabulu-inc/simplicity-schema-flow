@@ -71,6 +71,7 @@ export type {
   RoleSchema,
   SchemaGrant,
   ExtensionsSchema,
+  ExtensionRef,
   MixinSchema,
 } from './schema/types.js';
 

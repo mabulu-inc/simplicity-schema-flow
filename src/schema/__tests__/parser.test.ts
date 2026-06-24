@@ -824,7 +824,7 @@ schema_grants:
     schemas: [public]
 `;
     const result = parseExtensions(yaml);
-    expect(result.extensions).toEqual(['pgcrypto', 'pg_trgm']);
+    expect(result.extensions).toEqual([{ name: 'pgcrypto' }, { name: 'pg_trgm' }]);
     expect(result.schema_grants).toHaveLength(1);
     expect(result.schema_grants![0]).toEqual({ to: 'app_user', schemas: ['public'] });
   });

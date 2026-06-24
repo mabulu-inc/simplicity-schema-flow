@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Pin an extension's install schema.** Entries under `extensions:` now accept a
+  `{ name, schema }` object in addition to a bare name, emitting
+  `CREATE EXTENSION IF NOT EXISTS "name" SCHEMA "schema"`. Useful for extensions
+  that conventionally live in a dedicated schema (e.g. `pg_partman` in
+  `partman`).
 - **Declarative partitioned tables.** A table can now declare `partition_by`
   (`strategy: range | list | hash` plus the partition-key columns), and
   schema-flow emits `CREATE TABLE … PARTITION BY …`. Partitioned parents are

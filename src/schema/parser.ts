@@ -34,6 +34,7 @@ import type {
   MaterializedViewSchema,
   RoleSchema,
   ExtensionsSchema,
+  ExtensionRef,
   SchemaGrant,
   MixinSchema,
   MixinParam,
@@ -755,6 +756,20 @@ export function parseRole(yamlStr: string): RoleSchema {
 
 const EXTENSIONS_KEYS = ['extensions', 'schema_grants'] as const;
 const SCHEMA_GRANT_KEYS = ['to', 'schemas'] as const;
+const EXTENSION_REF_KEYS = ['name', 'schema'] as const;
+
+function parseExtensionRef(raw: unknown, context: string): ExtensionRef {
+  // Sugar: a bare string entry (`- pg_partman`) means "ensure this extension".
+  if (typeof raw === 'string') return { name: raw };
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    checkKeys(obj, EXTENSION_REF_KEYS, context);
+    const ref: ExtensionRef = { name: requireString(obj, 'name', context) };
+    if (obj.schema !== undefined) ref.schema = String(obj.schema);
+    return ref;
+  }
+  throw new Error(`${context}: must be an extension name or { name, schema } object`);
+}
 
 export function parseExtensions(yamlStr: string): ExtensionsSchema {
   const raw = parseYaml(yamlStr) as Record<string, unknown>;
@@ -762,7 +777,9 @@ export function parseExtensions(yamlStr: string): ExtensionsSchema {
   checkKeys(raw, EXTENSIONS_KEYS, ctx);
 
   const ext: ExtensionsSchema = {
-    extensions: requireArray<string>(raw, 'extensions', ctx),
+    extensions: requireArray<unknown>(raw, 'extensions', ctx).map((e, i) =>
+      parseExtensionRef(e, `${ctx}.extensions[${i}]`),
+    ),
   };
 
   if (raw.schema_grants !== undefined) {

@@ -685,7 +685,7 @@ describe('detectDrift', () => {
 
   it('reports extension missing in DB', () => {
     const desired = emptyDesired();
-    desired.extensions = { extensions: ['uuid-ossp', 'pgcrypto'] };
+    desired.extensions = { extensions: [{ name: 'uuid-ossp' }, { name: 'pgcrypto' }] };
     const actual = emptyActual();
     actual.extensions = ['uuid-ossp'];
     const report = detectDrift(desired, actual);
@@ -700,7 +700,7 @@ describe('detectDrift', () => {
 
   it('reports extension missing in YAML', () => {
     const desired = emptyDesired();
-    desired.extensions = { extensions: ['uuid-ossp'] };
+    desired.extensions = { extensions: [{ name: 'uuid-ossp' }] };
     const actual = emptyActual();
     actual.extensions = ['uuid-ossp', 'pgcrypto'];
     const report = detectDrift(desired, actual);

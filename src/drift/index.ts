@@ -135,14 +135,15 @@ export function detectDrift(desired: DesiredState, actual: ActualState): DriftRe
 function driftExtensions(desired: DesiredState['extensions'], actual: string[]): DriftItem[] {
   const items: DriftItem[] = [];
   const desiredExts = desired?.extensions ?? [];
+  const desiredNames = new Set(desiredExts.map((e) => e.name));
 
   for (const ext of desiredExts) {
-    if (!actual.includes(ext)) {
-      items.push({ type: 'extension', object: ext, status: 'missing_in_db' });
+    if (!actual.includes(ext.name)) {
+      items.push({ type: 'extension', object: ext.name, status: 'missing_in_db' });
     }
   }
   for (const ext of actual) {
-    if (!desiredExts.includes(ext)) {
+    if (!desiredNames.has(ext)) {
       items.push({ type: 'extension', object: ext, status: 'missing_in_yaml' });
     }
   }

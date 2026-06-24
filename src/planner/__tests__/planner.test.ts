@@ -45,7 +45,7 @@ describe('Planner', () => {
   describe('extensions', () => {
     it('creates new extensions', () => {
       const desired = emptyDesired();
-      desired.extensions = { extensions: ['pgcrypto', 'pg_trgm'] };
+      desired.extensions = { extensions: [{ name: 'pgcrypto' }, { name: 'pg_trgm' }] };
       const result = buildPlan(desired, emptyActual());
       const extOps = findOps(result.operations, 'create_extension');
       expect(extOps).toHaveLength(2);
@@ -55,7 +55,7 @@ describe('Planner', () => {
 
     it('skips existing extensions', () => {
       const desired = emptyDesired();
-      desired.extensions = { extensions: ['pgcrypto'] };
+      desired.extensions = { extensions: [{ name: 'pgcrypto' }] };
       const actual = emptyActual();
       actual.extensions = ['pgcrypto'];
       const result = buildPlan(desired, actual);
@@ -1594,7 +1594,7 @@ describe('Planner', () => {
   describe('operation ordering', () => {
     it('orders operations by phase (extensions before enums before tables)', () => {
       const desired = emptyDesired();
-      desired.extensions = { extensions: ['pgcrypto'] };
+      desired.extensions = { extensions: [{ name: 'pgcrypto' }] };
       desired.enums = [{ name: 'status', values: ['active'] }];
       desired.tables = [
         {
@@ -2787,7 +2787,7 @@ describe('Planner', () => {
     it('produces grant_schema operations from schema_grants', () => {
       const desired = emptyDesired();
       desired.extensions = {
-        extensions: ['pgcrypto'],
+        extensions: [{ name: 'pgcrypto' }],
         schema_grants: [{ to: 'app_user', schemas: ['public'] }],
       };
       const result = buildPlan(desired, emptyActual());
@@ -2802,7 +2802,7 @@ describe('Planner', () => {
     it('produces multiple grant_schema for multiple schemas and roles', () => {
       const desired = emptyDesired();
       desired.extensions = {
-        extensions: ['pgcrypto'],
+        extensions: [{ name: 'pgcrypto' }],
         schema_grants: [
           { to: 'app_user', schemas: ['public', 'extensions'] },
           { to: 'readonly', schemas: ['public'] },
@@ -2818,7 +2818,7 @@ describe('Planner', () => {
 
     it('produces no grant_schema when schema_grants is absent', () => {
       const desired = emptyDesired();
-      desired.extensions = { extensions: ['pgcrypto'] };
+      desired.extensions = { extensions: [{ name: 'pgcrypto' }] };
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'grant_schema');
       expect(ops).toHaveLength(0);

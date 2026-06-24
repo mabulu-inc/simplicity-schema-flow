@@ -463,10 +463,18 @@ extensions:
   - pgcrypto
   - pg_trgm
   - uuid-ossp
+  - name: pg_partman # Object form pins the install schema:
+    schema: partman #   CREATE EXTENSION … SCHEMA "partman"
 schema_grants: # Optional: grant usage on extension schemas
   - to: app_user
     schemas: [public]
 ```
+
+Each entry is either a bare extension name or a `{ name, schema }` object. The
+object form emits `CREATE EXTENSION IF NOT EXISTS "name" SCHEMA "schema"` —
+useful for extensions that conventionally live in a dedicated schema (e.g.
+`pg_partman` in `partman`). The schema is applied at install time; an
+already-installed extension is left where it is (`IF NOT EXISTS`).
 
 ### 4.8 Mixins
 

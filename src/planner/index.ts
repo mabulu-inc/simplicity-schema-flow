@@ -232,14 +232,16 @@ export function buildPlan(desired: DesiredState, actual: ActualState, options: P
 function diffExtensions(desired: ExtensionsSchema | null, actual: string[]): Operation[] {
   const ops: Operation[] = [];
   const desiredExts = desired?.extensions ?? [];
+  const desiredNames = new Set(desiredExts.map((e) => e.name));
 
   for (const ext of desiredExts) {
-    if (!actual.includes(ext)) {
+    if (!actual.includes(ext.name)) {
+      const schemaClause = ext.schema ? ` SCHEMA "${ext.schema}"` : '';
       ops.push({
         type: 'create_extension',
         phase: 2,
-        objectName: ext,
-        sql: `CREATE EXTENSION IF NOT EXISTS "${ext}"`,
+        objectName: ext.name,
+        sql: `CREATE EXTENSION IF NOT EXISTS "${ext.name}"${schemaClause}`,
         destructive: false,
       });
     }
@@ -247,7 +249,7 @@ function diffExtensions(desired: ExtensionsSchema | null, actual: string[]): Ope
 
   // Extensions in DB but not in YAML → drop (destructive)
   for (const ext of actual) {
-    if (!desiredExts.includes(ext)) {
+    if (!desiredNames.has(ext)) {
       ops.push({
         type: 'drop_extension',
         phase: 2,
