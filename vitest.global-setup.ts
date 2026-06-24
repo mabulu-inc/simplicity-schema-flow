@@ -18,7 +18,7 @@ import type { GlobalSetupContext } from 'vitest/node';
  * schema, which lives once per database. Giving every file its own database
  * keeps those drops from racing the rest of the suite.
  *
- * Built from `test/pg/Dockerfile` (postgres:17 + pg_partman + pg_cron) so the
+ * Built from `test/pg/Dockerfile` (postgres:16 + pg_partman + pg_cron) so the
  * partitioned-table maintenance path is exercised against the real extensions,
  * not mocked. The build is cached after the first run. `pg_cron` is loaded via
  * `shared_preload_libraries` and runs its jobs against the default `postgres`

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Partitioned tables can now declare foreign keys and indexes directly.** A
+  table with a `partition_by` block that also lists `references:` (a foreign key)
+  or `indexes:` no longer fails to apply. PostgreSQL rejects the `NOT VALID`
+  foreign keys and `CREATE INDEX CONCURRENTLY` that schema-flow emits for
+  ordinary tables, so on a partitioned parent these are now emitted as an
+  immediately-validated foreign key and a plain `CREATE INDEX` — both of which
+  Postgres propagates to every partition automatically. The previous workaround
+  of moving these into a `post/` SQL file is no longer needed.
+
 ## [0.15.0] - 2026-06-24
 
 ### Added

@@ -18,7 +18,7 @@ Requirements are defined in `docs/PRD.md`.
 ## Database (MANDATORY)
 
 - Tests run PostgreSQL via **Testcontainers** — `vitest.global-setup.ts` starts an
-  ephemeral `postgres:17` container automatically; nothing to start by hand.
+  ephemeral `postgres:16` container automatically; nothing to start by hand.
 - **NEVER assume PostgreSQL is installed locally** — tests always use the container.
 - A reachable Docker daemon is required (Docker Desktop / colima locally; CI runners
   provide one). That is the only prerequisite — no `docker compose`, no `.env`.

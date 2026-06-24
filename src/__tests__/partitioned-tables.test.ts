@@ -142,32 +142,74 @@ columns:
   });
 });
 
-// ─── Planner: SQL generation ─────────────────────────────────────
+// ─── Planner: behavioral apply ───────────────────────────────────
 
-describe('planner: PARTITION BY emission', () => {
-  it('appends PARTITION BY RANGE (...) to CREATE TABLE', () => {
-    const plan = buildPlan(desiredFrom([parseTable(PARTITIONED_YAML)]), emptyActual(), { pgSchema: TEST_SCHEMA });
-    const createOp = plan.operations.find((o) => o.type === 'create_table');
-    expect(createOp).toBeDefined();
-    expect(createOp!.sql).toMatch(/PARTITION BY RANGE \("as_of_date"\)/);
-  });
-
-  it('does not emit PARTITION BY for ordinary tables', () => {
-    const plan = buildPlan(
-      desiredFrom([
-        parseTable(`
-table: plain
+// A partitioned parent that ALSO declares a foreign key and a secondary
+// index — the intersection #64 never exercised. Postgres forbids the two
+// DDL forms schema-flow emits by default on a partitioned parent
+// (`relkind='p'`): `ADD CONSTRAINT … FOREIGN KEY … NOT VALID` and
+// `CREATE INDEX CONCURRENTLY`. The planner must emit the validated FK and a
+// plain `CREATE INDEX` instead — both propagate to every partition.
+const PARTITIONED_WITH_REFS_YAML = `
+table: kpi_daily_facts
+partition_by:
+  strategy: range
+  key: [as_of_date]
 columns:
   - name: id
     type: uuid
-    primary_key: true
-`),
-      ]),
-      emptyActual(),
-      { pgSchema: TEST_SCHEMA },
+    nullable: false
+  - name: as_of_date
+    type: date
+    nullable: false
+  - name: tenant_id
+    type: uuid
+    references:
+      table: kpi_tenants
+      column: id
+  - name: value
+    type: numeric
+primary_key: [id, as_of_date]
+indexes:
+  - columns: [value]
+`;
+
+describe('planner: partitioned parent applies against Postgres', () => {
+  it('creates a partitioned parent that also declares a FK and an index', async () => {
+    // Referenced parent for the FK.
+    await client.query(`CREATE TABLE "${TEST_SCHEMA}".kpi_tenants (id uuid PRIMARY KEY)`);
+
+    const plan = buildPlan(desiredFrom([parseTable(PARTITIONED_WITH_REFS_YAML)]), emptyActual(), {
+      pgSchema: TEST_SCHEMA,
+    });
+    for (const op of [...plan.operations].sort((a, b) => a.phase - b.phase)) {
+      await client.query(op.sql);
+    }
+
+    // The parent is actually partitioned (relkind 'p').
+    const { rows: rel } = await client.query(
+      `SELECT c.relkind FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = $1 AND c.relname = 'kpi_daily_facts'`,
+      [TEST_SCHEMA],
     );
-    const createOp = plan.operations.find((o) => o.type === 'create_table');
-    expect(createOp!.sql).not.toMatch(/PARTITION BY/);
+    expect(rel[0].relkind).toBe('p');
+
+    // The FK landed and is validated — no NOT VALID constraint left behind.
+    const { rows: fk } = await client.query(
+      `SELECT convalidated FROM pg_constraint
+        WHERE conrelid = '"${TEST_SCHEMA}".kpi_daily_facts'::regclass AND contype = 'f'`,
+    );
+    expect(fk).toHaveLength(1);
+    expect(fk[0].convalidated).toBe(true);
+
+    // The index landed on the parent.
+    const { rows: idx } = await client.query(
+      `SELECT 1 FROM pg_indexes
+        WHERE schemaname = $1 AND tablename = 'kpi_daily_facts' AND indexdef ILIKE '%(value)%'`,
+      [TEST_SCHEMA],
+    );
+    expect(idx).toHaveLength(1);
   });
 
   it('refuses to convert an ordinary table into a partitioned one in place', () => {

@@ -1078,7 +1078,7 @@ function createTableOps(
     for (const idx of table.indexes) {
       const isInlinedConstraint = idx.unique && idx.as_constraint;
       if (!isInlinedConstraint) {
-        ops.push(...createIndexOps(table.table, idx, pgSchema));
+        ops.push(...createIndexOps(table.table, idx, pgSchema, !!table.partition_by));
       }
       if (idx.comment) {
         const idxName = idx.name || defaultIndexName(table.table, idx);
@@ -1096,7 +1096,11 @@ function createTableOps(
     }
   }
 
-  // Foreign keys (phase 8) — added as NOT VALID
+  // Foreign keys (phase 8) — added as NOT VALID then validated, so the table
+  // isn't locked while existing rows are checked. Postgres forbids NOT VALID
+  // foreign keys on a partitioned parent, so those are added immediately
+  // validated (the validated form propagates to every partition).
+  const isPartitioned = !!table.partition_by;
   for (const col of fkColumns) {
     const ref = col.references!;
     const constraintName = ref.name || `fk_${table.table}_${col.name}_${ref.table}`;
@@ -1107,21 +1111,23 @@ function createTableOps(
     if (ref.deferrable) {
       fkSql += ref.initially_deferred ? ' DEFERRABLE INITIALLY DEFERRED' : ' DEFERRABLE INITIALLY IMMEDIATE';
     }
-    fkSql += ' NOT VALID';
+    if (!isPartitioned) fkSql += ' NOT VALID';
     ops.push({
-      type: 'add_foreign_key_not_valid',
+      type: isPartitioned ? 'add_foreign_key' : 'add_foreign_key_not_valid',
       phase: 8,
       objectName: `${table.table}.${col.name}`,
       sql: wrapConstraintIdempotent(constraintName, fkSql, `"${pgSchema}"."${table.table}"`),
       destructive: false,
     });
-    ops.push({
-      type: 'validate_constraint',
-      phase: 8,
-      objectName: `${table.table}.${constraintName}`,
-      sql: `ALTER TABLE "${pgSchema}"."${table.table}" VALIDATE CONSTRAINT "${constraintName}"`,
-      destructive: false,
-    });
+    if (!isPartitioned) {
+      ops.push({
+        type: 'validate_constraint',
+        phase: 8,
+        objectName: `${table.table}.${constraintName}`,
+        sql: `ALTER TABLE "${pgSchema}"."${table.table}" VALIDATE CONSTRAINT "${constraintName}"`,
+        destructive: false,
+      });
+    }
   }
 
   // Triggers (phase 11)
@@ -1326,21 +1332,25 @@ function alterTableOps(
         if (ref.deferrable) {
           fkSql += ref.initially_deferred ? ' DEFERRABLE INITIALLY DEFERRED' : ' DEFERRABLE INITIALLY IMMEDIATE';
         }
-        fkSql += ' NOT VALID';
+        // A partitioned parent rejects NOT VALID foreign keys — add it validated.
+        const fkPartitioned = !!desired.partition_by;
+        if (!fkPartitioned) fkSql += ' NOT VALID';
         ops.push({
-          type: 'add_foreign_key_not_valid',
+          type: fkPartitioned ? 'add_foreign_key' : 'add_foreign_key_not_valid',
           phase: 8,
           objectName: `${desired.table}.${col.name}`,
           sql: wrapConstraintIdempotent(constraintName, fkSql, `"${pgSchema}"."${desired.table}"`),
           destructive: false,
         });
-        ops.push({
-          type: 'validate_constraint',
-          phase: 8,
-          objectName: `${desired.table}.${constraintName}`,
-          sql: `ALTER TABLE "${pgSchema}"."${desired.table}" VALIDATE CONSTRAINT "${constraintName}"`,
-          destructive: false,
-        });
+        if (!fkPartitioned) {
+          ops.push({
+            type: 'validate_constraint',
+            phase: 8,
+            objectName: `${desired.table}.${constraintName}`,
+            sql: `ALTER TABLE "${pgSchema}"."${desired.table}" VALIDATE CONSTRAINT "${constraintName}"`,
+            destructive: false,
+          });
+        }
       }
 
       if (col.comment) {
@@ -1398,6 +1408,7 @@ function alterTableOps(
       droppedColNames,
       existing.columns,
       allowDestructive,
+      !!desired.partition_by,
     ),
   );
 
@@ -1618,6 +1629,7 @@ function diffIndexes(
   droppedColNames: Set<string> = new Set(),
   existingColumns: ColumnDef[] = [],
   allowDestructive = false,
+  partitioned = false,
 ): Operation[] {
   const ops: Operation[] = [];
   const existingByName = new Map<string, IndexDef>();
@@ -1672,7 +1684,7 @@ function diffIndexes(
         // drop is surfaced instead of a "create" that silently does nothing.
         if (!allowDestructive) continue;
       }
-      ops.push(...createIndexOps(table, { ...idx, name }, pgSchema));
+      ops.push(...createIndexOps(table, { ...idx, name }, pgSchema, partitioned));
     } else if (indexNeedsRecreate(idx, existingIdx)) {
       // Keys, where-clause, include-list, uniqueness, nulls-not-distinct,
       // constraint-wrapper, or deferrable changed. PG has no ALTER INDEX
@@ -1680,7 +1692,7 @@ function diffIndexes(
       // constraint-backed entries (DROP INDEX errors out — the index is
       // owned by the constraint).
       ops.push(buildDropIndexOp(table, existingIdx, name, pgSchema));
-      ops.push(...createIndexOps(table, { ...idx, name }, pgSchema));
+      ops.push(...createIndexOps(table, { ...idx, name }, pgSchema, partitioned));
     }
     if (idx.comment && idx.comment !== existingIdx?.comment) {
       const isConstraint = idx.unique && idx.as_constraint;
@@ -1761,12 +1773,15 @@ export function normalizeIndexClause(clause: string | undefined): string {
  * DEFERRABLE) at phase 8. PG's safe two-step pattern — the index build is
  * non-blocking, the constraint attachment is instant.
  */
-function createIndexOps(table: string, idx: IndexDef, pgSchema: string): Operation[] {
+function createIndexOps(table: string, idx: IndexDef, pgSchema: string, partitioned = false): Operation[] {
   const name = idx.name || defaultIndexName(table, idx);
   const method = idx.method || 'btree';
   const unique = idx.unique ? 'UNIQUE ' : '';
   const cols = idx.columns.map((c) => indexKeySql(c, idx.opclass)).join(', ');
-  let sql = `CREATE ${unique}INDEX CONCURRENTLY IF NOT EXISTS "${name}" ON "${pgSchema}"."${table}" USING ${method} (${cols})`;
+  // Postgres rejects CREATE INDEX CONCURRENTLY on a partitioned parent. A plain
+  // CREATE INDEX on the parent is allowed and propagates to every partition.
+  const concurrently = partitioned ? '' : 'CONCURRENTLY ';
+  let sql = `CREATE ${unique}INDEX ${concurrently}IF NOT EXISTS "${name}" ON "${pgSchema}"."${table}" USING ${method} (${cols})`;
   if (idx.include && idx.include.length > 0) {
     sql += ` INCLUDE (${idx.include.map((c) => `"${c}"`).join(', ')})`;
   }
@@ -1782,7 +1797,7 @@ function createIndexOps(table: string, idx: IndexDef, pgSchema: string): Operati
     objectName: name,
     sql,
     destructive: false,
-    concurrent: true,
+    concurrent: !partitioned,
   };
   if (!(idx.unique && idx.as_constraint)) return [indexOp];
 
