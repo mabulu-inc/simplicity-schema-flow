@@ -203,11 +203,29 @@ export interface SqlExpression {
 
 export type SeedRow = Record<string, unknown>;
 
+// ─── Partitioning ───────────────────────────────────────────────
+
+export type PartitionStrategy = 'range' | 'list' | 'hash';
+
+/**
+ * Declares a table as a partitioned parent (`CREATE TABLE … PARTITION BY`).
+ * `key` lists the partition-key columns; PostgreSQL requires every unique
+ * constraint / primary key on the table to include all of them. Child
+ * partitions are NOT modeled here — they are created out-of-band (e.g. by
+ * pg_partman) and are deliberately ignored by introspection so a re-run is a
+ * clean no-op on the parent.
+ */
+export interface PartitionByDef {
+  strategy: PartitionStrategy;
+  key: string[];
+}
+
 // ─── Table ──────────────────────────────────────────────────────
 
 export interface TableSchema {
   table: string;
   columns: ColumnDef[];
+  partition_by?: PartitionByDef;
   primary_key?: string[];
   primary_key_name?: string;
   indexes?: IndexDef[];

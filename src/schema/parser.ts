@@ -20,6 +20,8 @@ import type {
   PrecheckDef,
   ForeignKeyRef,
   ForeignKeyAction,
+  PartitionByDef,
+  PartitionStrategy,
   ExpandDef,
   EnumSchema,
   FunctionSchema,
@@ -443,9 +445,31 @@ function parsePrecheckDef(raw: Record<string, unknown>, context: string): Preche
 // `unique_constraints` is kept in the allowed set so the migration error
 // (below) fires with a useful message rather than the generic
 // `unknown field(s)` error from checkKeys.
+const PARTITION_BY_KEYS = ['strategy', 'key'] as const;
+const PARTITION_STRATEGIES: readonly PartitionStrategy[] = ['range', 'list', 'hash'];
+
+function parsePartitionBy(raw: Record<string, unknown>, context: string, columnNames: Set<string>): PartitionByDef {
+  checkKeys(raw, PARTITION_BY_KEYS, context);
+  const strategy = requireString(raw, 'strategy', context).toLowerCase() as PartitionStrategy;
+  if (!PARTITION_STRATEGIES.includes(strategy)) {
+    throw new Error(`${context}.strategy: must be one of ${PARTITION_STRATEGIES.join(', ')} (got "${strategy}")`);
+  }
+  const key = requireArray<string>(raw, 'key', context).map((k) => String(k));
+  if (key.length === 0) {
+    throw new Error(`${context}.key: must list at least one partition-key column`);
+  }
+  for (const col of key) {
+    if (!columnNames.has(col)) {
+      throw new Error(`${context}.key: column "${col}" is not declared in this table's columns`);
+    }
+  }
+  return { strategy, key };
+}
+
 const TABLE_KEYS = [
   'table',
   'columns',
+  'partition_by',
   'primary_key',
   'primary_key_name',
   'indexes',
@@ -477,6 +501,14 @@ export function parseTable(yamlStr: string): TableSchema {
     ),
   };
 
+  if (raw.partition_by !== undefined) {
+    const columnNames = new Set(table.columns.map((c) => c.name));
+    table.partition_by = parsePartitionBy(
+      raw.partition_by as Record<string, unknown>,
+      `${ctx}.partition_by`,
+      columnNames,
+    );
+  }
   if (raw.primary_key !== undefined) table.primary_key = raw.primary_key as string[];
   if (raw.primary_key_name !== undefined) table.primary_key_name = String(raw.primary_key_name);
   if (raw.indexes !== undefined)

@@ -23,6 +23,8 @@ import type {
   RoleSchema,
   ForeignKeyAction,
   ForeignKeyRef,
+  PartitionByDef,
+  PartitionStrategy,
   TriggerTiming,
   TriggerEvent,
   TriggerForEach,
@@ -36,19 +38,26 @@ type Client = pg.PoolClient | pg.Client;
 
 /** Get all table names in a schema, excluding extension-owned tables. */
 export async function getExistingTables(client: Client, schema: string): Promise<string[]> {
+  // relkind 'r' = ordinary table, 'p' = partitioned parent (both first-class
+  // here). `NOT relispartition` excludes child partitions: those are created
+  // out-of-band (e.g. by pg_partman) and are NOT part of the desired state, so
+  // they must never be introspected as standalone tables — otherwise the
+  // planner would try to DROP every one as "undeclared". Temp tables live in
+  // pg_temp_* namespaces and are excluded by the schema filter.
   const result = await client.query(
-    `SELECT t.tablename
-     FROM pg_catalog.pg_tables t
-     JOIN pg_catalog.pg_class c ON c.relname = t.tablename
-     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.schemaname
-     WHERE t.schemaname = $1
+    `SELECT c.relname AS tablename
+     FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = $1
+       AND c.relkind IN ('r', 'p')
+       AND NOT c.relispartition
        AND NOT EXISTS (
          SELECT 1 FROM pg_catalog.pg_depend d
          JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid
          WHERE d.objid = c.oid
            AND d.deptype = 'e'
        )
-     ORDER BY t.tablename`,
+     ORDER BY c.relname`,
     [schema],
   );
   return result.rows.map((r: { tablename: string }) => r.tablename);
@@ -471,6 +480,7 @@ export async function introspectTable(client: Client, tableName: string, schema:
   const tableGrants = await getTableLevelGrants(client, tableName, schema);
   const rlsInfo = await getRlsStatus(client, tableName, schema);
   const exclusionConstraints = await getExclusionConstraints(client, tableName, schema);
+  const partitionBy = await getPartitionBy(client, tableName, schema);
 
   // Merge FK info into columns
   for (const fk of fkInfo) {
@@ -534,6 +544,7 @@ export async function introspectTable(client: Client, tableName: string, schema:
     columns,
   };
 
+  if (partitionBy) result.partition_by = partitionBy;
   if (compositePk.columns.length > 1) result.primary_key = compositePk.columns;
   if (compositePk.constraintName) result.primary_key_name = compositePk.constraintName;
   if (indexesAfterColumnMerge.length > 0) result.indexes = indexesAfterColumnMerge;
@@ -1177,6 +1188,37 @@ async function getTableLevelGrants(client: Client, table: string, schema: string
   return Array.from(mergeMap.values());
 }
 
+const PARTITION_STRATEGY_MAP: Record<string, PartitionStrategy> = {
+  r: 'range',
+  l: 'list',
+  h: 'hash',
+};
+
+async function getPartitionBy(client: Client, table: string, schema: string): Promise<PartitionByDef | undefined> {
+  // pg_partitioned_table only has a row for partitioned parents (relkind 'p').
+  // partattrs is the int2vector of partition-key attribute numbers; we map it
+  // back to column names in key order. Expression partition keys (attnum 0) are
+  // not represented in the declarative model, so they're skipped here.
+  const result = await client.query(
+    `SELECT pt.partstrat AS strategy,
+            array_agg(a.attname::text ORDER BY k.ord) AS keys
+     FROM pg_catalog.pg_partitioned_table pt
+     JOIN pg_catalog.pg_class c ON c.oid = pt.partrelid
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     CROSS JOIN LATERAL unnest(string_to_array(pt.partattrs::text, ' ')::int[]) WITH ORDINALITY AS k(attnum, ord)
+     JOIN pg_catalog.pg_attribute a ON a.attrelid = pt.partrelid AND a.attnum = k.attnum
+     WHERE c.relname = $1
+       AND n.nspname = $2
+     GROUP BY pt.partstrat`,
+    [table, schema],
+  );
+  if (result.rows.length === 0) return undefined;
+  const row = result.rows[0] as { strategy: string; keys: string[] };
+  const strategy = PARTITION_STRATEGY_MAP[row.strategy];
+  if (!strategy || !row.keys || row.keys.length === 0) return undefined;
+  return { strategy, key: row.keys };
+}
+
 async function getRlsStatus(
   client: Client,
   table: string,
@@ -1188,7 +1230,7 @@ async function getRlsStatus(
      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
      WHERE c.relname = $1
        AND n.nspname = $2
-       AND c.relkind = 'r'`,
+       AND c.relkind IN ('r', 'p')`,
     [table, schema],
   );
   if (result.rows.length === 0) return { rls: false, force_rls: false };
@@ -1205,7 +1247,7 @@ async function getTableComment(client: Client, table: string, schema: string): P
      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
      WHERE c.relname = $1
        AND n.nspname = $2
-       AND c.relkind = 'r'`,
+       AND c.relkind IN ('r', 'p')`,
     [table, schema],
   );
   const comment = result.rows[0]?.comment;

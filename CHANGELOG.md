@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Declarative partitioned tables.** A table can now declare `partition_by`
+  (`strategy: range | list | hash` plus the partition-key columns), and
+  schema-flow emits `CREATE TABLE … PARTITION BY …`. Partitioned parents are
+  treated as first-class — their columns, primary key, indexes, RLS, grants, and
+  comment are diffed and reconciled like any other table. Child partitions
+  created out-of-band (e.g. by `pg_partman` + `pg_cron`) are ignored during
+  introspection, so re-runs converge to a clean no-op instead of trying to drop
+  them. Changing a table's partitioning in place is rejected at plan time
+  (PostgreSQL has no `ALTER` for it). `schema-flow generate` round-trips
+  `partition_by` back to YAML.
+
 ## [0.14.0] - 2026-06-19
 
 ### Added

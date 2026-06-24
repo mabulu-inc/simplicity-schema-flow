@@ -136,6 +136,9 @@ function buildTableYaml(table: TableSchema): Record<string, unknown> {
     return c;
   });
 
+  if (table.partition_by) {
+    result.partition_by = { strategy: table.partition_by.strategy, key: table.partition_by.key };
+  }
   if (table.primary_key) result.primary_key = table.primary_key;
   if (table.indexes && table.indexes.length > 0) result.indexes = table.indexes;
   if (table.checks && table.checks.length > 0) result.checks = table.checks;

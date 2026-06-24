@@ -224,6 +224,41 @@ comment: 'Core user accounts table'
 
 The `table` field is required. One YAML file per table.
 
+#### Partitioned Tables
+
+A table can be declared as a **partitioned parent** with `partition_by`:
+
+```yaml
+table: kpi_daily_facts
+partition_by:
+  strategy: range # range | list | hash
+  key: [as_of_date] # partition-key columns (must be declared columns)
+columns:
+  - name: id
+    type: uuid
+    nullable: false
+  - name: as_of_date
+    type: date
+    nullable: false
+primary_key: [id, as_of_date] # PG requires the PK to include the partition key
+```
+
+This emits `CREATE TABLE … PARTITION BY RANGE (as_of_date)`. The parent is
+first-class: its columns, primary key, indexes, RLS, policies, grants, and
+comment are all diffed and reconciled exactly like an ordinary table
+(introspection recognizes `relkind = 'p'` parents).
+
+**Child partitions are not modeled here.** They are created out-of-band — for
+example by [`pg_partman`](https://github.com/pgpartman/pg_partman) with a
+`pg_cron` job calling `partman.run_maintenance_proc()` to roll the time window
+forward. schema-flow deliberately **ignores child partitions** during
+introspection, so a re-run never tries to drop them and the parent converges to
+a clean no-op.
+
+PostgreSQL cannot turn an ordinary table into a partitioned one (or change the
+partition strategy/key) in place. Changing `partition_by` on an existing table
+is rejected at plan time — recreate the table in a pre-script instead.
+
 #### Column Types
 
 All PostgreSQL types are supported. Common ones:

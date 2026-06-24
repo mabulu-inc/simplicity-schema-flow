@@ -11,6 +11,7 @@ import type {
   IndexDef,
   IndexKey,
   CheckDef,
+  PartitionByDef,
   DeferrableMode,
   ExclusionConstraintDef,
   TriggerDef,
@@ -664,6 +665,28 @@ function validateBootstrapForeignKeys(desired: TableSchema[]): void {
   }
 }
 
+/**
+ * PostgreSQL cannot turn an ordinary table into a partitioned one (or change
+ * its partition strategy/key) in place — that requires a full table rebuild.
+ * Rather than silently churn, refuse the diff and tell the operator to do it
+ * via a pre-script.
+ */
+function assertPartitioningUnchanged(desired: TableSchema, existing: TableSchema): void {
+  const d = desired.partition_by;
+  const e = existing.partition_by;
+  const same =
+    (!d && !e) ||
+    (!!d && !!e && d.strategy === e.strategy && d.key.length === e.key.length && d.key.every((k, i) => k === e.key[i]));
+  if (same) return;
+  const describe = (p?: PartitionByDef) =>
+    p ? `PARTITION BY ${p.strategy.toUpperCase()} (${p.key.join(', ')})` : 'not partitioned';
+  throw new Error(
+    `table "${desired.table}": partitioning cannot be changed in place ` +
+      `(${describe(e)} → ${describe(d)}). PostgreSQL has no ALTER for this — ` +
+      `recreate the table in a pre-script (move data, then drop/create), or revert the partition_by change.`,
+  );
+}
+
 function diffTables(
   desired: TableSchema[],
   actual: Map<string, TableSchema>,
@@ -677,6 +700,7 @@ function diffTables(
 
   for (const desiredTable of desired) {
     const existing = actual.get(desiredTable.table);
+    if (existing) assertPartitioningUnchanged(desiredTable, existing);
     const tableOps = existing
       ? alterTableOps(desiredTable, existing, pgSchema, sequenceGrants, allowDestructive)
       : createTableOps(desiredTable, pgSchema, sequenceGrants);
@@ -846,11 +870,17 @@ function createTableOps(
     }
   }
 
+  let createTableSql = `CREATE TABLE IF NOT EXISTS "${pgSchema}"."${table.table}" (\n  ${colDefs.join(',\n  ')}\n)`;
+  if (table.partition_by) {
+    const keyCols = table.partition_by.key.map((c) => `"${c}"`).join(', ');
+    createTableSql += ` PARTITION BY ${table.partition_by.strategy.toUpperCase()} (${keyCols})`;
+  }
+
   ops.push({
     type: 'create_table',
     phase: 6,
     objectName: table.table,
-    sql: `CREATE TABLE IF NOT EXISTS "${pgSchema}"."${table.table}" (\n  ${colDefs.join(',\n  ')}\n)`,
+    sql: createTableSql,
     destructive: false,
   });
 
