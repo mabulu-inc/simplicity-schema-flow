@@ -50,6 +50,7 @@ export default defineConfig({
             { label: 'Views', slug: 'schema/views' },
             { label: 'Roles', slug: 'schema/roles' },
             { label: 'Extensions', slug: 'schema/extensions' },
+            { label: 'Partitioned tables', slug: 'schema/partitioning' },
             { label: 'Mixins', slug: 'schema/mixins' },
             { label: 'Imports & extend', slug: 'schema/imports' },
             { label: 'Pre/post scripts', slug: 'schema/scripts' },

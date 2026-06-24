@@ -248,6 +248,8 @@ indexes:
 ```
 
 Indexes are created using `CONCURRENTLY` outside of a transaction where possible.
+On a [partitioned parent](/simplicity-schema-flow/schema/partitioning/) a plain
+`CREATE INDEX` is emitted instead, since Postgres forbids `CONCURRENTLY` there.
 
 ### `as_constraint` (table-level unique constraints)
 
@@ -467,6 +469,14 @@ See [Bootstrap tables & sessions](/simplicity-schema-flow/schema/bootstrap/) for
 ## Description alias
 
 `description` is an alias for `comment` on any field that supports it. Either works; `comment` takes precedence.
+
+## Partitioned tables
+
+A table can declare `partition_by` to become a partitioned parent, with optional
+pg_partman-driven rolling partitions. Foreign keys and indexes declared on the
+parent propagate to every partition.
+
+See [Partitioned tables](/simplicity-schema-flow/schema/partitioning/) for details.
 
 ## Mixins
 

@@ -16,6 +16,12 @@ ALTER TABLE orders ADD CONSTRAINT fk_orders_user
 ALTER TABLE orders VALIDATE CONSTRAINT fk_orders_user;
 ```
 
+**Partitioned parents are the exception.** PostgreSQL rejects `NOT VALID`
+foreign keys on a partitioned table, so on a
+[partitioned parent](/simplicity-schema-flow/schema/partitioning/) schema-flow
+emits a single immediately-validated `ADD CONSTRAINT … FOREIGN KEY` instead. It
+propagates to every partition automatically.
+
 ## Safe NOT NULL
 
 Setting a column to `NOT NULL` without locking the table:
@@ -50,6 +56,12 @@ ALTER TABLE users ADD CONSTRAINT uq_users_email UNIQUE USING INDEX idx_users_ema
 Indexes are created using `CREATE INDEX CONCURRENTLY` outside of a transaction where possible. This avoids holding locks during index creation on large tables.
 
 If a `CONCURRENTLY` operation fails, it leaves an invalid index. Use `detectInvalidIndexes()` and `reindexInvalid()` to find and retry them.
+
+**Partitioned parents are the exception.** PostgreSQL rejects `CREATE INDEX
+CONCURRENTLY` on a partitioned table, so on a
+[partitioned parent](/simplicity-schema-flow/schema/partitioning/) schema-flow
+emits a plain `CREATE INDEX`. Postgres builds each child partition's index and
+attaches it to the parent.
 
 ## Pre-migration checks
 
