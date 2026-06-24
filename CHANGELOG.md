@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Documentation for partitioned tables.** The docs site now has a Partitioned
+  tables page covering `partition_by`, declaring foreign keys and indexes on a
+  partitioned parent, and rolling pg_partman maintenance (`partitions:` and the
+  database-global `partition_maintenance` schedule). The Extensions page documents
+  the `{ name, schema }` form for pinning an extension's install schema, and the
+  zero-downtime page now notes the partitioned-parent exceptions for foreign keys
+  and indexes.
+
 ## [0.15.1] - 2026-06-24
 
 ### Fixed
