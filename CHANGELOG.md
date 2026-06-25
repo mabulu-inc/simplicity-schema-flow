@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Policies, checks, and partial indexes that reference a `bigserial` or
+  `smallserial` primary key no longer drop and recreate on every run.** When an
+  expression passed such a column to a function expecting `bigint` (e.g. an RLS
+  policy `using: in_tenant(tenant_id)`), schema-flow's expression normalizer
+  treated the column as `integer` and baked a spurious `(tenant_id)::bigint`
+  widening cast into the comparison form — which never matched the real,
+  cast-free expression in the database, so the object was rewritten on every
+  `plan`/`run`. The normalizer now gives serial columns their true width
+  (`bigserial` → `bigint`, `smallserial` → `smallint`), so these expressions
+  converge to a clean no-op.
+
 ## [0.15.3] - 2026-06-25
 
 ### Fixed

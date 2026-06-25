@@ -2909,6 +2909,58 @@ policies:
     }
   });
 
+  it('reports no drift for a policy passing a bigserial PK to a bigint function arg', async () => {
+    // Reproduces the cast bug found on productionnow staging: a bigserial PK
+    // (real column type bigint) passed to a function whose parameter is bigint.
+    // The expression normalizer's temp table must give the column its true
+    // width (bigint), or PG bakes a `(id)::bigint` widening cast into the
+    // round-tripped policy that the real cast-free policy never has, so the
+    // policy drops+recreates on every plan (issue #66).
+    const project = await useTestProject(DATABASE_URL);
+    try {
+      writeSchema(project.dir, {
+        'functions/in_tenant.yaml': `
+name: in_tenant
+language: sql
+volatility: stable
+returns: boolean
+args:
+  - name: target
+    type: bigint
+body: "SELECT $1 IS NOT NULL"
+`,
+        'tables/tenants.yaml': `
+table: tenants
+rls: true
+columns:
+  - name: tenant_id
+    type: bigserial
+    primary_key: true
+  - name: name
+    type: text
+    nullable: false
+policies:
+  - name: tenants_select
+    for: SELECT
+    to: PUBLIC
+    using: "in_tenant(tenants.tenant_id)"
+`,
+      });
+
+      await project.migrate();
+
+      const { desired, actual } = await buildDesiredAndActual(project.config, logger);
+      const plan = buildPlan(desired, actual, { allowDestructive: false, pgSchema: project.config.pgSchema });
+      const policyOps = plan.operations.filter((op) => op.type === 'create_policy' || op.type === 'drop_policy');
+      expect(policyOps).toHaveLength(0);
+
+      const report = await project.drift();
+      expect(report.items.filter((i) => i.type === 'policy')).toEqual([]);
+    } finally {
+      await project.cleanup();
+    }
+  });
+
   it('reports no drift for a partial-index WHERE clause Postgres rewrites', async () => {
     const project = await useTestProject(DATABASE_URL);
     try {

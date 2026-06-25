@@ -83,14 +83,27 @@ async function normalizeExpression(
 
 /**
  * Map schema types to simple PostgreSQL types for the temp table.
- * Only needs to be accurate enough for expression parsing.
+ *
+ * A serial type is an integer column of a specific width with a sequence
+ * default; the temp column must use that REAL width. Collapsing every serial
+ * to `integer` made a `bigserial`/`smallserial` column narrower than the live
+ * one, so any expression passing the column to a function with a wider
+ * parameter (e.g. `auth_in_tenant(tenant_id)` where the arg is `bigint`)
+ * round-tripped with a spurious `(tenant_id)::bigint` widening cast that the
+ * real `bigint` column never carries — leaving the policy/check to drop and
+ * recreate on every plan (issue #66).
  */
 function mapColumnType(type: string): string {
-  const lower = type.toLowerCase();
-  if (lower === 'serial' || lower === 'bigserial' || lower === 'smallserial') {
-    return 'integer';
+  switch (type.toLowerCase()) {
+    case 'serial':
+      return 'integer';
+    case 'bigserial':
+      return 'bigint';
+    case 'smallserial':
+      return 'smallint';
+    default:
+      return type;
   }
-  return type;
 }
 
 /**
