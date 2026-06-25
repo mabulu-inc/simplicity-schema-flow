@@ -10,9 +10,12 @@ import type { DesiredState, ActualState } from '../planner/index.js';
 import {
   defaultIndexName,
   indexKeysIdentity,
+  normalizeCheckExpression,
   normalizeFunctionType,
   normalizeGrants,
   normalizeIndexClause,
+  normalizePolicyRoles,
+  normalizeTypeName,
   partitionsConverged,
 } from '../planner/index.js';
 import type {
@@ -474,10 +477,14 @@ function driftColumns(table: string, desired: ColumnDef[], actual: ColumnDef[]):
           detail: `Type: expected ${dc.type}, actual ${ac.type}`,
         });
       }
-      // Nullable
+      // Nullable — skip for primary key columns. A PK column is implicitly
+      // NOT NULL, so the introspected side reports `nullable: false` while YAML
+      // that omits `nullable` defaults to true. The planner exempts PK columns
+      // here (diffColumn), so drift must too or it over-reports (issue #66).
+      const isPrimaryKey = dc.primary_key || ac.primary_key;
       const dNullable = dc.nullable !== false;
       const aNullable = ac.nullable !== false;
-      if (dNullable !== aNullable) {
+      if (!isPrimaryKey && dNullable !== aNullable) {
         items.push({
           type: 'column',
           object: `${table}.${dc.name}`,
@@ -622,6 +629,11 @@ function driftChecks(table: string, desired: CheckDef[], actual: CheckDef[]): Dr
     const act = actualByName.get(chk.name);
     if (!act) {
       items.push({ type: 'constraint', object: `${table}.${chk.name}`, status: 'missing_in_db' });
+      // Use the planner's own check normalizer so drift and plan agree exactly
+      // (issue #66). The build step also round-trips the desired side through PG
+      // (normalizeCheckExpressions); this inline pass mirrors the planner's
+      // diffChecks, which strips PG's redundant `::character varying::text` and
+      // `]::text[]` casts on top of the round-trip.
     } else if (normalizeCheckExpression(chk.expression) !== normalizeCheckExpression(act.expression)) {
       items.push({
         type: 'constraint',
@@ -695,7 +707,10 @@ function driftPolicies(table: string, desired: PolicyDef[], actual: PolicyDef[])
       if ((pol.for || 'ALL') !== (act.for || 'ALL')) {
         details.push(`for: expected ${pol.for || 'ALL'}, actual ${act.for || 'ALL'}`);
       }
-      if (pol.to !== act.to) {
+      // Normalize roles the way the planner does — PG stores `PUBLIC` as the
+      // lowercase `public` and a role list is order-insensitive, so a raw
+      // string compare over-reports (issue #66).
+      if (normalizePolicyRoles(pol.to) !== normalizePolicyRoles(act.to)) {
         details.push(`to: expected ${pol.to}, actual ${act.to}`);
       }
       if ((pol.using || '') !== (act.using || '')) {
@@ -1069,26 +1084,6 @@ function driftSeeds(
 
 // ─── Helpers ────────────────────────────────────────────────────
 
-function normalizeTypeName(t: string): string {
-  const lower = t.toLowerCase().trim();
-  const aliases: Record<string, string> = {
-    int: 'integer',
-    int4: 'integer',
-    int8: 'bigint',
-    int2: 'smallint',
-    float4: 'real',
-    float8: 'double precision',
-    bool: 'boolean',
-    serial: 'integer',
-    bigserial: 'bigint',
-  };
-  return aliases[lower] || lower;
-}
-
 function normalizeWhitespace(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
-}
-
-function normalizeCheckExpression(s: string): string {
-  return s.replace(/::character varying::text/g, '::character varying').replace(/\]::text\[\]/g, ']');
 }

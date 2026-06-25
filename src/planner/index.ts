@@ -2209,7 +2209,7 @@ function policyChanged(desired: PolicyDef, existing: PolicyDef): boolean {
 // the lowercase `public` role; YAML conventionally writes `PUBLIC`. Roles
 // can also be a comma-separated list. Case-fold and trim so the desired and
 // introspected forms compare equal.
-function normalizePolicyRoles(to: string): string {
+export function normalizePolicyRoles(to: string): string {
   return to
     .split(',')
     .map((r) => r.trim().toLowerCase())
@@ -2756,7 +2756,7 @@ function escapeQuote(s: string): string {
   return s.replace(/'/g, "''");
 }
 
-function normalizeTypeName(t: string): string {
+export function normalizeTypeName(t: string): string {
   // Strip whitespace adjacent to parens/commas so `numeric(10, 2)` matches
   // `numeric(10,2)` (PG's format_type renders without the inner space).
   const stripped = t
@@ -2870,6 +2870,6 @@ function normalizeWhitespace(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
 }
 
-function normalizeCheckExpression(s: string): string {
+export function normalizeCheckExpression(s: string): string {
   return s.replace(/::character varying::text/g, '::character varying').replace(/\]::text\[\]/g, ']');
 }

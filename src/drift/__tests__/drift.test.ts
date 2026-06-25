@@ -2846,3 +2846,101 @@ seeds:
     }
   });
 });
+
+// Issue #66: `drift` must apply the SAME normalization as `plan`. On a converged
+// database `plan` reports zero operations; before the fix `drift` over-reported
+// type-alias / expression / nullability / policy-role differences that `plan`
+// correctly suppressed. These tests pin the invariant: a schema `plan` considers
+// clean reports no drift.
+describe('drift / plan normalization parity (issue #66)', () => {
+  it('reports no drift for type aliases, normalized exprs, PK nullability, and policy roles', async () => {
+    const project = await useTestProject(DATABASE_URL);
+    try {
+      // Every field below is authored in the alias / pre-normalized form that
+      // Postgres rewrites on store:
+      //   varchar(50)         -> character varying(50)
+      //   timestamptz         -> timestamp with time zone
+      //   PK with no nullable -> NOT NULL (introspects as nullable: false)
+      //   kind IN (...)       -> kind = ANY (ARRAY[...])
+      //   'human'             -> 'human'::text
+      //   to: PUBLIC          -> public
+      writeSchema(project.dir, {
+        'tables/roles.yaml': `
+table: roles
+rls: true
+columns:
+  - name: role_id
+    type: integer
+    primary_key: true
+  - name: name
+    type: varchar(50)
+    nullable: false
+  - name: created_at
+    type: timestamptz
+    default: "now()"
+  - name: kind
+    type: text
+    default: "'human'"
+checks:
+  - name: chk_roles_kind
+    expression: "kind IN ('human', 'service')"
+policies:
+  - name: roles_select
+    for: SELECT
+    to: PUBLIC
+    using: "true"
+`,
+      });
+
+      await project.migrate();
+
+      // plan and drift must agree: both clean on a converged DB.
+      const { desired, actual } = await buildDesiredAndActual(project.config, logger);
+      const plan = buildPlan(desired, actual, { allowDestructive: false, pgSchema: project.config.pgSchema });
+      expect(plan.operations).toHaveLength(0);
+      expect(plan.blocked).toHaveLength(0);
+
+      const report = await project.drift();
+      // No false `different` items, and nothing reported for the roles table at all.
+      expect(report.items.filter((i) => i.status === 'different')).toEqual([]);
+      expect(report.items.filter((i) => i.object.startsWith('roles'))).toEqual([]);
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it('reports no drift for a partial-index WHERE clause Postgres rewrites', async () => {
+    const project = await useTestProject(DATABASE_URL);
+    try {
+      // `status = 'active'` is stored by PG as `status = 'active'::text` — drift
+      // must round-trip the desired WHERE the same way plan does.
+      writeSchema(project.dir, {
+        'tables/jobs.yaml': `
+table: jobs
+columns:
+  - name: id
+    type: integer
+    primary_key: true
+  - name: status
+    type: text
+    nullable: false
+indexes:
+  - name: jobs_active_idx
+    columns: [id]
+    where: "status = 'active'"
+`,
+      });
+
+      await project.migrate();
+
+      const { desired, actual } = await buildDesiredAndActual(project.config, logger);
+      const plan = buildPlan(desired, actual, { allowDestructive: false, pgSchema: project.config.pgSchema });
+      expect(plan.operations).toHaveLength(0);
+
+      const report = await project.drift();
+      expect(report.items.filter((i) => i.status === 'different')).toEqual([]);
+    } finally {
+      await project.cleanup();
+    }
+  });
+});

@@ -21,31 +21,10 @@ import { getPool } from '../core/db.js';
 import { resolveConfig } from '../core/config.js';
 import type { SimplicitySchemaConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
-import { runPipeline } from '../cli/pipeline.js';
+import { runPipeline, buildDesiredAndActual } from '../cli/pipeline.js';
 import type { ExecuteResult } from '../executor/index.js';
-import { discoverAllSources, resolveImportParams } from '../core/sources.js';
-import { buildDesiredState } from '../schema/desired-state.js';
-import {
-  getExistingTables,
-  getExistingEnums,
-  getExistingFunctions,
-  getExistingViews,
-  getExistingMaterializedViews,
-  getExistingRoles,
-  introspectTable,
-  getPartitionMaintenance,
-} from '../introspect/index.js';
-import { detectDrift, hydrateActualSeeds } from '../drift/index.js';
+import { detectDrift } from '../drift/index.js';
 import type { DriftReport } from '../drift/index.js';
-import type { ActualState } from '../planner/index.js';
-import type {
-  TableSchema,
-  EnumSchema,
-  FunctionSchema,
-  ViewSchema,
-  MaterializedViewSchema,
-  RoleSchema,
-} from '../schema/types.js';
 
 export interface TestProject {
   /** Unique PostgreSQL schema name for this test */
@@ -103,17 +82,11 @@ export async function useTestProject(connectionString: string): Promise<TestProj
   }
 
   async function drift(): Promise<DriftReport> {
-    const discovered = await discoverAllSources(config);
-    const desired = await buildDesiredState(discovered.schema, { importParams: resolveImportParams(config) });
-    const actual = await introspectActual(connectionString, schema);
-
-    const driftClient = await pool.connect();
-    try {
-      await hydrateActualSeeds(driftClient, desired.tables, actual.tables, schema);
-    } finally {
-      driftClient.release();
-    }
-
+    // Mirror the real `drift` CLI command exactly (cli/index.ts) — build desired
+    // and actual through the shared pipeline so the test harness exercises the
+    // same SQL-expression normalization the command applies. Reimplementing the
+    // path here would let the harness mask drift-vs-plan divergence (issue #66).
+    const { desired, actual } = await buildDesiredAndActual(config, logger);
     return detectDrift(desired, actual);
   }
 
@@ -143,59 +116,5 @@ export function writeSchema(dir: string, files: Record<string, string>): void {
     const fullPath = path.join(dir, relativePath);
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, content, 'utf-8');
-  }
-}
-
-// ─── Internal helpers ──────────────────────────────────────────
-
-async function introspectActual(connectionString: string, pgSchema: string): Promise<ActualState> {
-  const pool = getPool(connectionString);
-  const client = await pool.connect();
-
-  try {
-    const tableNames = await getExistingTables(client, pgSchema);
-    const enumList = await getExistingEnums(client, pgSchema);
-    const fnList = await getExistingFunctions(client, pgSchema);
-    const viewList = await getExistingViews(client, pgSchema);
-    const matViewList = await getExistingMaterializedViews(client, pgSchema);
-    const roleList = await getExistingRoles(client);
-
-    const tablesMap = new Map<string, TableSchema>();
-    for (const name of tableNames) {
-      const table = await introspectTable(client, name, pgSchema);
-      tablesMap.set(name, table);
-    }
-
-    const enumsMap = new Map<string, EnumSchema>();
-    for (const e of enumList) enumsMap.set(e.name, e);
-
-    const functionsMap = new Map<string, FunctionSchema>();
-    for (const f of fnList) functionsMap.set(f.name, f);
-
-    const viewsMap = new Map<string, ViewSchema>();
-    for (const v of viewList) viewsMap.set(v.name, v);
-
-    const matViewsMap = new Map<string, MaterializedViewSchema>();
-    for (const mv of matViewList) matViewsMap.set(mv.name, mv);
-
-    const rolesMap = new Map<string, RoleSchema>();
-    for (const r of roleList) rolesMap.set(r.role, r);
-
-    const extResult = await client.query("SELECT extname FROM pg_extension WHERE extname != 'plpgsql'");
-    const extensions = extResult.rows.map((r: { extname: string }) => r.extname);
-    const partitionMaintenance = await getPartitionMaintenance(client);
-
-    return {
-      tables: tablesMap,
-      enums: enumsMap,
-      functions: functionsMap,
-      views: viewsMap,
-      materializedViews: matViewsMap,
-      roles: rolesMap,
-      extensions,
-      partitionMaintenance,
-    };
-  } finally {
-    client.release();
   }
 }

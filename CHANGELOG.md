@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`drift` no longer reports false differences that `plan` ignores.** On a
+  converged database `drift` could flag hundreds of items as different while
+  `plan` correctly saw the schema as clean — type aliases (`timestamptz` vs
+  `timestamp with time zone`, `varchar(50)` vs `character varying(50)`), check
+  constraints PostgreSQL rewrites (`x IN (...)` → `x = ANY (ARRAY[...])`),
+  column defaults (`'human'` → `'human'::text`), partial-index `WHERE` clauses,
+  primary-key columns (implicitly `NOT NULL`), and policy roles (`PUBLIC` vs
+  `public`). `drift`, `lint`, and `sql` now apply exactly the same expression
+  normalization as `plan`, so a schema `plan` treats as converged reports no
+  drift.
+
 ## [0.15.2] - 2026-06-24
 
 ### Added

@@ -344,10 +344,20 @@ export async function buildDesiredAndActual(
   const discovered = await discoverAllSources(config);
   const desired = await buildDesiredState(discovered.schema, { importParams: resolveImportParams(config) });
 
-  // Normalize policy expressions via PG round-trip + hydrate actual seeds
+  // Normalize SQL expressions via PG round-trip — the SAME set runPipeline
+  // applies before planning (policy USING/CHECK, table CHECK constraints,
+  // partial-index WHERE clauses, column defaults, view bodies). drift/lint/sql
+  // share this path, so without the full set they compare raw YAML text against
+  // PG's canonical form and over-report differences that `plan` suppresses
+  // (issue #66). Keeping this list in lockstep with runPipeline (step 3) is what
+  // guarantees a `plan`-clean schema also reads as drift-clean.
   const normClient = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
   try {
     await normalizePolicyExpressions(normClient, desired.tables);
+    await normalizeCheckExpressions(normClient, desired.tables);
+    await normalizeIndexWhereClauses(normClient, desired.tables);
+    await normalizeColumnDefaults(normClient, desired.tables);
+    await normalizeViewBodies(normClient, desired.views);
   } finally {
     normClient.release();
   }
