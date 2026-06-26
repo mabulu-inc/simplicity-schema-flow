@@ -559,7 +559,9 @@ function parsePartitions(raw: Record<string, unknown>, context: string): Partiti
   return def;
 }
 
-const TABLE_KEYS = [
+// Exported as the single source of truth for the set of accepted table-level
+// keys — the docs "Table-level keys" reference is kept in sync with it by test.
+export const TABLE_KEYS = [
   'table',
   'columns',
   'partition_by',
