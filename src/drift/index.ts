@@ -17,6 +17,7 @@ import {
   normalizePolicyRoles,
   normalizeTypeName,
   partitionsConverged,
+  serialSequenceWidth,
 } from '../planner/index.js';
 import type {
   TableSchema,
@@ -507,6 +508,21 @@ function driftColumns(table: string, desired: ColumnDef[], actual: ColumnDef[]):
           expected: dDefault ?? '(none)',
           actual: aDefault ?? '(none)',
           detail: `default: expected ${dDefault ?? '(none)'}, actual ${aDefault ?? '(none)'}`,
+        });
+      }
+      // Serial sequence width — a bigserial/serial/smallserial column's backing
+      // sequence must match its declared width. An in-place `ALTER COLUMN TYPE`
+      // widens the column but not the sequence, so a bigint column can be backed
+      // by an integer sequence that overflows at 2.1B (issue #66 follow-up).
+      const dSeqWidth = serialSequenceWidth(dc.type);
+      if (dSeqWidth && ac.sequence_type && ac.sequence_type !== dSeqWidth) {
+        items.push({
+          type: 'column',
+          object: `${table}.${dc.name}`,
+          status: 'different',
+          expected: dSeqWidth,
+          actual: ac.sequence_type,
+          detail: `sequence type: expected ${dSeqWidth}, actual ${ac.sequence_type}`,
         });
       }
       // Unique constraint name

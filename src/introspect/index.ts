@@ -633,7 +633,18 @@ async function getColumns(client: Client, table: string, schema: string): Promis
          WHERE con.contype = 'p'
            AND con.conrelid = c.oid
            AND a.attnum = ANY(con.conkey)
-       ) AS is_primary_key
+       ) AS is_primary_key,
+       -- Element type of the sequence this column auto-owns (serial columns).
+       -- ALTER COLUMN ... TYPE bigint widens the column but leaves the owned
+       -- sequence at its original width, so capture it to detect that drift.
+       (
+         SELECT seq.seqtypid::regtype::text
+         FROM pg_catalog.pg_depend dep
+         JOIN pg_catalog.pg_class s ON s.oid = dep.objid AND s.relkind = 'S'
+         JOIN pg_catalog.pg_sequence seq ON seq.seqrelid = s.oid
+         WHERE dep.refobjid = c.oid AND dep.refobjsubid = a.attnum AND dep.deptype = 'a'
+         LIMIT 1
+       ) AS sequence_type
      FROM pg_catalog.pg_class c
      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
      JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
@@ -661,6 +672,7 @@ async function getColumns(client: Client, table: string, schema: string): Promis
     }
     if (r.comment) col.comment = r.comment as string;
     if (r.is_generated && r.generation_expression) col.generated = r.generation_expression as string;
+    if (r.sequence_type) col.sequence_type = r.sequence_type as string;
 
     return col;
   });

@@ -39,6 +39,14 @@ export interface ColumnDef {
   references?: ForeignKeyRef;
   generated?: string;
   expand?: ExpandDef;
+  /**
+   * Introspection-only: the element type of the sequence a serial column owns
+   * (`integer` | `bigint` | `smallint`). Populated by `getColumns` when the
+   * column auto-owns a sequence; used by the planner/drift to detect a serial
+   * column whose backing sequence width no longer matches its declared type
+   * (an `ALTER COLUMN TYPE bigint` widens the column but not its sequence).
+   */
+  sequence_type?: string;
 }
 
 // ─── Index ──────────────────────────────────────────────────────

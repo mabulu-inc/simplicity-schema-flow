@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Foreign-key referential actions are now reconciled.** Changing a foreign
+  key's `on_delete`/`on_update` (or its target or deferrability) in the YAML is
+  now applied — schema-flow drops and re-adds the constraint, since Postgres has
+  no `ALTER` for it. Previously these were set only when a column was first
+  created, so a drifted referential action was reported by `drift` forever but
+  never fixed by `plan`/`run`. A referential-action change re-adds immediately
+  and is not destructive; removing a foreign key entirely is still gated behind
+  `--allow-destructive`.
+- **Serial sequence widths are now reconciled.** A `bigserial`/`smallserial`
+  column whose backing sequence no longer matches its declared width — e.g. a
+  `bigint` column left with an `integer` sequence after an in-place
+  `ALTER COLUMN … TYPE bigint`, which silently caps inserts at ~2.1 billion — is
+  now detected by `drift` and corrected by `plan`/`run` with `ALTER SEQUENCE …
+AS bigint`. The column type alone reads as converged, so this was previously
+  invisible to both commands.
+
 ### Fixed
 
 - **Policies, checks, and partial indexes that reference a `bigserial` or

@@ -8,6 +8,7 @@
 import type {
   TableSchema,
   ColumnDef,
+  ForeignKeyRef,
   IndexDef,
   IndexKey,
   CheckDef,
@@ -38,6 +39,7 @@ export type OperationType =
   | 'drop_table'
   | 'add_column'
   | 'alter_column'
+  | 'alter_sequence'
   | 'drop_column'
   // Indexes
   | 'add_index'
@@ -1323,34 +1325,7 @@ function alterTableOps(
 
       // FK for new column
       if (col.references) {
-        const ref = col.references;
-        const constraintName = ref.name || `fk_${desired.table}_${col.name}_${ref.table}`;
-        const onDelete = ref.on_delete || 'NO ACTION';
-        const onUpdate = ref.on_update || 'NO ACTION';
-        const refSchema = ref.schema || pgSchema;
-        let fkSql = `ALTER TABLE "${pgSchema}"."${desired.table}" ADD CONSTRAINT "${constraintName}" FOREIGN KEY ("${col.name}") REFERENCES "${refSchema}"."${ref.table}" ("${ref.column}") ON DELETE ${onDelete} ON UPDATE ${onUpdate}`;
-        if (ref.deferrable) {
-          fkSql += ref.initially_deferred ? ' DEFERRABLE INITIALLY DEFERRED' : ' DEFERRABLE INITIALLY IMMEDIATE';
-        }
-        // A partitioned parent rejects NOT VALID foreign keys — add it validated.
-        const fkPartitioned = !!desired.partition_by;
-        if (!fkPartitioned) fkSql += ' NOT VALID';
-        ops.push({
-          type: fkPartitioned ? 'add_foreign_key' : 'add_foreign_key_not_valid',
-          phase: 8,
-          objectName: `${desired.table}.${col.name}`,
-          sql: wrapConstraintIdempotent(constraintName, fkSql, `"${pgSchema}"."${desired.table}"`),
-          destructive: false,
-        });
-        if (!fkPartitioned) {
-          ops.push({
-            type: 'validate_constraint',
-            phase: 8,
-            objectName: `${desired.table}.${constraintName}`,
-            sql: `ALTER TABLE "${pgSchema}"."${desired.table}" VALIDATE CONSTRAINT "${constraintName}"`,
-            destructive: false,
-          });
-        }
+        ops.push(...addForeignKeyOps(desired.table, col.name, col.references, pgSchema, !!desired.partition_by));
       }
 
       if (col.comment) {
@@ -1364,7 +1339,7 @@ function alterTableOps(
       }
     } else {
       // Alter existing column if different
-      ops.push(...diffColumn(desired.table, col, existingCol, pgSchema));
+      ops.push(...diffColumn(desired.table, col, existingCol, pgSchema, !!desired.partition_by));
     }
   }
 
@@ -1458,7 +1433,103 @@ function alterTableOps(
   return ops;
 }
 
-function diffColumn(table: string, desired: ColumnDef, existing: ColumnDef, pgSchema: string): Operation[] {
+/**
+ * The integer width the sequence backing a serial column must have. Returns
+ * null for non-serial types. Used to detect a serial column whose owned
+ * sequence drifted from its declared width (e.g. a `bigserial` left with an
+ * `integer` sequence after an in-place `ALTER COLUMN ... TYPE bigint`, which
+ * would overflow at 2.1B). Exported so drift compares it the same way.
+ */
+export function serialSequenceWidth(type: string): string | null {
+  switch (type.toLowerCase()) {
+    case 'smallserial':
+    case 'serial2':
+      return 'smallint';
+    case 'serial':
+    case 'serial4':
+      return 'integer';
+    case 'bigserial':
+    case 'serial8':
+      return 'bigint';
+    default:
+      return null;
+  }
+}
+
+/** Default constraint name schema-flow gives an FK it creates. */
+function foreignKeyName(table: string, column: string, ref: ForeignKeyRef): string {
+  return ref.name || `fk_${table}_${column}_${ref.table}`;
+}
+
+/**
+ * Normalized signature of an FK reference for change-detection — the parts
+ * Postgres bakes into the constraint and that a change requires drop+re-add to
+ * alter (target, referential actions, deferrability). Deliberately excludes the
+ * constraint *name*: a name-only difference shouldn't churn an otherwise-correct
+ * FK, and when we do re-add we converge the name as a side effect.
+ */
+function foreignKeySignature(ref: ForeignKeyRef, pgSchema: string): string {
+  return [
+    ref.schema || pgSchema,
+    ref.table,
+    ref.column,
+    ref.on_delete || 'NO ACTION',
+    ref.on_update || 'NO ACTION',
+    ref.deferrable ? (ref.initially_deferred ? 'deferred' : 'deferrable') : 'not-deferrable',
+  ].join('|');
+}
+
+/**
+ * Operations to add a foreign key. On an ordinary table the FK is added
+ * `NOT VALID` then `VALIDATE`d in a second step (zero-downtime — VALIDATE takes
+ * only a SHARE UPDATE EXCLUSIVE lock, not the ACCESS EXCLUSIVE a plain ADD
+ * holds for the full scan). A partitioned parent rejects `NOT VALID`, so there
+ * it's added validated in one step. Shared by the new-column path and the
+ * existing-FK reconciliation in diffColumn.
+ */
+function addForeignKeyOps(
+  table: string,
+  column: string,
+  ref: ForeignKeyRef,
+  pgSchema: string,
+  partitioned: boolean,
+): Operation[] {
+  const ops: Operation[] = [];
+  const constraintName = foreignKeyName(table, column, ref);
+  const onDelete = ref.on_delete || 'NO ACTION';
+  const onUpdate = ref.on_update || 'NO ACTION';
+  const refSchema = ref.schema || pgSchema;
+  let fkSql = `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${constraintName}" FOREIGN KEY ("${column}") REFERENCES "${refSchema}"."${ref.table}" ("${ref.column}") ON DELETE ${onDelete} ON UPDATE ${onUpdate}`;
+  if (ref.deferrable) {
+    fkSql += ref.initially_deferred ? ' DEFERRABLE INITIALLY DEFERRED' : ' DEFERRABLE INITIALLY IMMEDIATE';
+  }
+  if (!partitioned) fkSql += ' NOT VALID';
+  ops.push({
+    type: partitioned ? 'add_foreign_key' : 'add_foreign_key_not_valid',
+    phase: 8,
+    objectName: `${table}.${column}`,
+    sql: wrapConstraintIdempotent(constraintName, fkSql, `"${pgSchema}"."${table}"`),
+    destructive: false,
+  });
+  if (!partitioned) {
+    ops.push({
+      type: 'validate_constraint',
+      phase: 8,
+      objectName: `${table}.${constraintName}`,
+      sql: `ALTER TABLE "${pgSchema}"."${table}" VALIDATE CONSTRAINT "${constraintName}"`,
+      destructive: false,
+    });
+  }
+  return ops;
+}
+
+function diffColumn(
+  table: string,
+  desired: ColumnDef,
+  existing: ColumnDef,
+  pgSchema: string,
+  partitioned = false,
+): Operation[] {
   const ops: Operation[] = [];
 
   // Type change
@@ -1515,6 +1586,58 @@ function diffColumn(table: string, desired: ColumnDef, existing: ColumnDef, pgSc
         sql: `ALTER TABLE "${pgSchema}"."${table}" ALTER COLUMN "${desired.name}" DROP DEFAULT`,
         destructive: false,
       });
+    }
+  }
+
+  // Serial sequence width — a serial/bigserial/smallserial column owns a
+  // sequence whose integer width must match the declared type. `ALTER COLUMN
+  // ... TYPE bigint` (the in-place bigserial widening) does NOT widen the owned
+  // sequence, so a column can end up `bigint` while its sequence is still
+  // `integer` and overflows at 2.1B. Reconcile via ALTER SEQUENCE. The
+  // column-type comparison above treats bigserial≡bigint, so this is the only
+  // place the sequence width is checked. (issue #66 follow-up)
+  const desiredSeqWidth = serialSequenceWidth(desired.type);
+  if (desiredSeqWidth && existing.sequence_type && existing.sequence_type !== desiredSeqWidth) {
+    ops.push({
+      type: 'alter_sequence',
+      phase: 6,
+      objectName: `${table}.${desired.name}`,
+      // Resolve the owned sequence by name at run time so a renamed sequence is
+      // still found; no-op if the column somehow owns none.
+      sql: `DO $$ DECLARE seq text; BEGIN seq := pg_get_serial_sequence('"${pgSchema}"."${table}"', '${desired.name}'); IF seq IS NOT NULL THEN EXECUTE 'ALTER SEQUENCE ' || seq || ' AS ${desiredSeqWidth}'; END IF; END $$`,
+      destructive: false,
+    });
+  }
+
+  // Foreign-key change — Postgres has no ALTER for an FK's target or
+  // referential actions, so any change is drop + re-add. The planner used to
+  // set FK actions only when a column was first created, leaving an existing
+  // FK whose on_delete/on_update (or target/deferrability) drifted from the
+  // YAML permanently unreconciled — `drift` would report it forever while
+  // `run` emitted nothing. Compare normalized signatures and converge.
+  const desiredRef = desired.references;
+  const existingRef = existing.references;
+  const desiredSig = desiredRef ? foreignKeySignature(desiredRef, pgSchema) : null;
+  const existingSig = existingRef ? foreignKeySignature(existingRef, pgSchema) : null;
+  if (desiredSig !== existingSig) {
+    if (existingRef) {
+      // Drop the live constraint by its actual name. Introspection only sets
+      // `name` when it differs from Postgres's own `<table>_<col>_fkey`
+      // default, so fall back to that.
+      const existingName = existingRef.name ?? `${table}_${desired.name}_fkey`;
+      ops.push({
+        type: 'drop_foreign_key',
+        phase: 8,
+        objectName: `${table}.${desired.name}`,
+        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${existingName}"`,
+        // A change re-adds immediately in the same phase, so it's not
+        // destructive. A pure removal (YAML dropped the FK) loses enforcement
+        // with nothing to replace it — gate that behind --allow-destructive.
+        destructive: !desiredRef,
+      });
+    }
+    if (desiredRef) {
+      ops.push(...addForeignKeyOps(table, desired.name, desiredRef, pgSchema, partitioned));
     }
   }
 

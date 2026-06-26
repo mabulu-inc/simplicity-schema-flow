@@ -10,6 +10,7 @@ const DESCRIPTIONS: Record<OperationType, string> = {
   drop_table: 'Dropped table',
   add_column: 'Added column',
   alter_column: 'Altered column',
+  alter_sequence: 'Altered sequence type',
   drop_column: 'Dropped column',
   // Indexes
   add_index: 'Added index',
@@ -88,6 +89,7 @@ const PRESENT_DESCRIPTIONS: Record<OperationType, string> = {
   drop_table: 'Drop table',
   add_column: 'Add column',
   alter_column: 'Alter column',
+  alter_sequence: 'Alter sequence type',
   drop_column: 'Drop column',
   add_index: 'Add index',
   drop_index: 'Drop index',
