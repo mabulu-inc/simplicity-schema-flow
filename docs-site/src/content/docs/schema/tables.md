@@ -61,20 +61,18 @@ indexes:
   - columns: [name]
     include: [email]
     opclass: text_pattern_ops
-
-checks:
-  - name: email_not_empty
-    expression: 'length(email) > 0'
-
-# Table-level unique constraints are declared under `indexes:` with
-# `as_constraint: true`. That's also the only place `deferrable:` is legal
-# (Postgres requires a constraint, not a bare unique index, for deferral).
-indexes:
+  # Table-level unique constraints are declared under `indexes:` with
+  # `as_constraint: true` — also the only place `deferrable:` is legal
+  # (Postgres requires a constraint, not a bare unique index, for deferral).
   - columns: [email, tenant_id]
     name: uq_users_email_tenant
     unique: true
     as_constraint: true
     nulls_not_distinct: true
+
+checks:
+  - name: email_not_empty
+    expression: 'length(email) > 0'
 
 triggers:
   - name: set_updated_at

@@ -73,12 +73,16 @@ columns:
 
 The `{table}` placeholder in any mixin string value is replaced with the consuming table's name. This ensures unique constraint/trigger/policy names across tables.
 
+In the mixin:
+
 ```yaml
-# In the mixin:
 triggers:
   - name: set_{table}_updated_at
+```
 
-# Applied to table "orders", becomes:
+Applied to table `orders`, becomes:
+
+```yaml
 triggers:
   - name: set_orders_updated_at
 ```

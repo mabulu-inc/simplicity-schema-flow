@@ -1,6 +1,8 @@
 import type { ConfigOverrides } from '../core/config.js';
 
-const VALID_COMMANDS = [
+// Exported as the source of truth for the CLI command set; the docs
+// cli/commands page is kept in sync with it by test.
+export const VALID_COMMANDS = [
   'run',
   'plan',
   'validate',

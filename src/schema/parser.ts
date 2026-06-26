@@ -100,7 +100,9 @@ function checkKeys(raw: Record<string, unknown>, allowed: readonly string[], con
 
 const FK_ACTIONS: readonly ForeignKeyAction[] = ['CASCADE', 'SET NULL', 'SET DEFAULT', 'RESTRICT', 'NO ACTION'];
 
-const COLUMN_KEYS = [
+// Exported as the source of truth for accepted column-level keys; the docs
+// "Columns" field reference is kept in sync with it by test.
+export const COLUMN_KEYS = [
   'name',
   'type',
   'nullable',
