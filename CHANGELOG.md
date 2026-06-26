@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`run --allow-destructive` now drops functions that exist in the database but
+  aren't declared in the schema.** Previously undeclared functions were reported
+  by `drift` but never removed by `plan`/`run`, so stale helper functions
+  lingered indefinitely. Extension-owned functions are never touched (they're
+  excluded at introspection), and the `DROP` carries the function's argument-type
+  signature so overloads are handled correctly. The drop is destructive (gated
+  behind `--allow-destructive`) and is **not** `CASCADE` — if something still
+  depends on the function it fails loudly rather than silently removing the
+  dependent.
+
 ## [0.16.1] - 2026-06-26
 
 ### Fixed

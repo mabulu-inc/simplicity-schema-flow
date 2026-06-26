@@ -805,6 +805,28 @@ function diffFunctions(
     }
   }
 
+  // Drop functions present in the database but not declared. Introspection
+  // already excludes extension-owned functions (pg_depend deptype 'e'), so they
+  // can never appear here. Matched by name (the model's identity) — a return-type
+  // or body change on a *declared* function is handled above, so it never reaches
+  // this path. The DROP carries the live arg-type signature so it's overload-safe.
+  // No CASCADE: unlike the return-type drop (which recreates dependents), this
+  // removes for good, so it must fail loudly if something still depends on it
+  // rather than silently cascade a live dependent away. Destructive → gated
+  // behind --allow-destructive.
+  const desiredNames = new Set(desired.map((f) => f.name));
+  for (const [name, fn] of actual) {
+    if (desiredNames.has(name)) continue;
+    const argTypes = (fn.args || []).map((a) => a.type).join(', ');
+    ops.push({
+      type: 'drop_function',
+      phase: 4,
+      objectName: name,
+      sql: `DROP FUNCTION IF EXISTS "${pgSchema}"."${name}"(${argTypes})`,
+      destructive: true,
+    });
+  }
+
   return ops;
 }
 
