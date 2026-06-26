@@ -1333,6 +1333,14 @@ function alterTableOps(
         ops.push(...addForeignKeyOps(desired.table, col.name, col.references, pgSchema, !!desired.partition_by));
       }
 
+      // UNIQUE for a column added to an existing table (createTableOps handles
+      // the fresh-table case inline; this is the ALTER ADD COLUMN case).
+      if (col.unique) {
+        ops.push(
+          ...createIndexOps(desired.table, columnUniqueIndex(desired.table, col), pgSchema, !!desired.partition_by),
+        );
+      }
+
       if (col.comment) {
         ops.push({
           type: 'set_comment',
@@ -1644,6 +1652,21 @@ function diffCompositeForeignKeys(
   return ops;
 }
 
+/**
+ * The constraint-backed unique index a column-level `unique: true` maps to. A
+ * column UNIQUE in Postgres is a unique *constraint* named `<table>_<col>_key`
+ * (or `unique_name`), so it routes through the same zero-downtime machinery as
+ * an `indexes:` entry with `as_constraint: true`.
+ */
+function columnUniqueIndex(table: string, col: ColumnDef): IndexDef {
+  return {
+    name: col.unique_name || `${table}_${col.name}_key`,
+    columns: [col.name],
+    unique: true,
+    as_constraint: true,
+  };
+}
+
 function diffColumn(
   table: string,
   desired: ColumnDef,
@@ -1760,6 +1783,25 @@ function diffColumn(
     if (desiredRef) {
       ops.push(...addForeignKeyOps(table, desired.name, desiredRef, pgSchema, partitioned));
     }
+  }
+
+  // Column-level UNIQUE change — like FK actions, the planner historically set
+  // this only when a column (or its table) was first created, so an existing
+  // column that gained or lost `unique: true` was never reconciled: `drift`
+  // reported it forever while `plan`/`run` emitted nothing (issue #66 follow-up).
+  // diffIndexes deliberately leaves column-level uniques to the column path, so
+  // this is the only place they are reconciled.
+  if (!!desired.unique && !existing.unique) {
+    ops.push(...createIndexOps(table, columnUniqueIndex(table, desired), pgSchema, partitioned));
+  } else if (!desired.unique && !!existing.unique) {
+    const name = existing.unique_name || `${table}_${desired.name}_key`;
+    ops.push({
+      type: 'drop_unique_constraint',
+      phase: 6,
+      objectName: `${table}.${name}`,
+      sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${name}"`,
+      destructive: true,
+    });
   }
 
   // Comment change

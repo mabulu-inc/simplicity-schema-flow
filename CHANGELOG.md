@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A column-level `unique: true` added to an existing column is now applied.**
+  Previously schema-flow created a column's unique constraint only when the whole
+  table was first created — declaring `unique: true` on a pre-existing column (or
+  adding a new `unique:` column to an existing table) was reported by `drift`
+  forever but never reconciled by `plan`/`run`. It now emits the constraint via
+  the same zero-downtime path as table-level unique indexes
+  (`CREATE UNIQUE INDEX CONCURRENTLY` + `ADD CONSTRAINT … USING INDEX`); removing
+  `unique:` drops it (gated behind `--allow-destructive`).
+
 ## [0.16.0] - 2026-06-26
 
 ### Added
