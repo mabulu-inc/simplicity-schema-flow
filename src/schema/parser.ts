@@ -1114,3 +1114,43 @@ export function parseViewFile(filePath: string): ViewSchema | MaterializedViewSc
 export function parseRoleFile(filePath: string): RoleSchema {
   return parseRole(readFileSync(filePath, 'utf-8'));
 }
+
+// ─── Key-set registry ──────────────────────────────────────────
+//
+// Every `*_KEYS` allowlist the parser enforces, in one place. The
+// docs-key-coverage test iterates this so a new configurable key cannot ship
+// without being documented, and a companion test asserts every `*_KEYS`
+// declared above is registered here (so none is forgotten).
+export const PARSER_KEY_SETS = {
+  TABLE_KEYS,
+  COLUMN_KEYS,
+  FK_REF_KEYS,
+  FK_DEF_KEYS,
+  FK_REFERENCES_KEYS,
+  EXPAND_KEYS,
+  INDEX_KEYS,
+  INDEX_COLUMN_EXPR_KEYS,
+  INDEX_COLUMN_BARE_KEYS,
+  TRIGGER_KEYS,
+  POLICY_KEYS,
+  GRANT_KEYS,
+  FUNCTION_GRANT_KEYS,
+  CHECK_KEYS,
+  EXCLUSION_KEYS,
+  EXCLUSION_ELEMENT_KEYS,
+  PRECHECK_KEYS,
+  PARTITION_BY_KEYS,
+  PARTITIONS_KEYS,
+  ENUM_KEYS,
+  FUNCTION_KEYS,
+  FUNCTION_ARG_KEYS,
+  VIEW_KEYS,
+  MATERIALIZED_VIEW_KEYS,
+  ROLE_KEYS,
+  EXTENSIONS_KEYS,
+  SCHEMA_GRANT_KEYS,
+  EXTENSION_REF_KEYS,
+  PARTITION_MAINTENANCE_KEYS,
+  MIXIN_KEYS,
+  EXTEND_KEYS,
+} as const satisfies Record<string, readonly string[]>;
