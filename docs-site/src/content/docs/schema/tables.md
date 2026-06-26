@@ -118,6 +118,34 @@ mixins:
 comment: 'Core user accounts table'
 ```
 
+## Table-level keys
+
+Every key a table file accepts. `table` and `columns` are required; the rest are
+optional. Each has its own section below or its own page.
+
+| Key                     | Type    | Description                                                                                                |
+| ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `table`                 | string  | Table name (required)                                                                                      |
+| `columns`               | list    | Column definitions — see [Columns](#columns) (required)                                                    |
+| `primary_key`           | list    | Composite primary key columns (alternative to column-level `primary_key`)                                  |
+| `primary_key_name`      | string  | Custom primary-key constraint name                                                                         |
+| `indexes`               | list    | Indexes, including table-level unique constraints (`as_constraint`)                                        |
+| `checks`                | list    | Named check constraints                                                                                    |
+| `foreign_keys`          | list    | Composite (multi-column) foreign keys — see [Composite foreign keys](#composite-foreign-keys)              |
+| `exclusion_constraints` | list    | Exclusion constraints                                                                                      |
+| `triggers`              | list    | Triggers                                                                                                   |
+| `rls`                   | boolean | Enable row-level security                                                                                  |
+| `force_rls`             | boolean | Force RLS for the table owner too                                                                          |
+| `policies`              | list    | RLS policies                                                                                               |
+| `grants`                | list    | Privilege grants                                                                                           |
+| `prechecks`             | list    | Pre-apply assertions that must hold before the migration runs                                              |
+| `seeds`                 | list    | Insert-only seed rows — see [Seeds](/simplicity-schema-flow/schema/seeds/)                                 |
+| `mixins`                | list    | Reusable column/constraint sets — see [Mixins](/simplicity-schema-flow/schema/mixins/)                     |
+| `partition_by`          | object  | Declarative partitioning — see [Partitioning](/simplicity-schema-flow/schema/partitioning/)                |
+| `partitions`            | object  | pg_partman rolling-partition maintenance                                                                   |
+| `bootstrap`             | boolean | Apply this table in the bootstrap transaction — see [Bootstrap](/simplicity-schema-flow/schema/bootstrap/) |
+| `comment`               | string  | Table comment (alias: `description`)                                                                       |
+
 ## Columns
 
 ### Required fields
@@ -177,6 +205,37 @@ references:
   deferrable: false
   initially_deferred: false
 ```
+
+Changing a foreign key's referential actions (`on_delete`/`on_update`), target,
+or deferrability is reconciled in place: PostgreSQL has no `ALTER` for these, so
+schema-flow drops and re-adds the constraint in the same run. (A change re-adds
+immediately and isn't treated as destructive; removing a foreign key entirely is
+gated behind `--allow-destructive`.)
+
+### Composite foreign keys
+
+A foreign key that spans **two or more columns** is declared in a table-level
+`foreign_keys:` block, using a local→referenced column `map` (so the two column
+lists can't fall out of alignment):
+
+```yaml
+foreign_keys:
+  - references: tenant_roles # table name, or { table, schema } for cross-schema
+    map: # localColumn: referencedColumn
+      tenant_id: t_id
+      role_id: r_id
+    on_delete: RESTRICT # optional — same actions as column-level references
+    on_update: CASCADE # optional
+    name: fk_user_roles_tenant_role # optional, auto-generated if omitted
+    deferrable: false # optional
+    initially_deferred: false # optional
+```
+
+The referenced columns must form a primary key or unique constraint on the
+target table. Single-column foreign keys belong on the column as `references:`
+(above) — a single-entry `map:` is rejected with a pointer to that form.
+Composite keys are introspected, diffed, reconciled, and `generate`-round-tripped
+just like single-column ones.
 
 ### Column-level check sugar
 

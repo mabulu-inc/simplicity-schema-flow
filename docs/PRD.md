@@ -349,6 +349,30 @@ All PostgreSQL types are supported. Common ones:
 | `RESTRICT`    | Prevent if children exist (immediate)         |
 | `NO ACTION`   | Prevent if children exist (deferred, default) |
 
+A foreign key's referential actions, target, or deferrability are reconciled in
+place (drop + re-add, since PostgreSQL offers no `ALTER` for them). A pure
+removal is gated behind `--allow-destructive`.
+
+#### Composite (Multi-Column) Foreign Keys
+
+A foreign key spanning two or more columns is declared in a table-level
+`foreign_keys:` block, using a local→referenced column `map`:
+
+```yaml
+foreign_keys:
+  - references: tenant_roles # table name, or { table, schema }
+    map: { tenant_id: t_id, role_id: r_id }
+    on_delete: RESTRICT
+    on_update: CASCADE
+    name: fk_user_roles_tenant_role # optional
+    deferrable: false
+    initially_deferred: false
+```
+
+Single-column foreign keys use column-level `references:`; a single-entry `map:`
+is rejected. Composite keys are introspected (all key columns), diffed,
+reconciled, and round-tripped by `generate`.
+
 #### Column-Level Check Sugar
 
 Columns support an inline `check` field as syntactic sugar:
@@ -916,7 +940,7 @@ interface DriftItem {
 
 - **Tables**: existence, columns (name, type, default, nullability, generated expressions)
 - **Indexes**: existence, columns (with optional per-column ASC/DESC and NULLS FIRST/LAST), uniqueness, method, partial conditions (WHERE), covering columns (INCLUDE), opclass
-- **Constraints**: checks (expression), foreign keys (actions, deferrable, initially_deferred), unique constraints, exclusion constraints (method, elements, partial WHERE)
+- **Constraints**: checks (expression), foreign keys (single- and multi-column, actions, deferrable, initially_deferred), unique constraints, exclusion constraints (method, elements, partial WHERE)
 - **Enums**: existence, values (order matters)
 - **Functions**: existence, body, args, return type, security, volatility, parallel, strict, leakproof, cost, rows, set params
 - **Views**: existence, query, options, triggers
