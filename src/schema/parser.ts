@@ -19,6 +19,7 @@ import type {
   FunctionGrantDef,
   PrecheckDef,
   ForeignKeyRef,
+  ForeignKeyDef,
   ForeignKeyAction,
   PartitionByDef,
   PartitionStrategy,
@@ -125,6 +126,72 @@ const FK_REF_KEYS = [
   'deferrable',
   'initially_deferred',
 ] as const;
+
+const FK_DEF_KEYS = [
+  'references',
+  'map',
+  'name',
+  'on_delete',
+  'on_update',
+  'deferrable',
+  'initially_deferred',
+] as const;
+
+const FK_REFERENCES_KEYS = ['table', 'schema'] as const;
+
+/**
+ * Parse a table-level composite foreign key. The author writes a local→referenced
+ * column `map:` (so the two column lists can't drift out of alignment) and a
+ * `references:` table (a bare table name, or `{ table, schema }`). Single-column
+ * foreign keys are not allowed here — they belong on the column as `references:`
+ * — so a map with fewer than two entries is a clear error.
+ */
+function parseForeignKeyDef(raw: Record<string, unknown>, validColumns: Set<string>, context: string): ForeignKeyDef {
+  checkKeys(raw, FK_DEF_KEYS, context);
+
+  if (raw.map == null || typeof raw.map !== 'object' || Array.isArray(raw.map)) {
+    throw new Error(`${context}: "map" is required and must be a { localColumn: referencedColumn } object`);
+  }
+  const map = raw.map as Record<string, unknown>;
+  const localColumns = Object.keys(map);
+  if (localColumns.length < 2) {
+    throw new Error(
+      `${context}: a table-level foreign key must span two or more columns. ` +
+        `For a single-column foreign key use column-level "references:" instead.`,
+    );
+  }
+  const referencedColumns = localColumns.map((c) => String(map[c]));
+  for (const col of localColumns) {
+    if (!validColumns.has(col)) {
+      throw new Error(`${context}.map: local column "${col}" is not a column of this table`);
+    }
+  }
+
+  // `references` is either a bare table name or { table, schema }.
+  let refTable: string;
+  let refSchema: string | undefined;
+  if (typeof raw.references === 'string') {
+    refTable = raw.references;
+  } else if (raw.references != null && typeof raw.references === 'object') {
+    const ref = raw.references as Record<string, unknown>;
+    checkKeys(ref, FK_REFERENCES_KEYS, `${context}.references`);
+    refTable = requireString(ref, 'table', `${context}.references`);
+    if (ref.schema !== undefined) refSchema = String(ref.schema);
+  } else {
+    throw new Error(`${context}: "references" is required (a table name, or { table, schema })`);
+  }
+
+  const fk: ForeignKeyDef = {
+    columns: localColumns,
+    references: { table: refTable, columns: referencedColumns, ...(refSchema ? { schema: refSchema } : {}) },
+  };
+  if (raw.name !== undefined) fk.name = String(raw.name);
+  if (raw.on_delete !== undefined) fk.on_delete = validateEnum(String(raw.on_delete), FK_ACTIONS, 'on_delete', context);
+  if (raw.on_update !== undefined) fk.on_update = validateEnum(String(raw.on_update), FK_ACTIONS, 'on_update', context);
+  if (raw.deferrable !== undefined) fk.deferrable = Boolean(raw.deferrable);
+  if (raw.initially_deferred !== undefined) fk.initially_deferred = Boolean(raw.initially_deferred);
+  return fk;
+}
 
 const EXPAND_KEYS = ['from', 'transform', 'reverse', 'batch_size'] as const;
 
@@ -501,6 +568,7 @@ const TABLE_KEYS = [
   'primary_key_name',
   'indexes',
   'checks',
+  'foreign_keys',
   'unique_constraints',
   'exclusion_constraints',
   'triggers',
@@ -547,6 +615,12 @@ export function parseTable(yamlStr: string): TableSchema {
     );
   if (raw.checks !== undefined)
     table.checks = (raw.checks as Record<string, unknown>[]).map((c, i) => parseCheckDef(c, `${ctx}.checks[${i}]`));
+  if (raw.foreign_keys !== undefined) {
+    const columnNames = new Set(table.columns.map((c) => c.name));
+    table.foreign_keys = (raw.foreign_keys as Record<string, unknown>[]).map((fk, i) =>
+      parseForeignKeyDef(fk, columnNames, `${ctx}.foreign_keys[${i}]`),
+    );
+  }
   if (raw.unique_constraints !== undefined) {
     // The `unique_constraints:` section was unified into `indexes:` in
     // schema-flow 0.8.0. Each former entry becomes an `indexes:` entry

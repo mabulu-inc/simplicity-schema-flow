@@ -22,6 +22,7 @@ import {
 import type {
   TableSchema,
   ColumnDef,
+  ForeignKeyDef,
   IndexDef,
   CheckDef,
   ExclusionConstraintDef,
@@ -354,6 +355,7 @@ function driftTables(desired: TableSchema[], actual: Map<string, TableSchema>): 
       items.push(...driftCompositePk(dt.table, dt, at));
       items.push(...driftColumns(dt.table, dt.columns, at.columns));
       items.push(...driftForeignKeys(dt.table, dt.columns, at.columns));
+      items.push(...driftCompositeForeignKeys(dt.table, dt.foreign_keys || [], at.foreign_keys || []));
       // driftIndexes covers both plain unique indexes and constraint-backed
       // ones (`as_constraint: true`). No separate driftUniqueConstraints —
       // the unification happens at the data-model level.
@@ -933,6 +935,59 @@ function driftForeignKeys(table: string, desired: ColumnDef[], actual: ColumnDef
       }
     }
   }
+  return items;
+}
+
+/** Match key for a composite FK — which local columns reference which target. */
+function compositeFkMatch(fk: ForeignKeyDef): string {
+  return [fk.columns.join(','), fk.references.schema || '', fk.references.table, fk.references.columns.join(',')].join(
+    '->',
+  );
+}
+
+/** Drift for table-level composite (multi-column) foreign keys. */
+function driftCompositeForeignKeys(table: string, desired: ForeignKeyDef[], actual: ForeignKeyDef[]): DriftItem[] {
+  const items: DriftItem[] = [];
+  const actualByMatch = new Map(actual.map((fk) => [compositeFkMatch(fk), fk]));
+  const desiredMatches = new Set(desired.map(compositeFkMatch));
+
+  for (const fk of desired) {
+    const label = `${table}.(${fk.columns.join(',')})`;
+    const target = `${fk.references.table}.(${fk.references.columns.join(',')})`;
+    const aFk = actualByMatch.get(compositeFkMatch(fk));
+    if (!aFk) {
+      items.push({ type: 'constraint', object: label, status: 'missing_in_db', detail: `composite FK -> ${target}` });
+      continue;
+    }
+    const diffs: string[] = [];
+    if ((fk.on_delete || 'NO ACTION') !== (aFk.on_delete || 'NO ACTION'))
+      diffs.push(`on_delete: expected ${fk.on_delete || 'NO ACTION'}, actual ${aFk.on_delete || 'NO ACTION'}`);
+    if ((fk.on_update || 'NO ACTION') !== (aFk.on_update || 'NO ACTION'))
+      diffs.push(`on_update: expected ${fk.on_update || 'NO ACTION'}, actual ${aFk.on_update || 'NO ACTION'}`);
+    if (Boolean(fk.deferrable) !== Boolean(aFk.deferrable)) diffs.push('deferrable');
+    else if (fk.deferrable && Boolean(fk.initially_deferred) !== Boolean(aFk.initially_deferred))
+      diffs.push('initially_deferred');
+    if (diffs.length > 0) {
+      items.push({
+        type: 'constraint',
+        object: label,
+        status: 'different',
+        detail: `composite FK ${diffs.join('; ')}`,
+      });
+    }
+  }
+
+  for (const fk of actual) {
+    if (!desiredMatches.has(compositeFkMatch(fk))) {
+      items.push({
+        type: 'constraint',
+        object: `${table}.(${fk.columns.join(',')})`,
+        status: 'missing_in_yaml',
+        detail: `composite FK -> ${fk.references.table}.(${fk.references.columns.join(',')}) exists in DB but not in YAML`,
+      });
+    }
+  }
+
   return items;
 }
 

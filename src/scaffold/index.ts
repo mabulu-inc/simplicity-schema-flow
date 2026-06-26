@@ -150,6 +150,31 @@ function buildTableYaml(table: TableSchema): Record<string, unknown> {
   if (table.primary_key) result.primary_key = table.primary_key;
   if (table.indexes && table.indexes.length > 0) result.indexes = table.indexes;
   if (table.checks && table.checks.length > 0) result.checks = table.checks;
+  if (table.foreign_keys && table.foreign_keys.length > 0) {
+    result.foreign_keys = table.foreign_keys.map((fk) => {
+      const map: Record<string, string> = {};
+      fk.columns.forEach((c, i) => {
+        map[c] = fk.references.columns[i];
+      });
+      const out: Record<string, unknown> = {
+        references: fk.references.schema
+          ? { table: fk.references.table, schema: fk.references.schema }
+          : fk.references.table,
+        map,
+      };
+      // Emit the name only when it deviates from the planner's default, so a
+      // scaffolded composite FK round-trips to a clean no-op.
+      const defaultName = `fk_${table.table}_${fk.columns.join('_')}_${fk.references.table}`;
+      if (fk.name && fk.name !== defaultName) out.name = fk.name;
+      if (fk.on_delete && fk.on_delete !== 'NO ACTION') out.on_delete = fk.on_delete;
+      if (fk.on_update && fk.on_update !== 'NO ACTION') out.on_update = fk.on_update;
+      if (fk.deferrable) {
+        out.deferrable = true;
+        if (fk.initially_deferred) out.initially_deferred = true;
+      }
+      return out;
+    });
+  }
   if (table.exclusion_constraints && table.exclusion_constraints.length > 0) {
     result.exclusion_constraints = table.exclusion_constraints;
   }

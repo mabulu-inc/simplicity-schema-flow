@@ -15,6 +15,28 @@ export interface ForeignKeyRef {
   initially_deferred?: boolean;
 }
 
+/**
+ * A composite (multi-column) foreign key. Single-column foreign keys are
+ * declared as column-level `references:` sugar; a foreign key that spans two or
+ * more columns belongs to the table, so it's declared in a table-level
+ * `foreign_keys:` block. `columns` and `references.columns` are positionally
+ * aligned (1:1, same length, ≥2) — the parser builds them from the YAML `map:`
+ * so authors never have to keep two arrays in sync.
+ */
+export interface ForeignKeyDef {
+  columns: string[];
+  references: {
+    table: string;
+    columns: string[];
+    schema?: string;
+  };
+  name?: string;
+  on_delete?: ForeignKeyAction;
+  on_update?: ForeignKeyAction;
+  deferrable?: boolean;
+  initially_deferred?: boolean;
+}
+
 // ─── Expand (zero-downtime column migration) ────────────────────
 
 export interface ExpandDef {
@@ -279,6 +301,8 @@ export interface TableSchema {
   primary_key_name?: string;
   indexes?: IndexDef[];
   checks?: CheckDef[];
+  /** Composite (multi-column) foreign keys. Single-column FKs use column-level `references:`. */
+  foreign_keys?: ForeignKeyDef[];
   exclusion_constraints?: ExclusionConstraintDef[];
   triggers?: TriggerDef[];
   rls?: boolean;

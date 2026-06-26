@@ -9,6 +9,7 @@ import type {
   TableSchema,
   ColumnDef,
   ForeignKeyRef,
+  ForeignKeyDef,
   IndexDef,
   IndexKey,
   CheckDef,
@@ -875,6 +876,10 @@ function diffTables(
     const tableOps = existing
       ? alterTableOps(desiredTable, existing, pgSchema, sequenceGrants, allowDestructive)
       : createTableOps(desiredTable, pgSchema, sequenceGrants);
+    // Composite (multi-column) foreign keys are table-level, so they're
+    // reconciled here for both new and existing tables (existing → undefined
+    // means every declared composite FK is added).
+    tableOps.push(...diffCompositeForeignKeys(desiredTable, existing, pgSchema));
     // A bootstrap table's entire op set (create, indexes, constraints, seeds)
     // runs in the bootstrap transaction. Tag here so the executor can route
     // them ahead of the main apply tx.
@@ -1520,6 +1525,122 @@ function addForeignKeyOps(
       destructive: false,
     });
   }
+  return ops;
+}
+
+/** Default constraint name for a composite FK schema-flow creates. */
+function compositeForeignKeyName(table: string, fk: ForeignKeyDef): string {
+  return fk.name || `fk_${table}_${fk.columns.join('_')}_${fk.references.table}`;
+}
+
+/** Match key — which local columns reference which target (name/action-independent). */
+function compositeForeignKeyMatch(fk: ForeignKeyDef, pgSchema: string): string {
+  return [
+    fk.columns.join(','),
+    fk.references.schema || pgSchema,
+    fk.references.table,
+    fk.references.columns.join(','),
+  ].join('->');
+}
+
+/** Full signature including referential actions + deferrability. */
+function compositeForeignKeySignature(fk: ForeignKeyDef, pgSchema: string): string {
+  return [
+    compositeForeignKeyMatch(fk, pgSchema),
+    fk.on_delete || 'NO ACTION',
+    fk.on_update || 'NO ACTION',
+    fk.deferrable ? (fk.initially_deferred ? 'deferred' : 'deferrable') : 'not-deferrable',
+  ].join('|');
+}
+
+/** Operations to add a composite foreign key (same NOT VALID + VALIDATE shape as the single-column path). */
+function addCompositeForeignKeyOps(
+  table: string,
+  fk: ForeignKeyDef,
+  pgSchema: string,
+  partitioned: boolean,
+): Operation[] {
+  const ops: Operation[] = [];
+  const name = compositeForeignKeyName(table, fk);
+  const onDelete = fk.on_delete || 'NO ACTION';
+  const onUpdate = fk.on_update || 'NO ACTION';
+  const refSchema = fk.references.schema || pgSchema;
+  const localCols = fk.columns.map((c) => `"${c}"`).join(', ');
+  const refCols = fk.references.columns.map((c) => `"${c}"`).join(', ');
+  let sql = `ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${name}" FOREIGN KEY (${localCols}) REFERENCES "${refSchema}"."${fk.references.table}" (${refCols}) ON DELETE ${onDelete} ON UPDATE ${onUpdate}`;
+  if (fk.deferrable)
+    sql += fk.initially_deferred ? ' DEFERRABLE INITIALLY DEFERRED' : ' DEFERRABLE INITIALLY IMMEDIATE';
+  if (!partitioned) sql += ' NOT VALID';
+  ops.push({
+    type: partitioned ? 'add_foreign_key' : 'add_foreign_key_not_valid',
+    phase: 8,
+    objectName: `${table}.${name}`,
+    sql: wrapConstraintIdempotent(name, sql, `"${pgSchema}"."${table}"`),
+    destructive: false,
+  });
+  if (!partitioned) {
+    ops.push({
+      type: 'validate_constraint',
+      phase: 8,
+      objectName: `${table}.${name}`,
+      sql: `ALTER TABLE "${pgSchema}"."${table}" VALIDATE CONSTRAINT "${name}"`,
+      destructive: false,
+    });
+  }
+  return ops;
+}
+
+/**
+ * Reconcile a table's composite (multi-column) foreign keys. Matches desired
+ * against existing by which columns reference which target (ignoring the
+ * constraint name), then adds missing ones, drops undeclared ones, and on a
+ * referential-action/deferrability change drops + re-adds. Single-column FKs
+ * are handled on their column via `references:`; this is only for `foreign_keys:`.
+ */
+function diffCompositeForeignKeys(
+  desired: TableSchema,
+  existing: TableSchema | undefined,
+  pgSchema: string,
+): Operation[] {
+  const ops: Operation[] = [];
+  const desiredFks = desired.foreign_keys || [];
+  const existingFks = existing?.foreign_keys || [];
+  if (desiredFks.length === 0 && existingFks.length === 0) return ops;
+
+  const partitioned = !!desired.partition_by;
+  const existingByMatch = new Map(existingFks.map((fk) => [compositeForeignKeyMatch(fk, pgSchema), fk]));
+  const desiredMatches = new Set(desiredFks.map((fk) => compositeForeignKeyMatch(fk, pgSchema)));
+
+  for (const fk of desiredFks) {
+    const existingFk = existingByMatch.get(compositeForeignKeyMatch(fk, pgSchema));
+    if (!existingFk) {
+      ops.push(...addCompositeForeignKeyOps(desired.table, fk, pgSchema, partitioned));
+    } else if (compositeForeignKeySignature(fk, pgSchema) !== compositeForeignKeySignature(existingFk, pgSchema)) {
+      const name = existingFk.name ?? compositeForeignKeyName(desired.table, existingFk);
+      ops.push({
+        type: 'drop_foreign_key',
+        phase: 8,
+        objectName: `${desired.table}.${name}`,
+        sql: `ALTER TABLE "${pgSchema}"."${desired.table}" DROP CONSTRAINT IF EXISTS "${name}"`,
+        destructive: false,
+      });
+      ops.push(...addCompositeForeignKeyOps(desired.table, fk, pgSchema, partitioned));
+    }
+  }
+
+  for (const fk of existingFks) {
+    if (!desiredMatches.has(compositeForeignKeyMatch(fk, pgSchema))) {
+      const name = fk.name ?? compositeForeignKeyName(desired.table, fk);
+      ops.push({
+        type: 'drop_foreign_key',
+        phase: 8,
+        objectName: `${desired.table}.${name}`,
+        sql: `ALTER TABLE "${pgSchema}"."${desired.table}" DROP CONSTRAINT IF EXISTS "${name}"`,
+        destructive: true,
+      });
+    }
+  }
+
   return ops;
 }
 

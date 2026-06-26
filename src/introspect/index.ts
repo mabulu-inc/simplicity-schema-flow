@@ -23,6 +23,7 @@ import type {
   RoleSchema,
   ForeignKeyAction,
   ForeignKeyRef,
+  ForeignKeyDef,
   PartitionByDef,
   PartitionStrategy,
   PartitionsDef,
@@ -484,30 +485,51 @@ export async function introspectTable(client: Client, tableName: string, schema:
   const partitionBy = await getPartitionBy(client, tableName, schema);
   const partitions = partitionBy ? await getPartitions(client, tableName, schema) : undefined;
 
-  // Merge FK info into columns
+  // Merge FK info: single-column FKs become column-level `references:` sugar
+  // (as before); composite FKs become table-level `foreign_keys:` entries.
+  const compositeForeignKeys: ForeignKeyDef[] = [];
   for (const fk of fkInfo) {
-    const col = columns.find((c) => c.name === fk.column);
-    if (col) {
-      const ref: ForeignKeyRef = {
-        table: fk.foreign_table,
-        column: fk.foreign_column,
+    if (fk.columns.length === 1) {
+      const col = columns.find((c) => c.name === fk.columns[0]);
+      if (col) {
+        const ref: ForeignKeyRef = {
+          table: fk.foreign_table,
+          column: fk.foreign_columns[0],
+          on_delete: fk.on_delete,
+          on_update: fk.on_update,
+        };
+        // Only set name if it differs from the default PostgreSQL pattern (table_column_fkey)
+        const defaultFkName = `${tableName}_${fk.columns[0]}_fkey`;
+        if (fk.constraint_name !== defaultFkName) {
+          ref.name = fk.constraint_name;
+        }
+        // Only set schema if it differs from the table's own schema
+        if (fk.foreign_schema !== schema) {
+          ref.schema = fk.foreign_schema;
+        }
+        if (fk.deferrable) {
+          ref.deferrable = true;
+          ref.initially_deferred = fk.initially_deferred;
+        }
+        col.references = ref;
+      }
+    } else {
+      const def: ForeignKeyDef = {
+        columns: fk.columns,
+        references: {
+          table: fk.foreign_table,
+          columns: fk.foreign_columns,
+          ...(fk.foreign_schema !== schema ? { schema: fk.foreign_schema } : {}),
+        },
+        name: fk.constraint_name,
         on_delete: fk.on_delete,
         on_update: fk.on_update,
       };
-      // Only set name if it differs from the default PostgreSQL pattern (table_column_fkey)
-      const defaultFkName = `${tableName}_${fk.column}_fkey`;
-      if (fk.constraint_name !== defaultFkName) {
-        ref.name = fk.constraint_name;
-      }
-      // Only set schema if it differs from the table's own schema
-      if (fk.foreign_schema !== schema) {
-        ref.schema = fk.foreign_schema;
-      }
       if (fk.deferrable) {
-        ref.deferrable = true;
-        ref.initially_deferred = fk.initially_deferred;
+        def.deferrable = true;
+        def.initially_deferred = fk.initially_deferred;
       }
-      col.references = ref;
+      compositeForeignKeys.push(def);
     }
   }
 
@@ -552,6 +574,7 @@ export async function introspectTable(client: Client, tableName: string, schema:
   if (compositePk.constraintName) result.primary_key_name = compositePk.constraintName;
   if (indexesAfterColumnMerge.length > 0) result.indexes = indexesAfterColumnMerge;
   if (checks.length > 0) result.checks = checks;
+  if (compositeForeignKeys.length > 0) result.foreign_keys = compositeForeignKeys;
   if (exclusionConstraints.length > 0) result.exclusion_constraints = exclusionConstraints;
   if (triggers.length > 0) result.triggers = triggers;
   if (policies.length > 0) result.policies = policies;
@@ -568,9 +591,9 @@ export async function introspectTable(client: Client, tableName: string, schema:
 
 interface FKInfo {
   constraint_name: string;
-  column: string;
+  columns: string[];
   foreign_table: string;
-  foreign_column: string;
+  foreign_columns: string[];
   foreign_schema: string;
   on_delete: ForeignKeyAction;
   on_update: ForeignKeyAction;
@@ -961,36 +984,41 @@ function splitTopLevelCommas(s: string): string[] {
 }
 
 async function getForeignKeys(client: Client, table: string, schema: string): Promise<FKInfo[]> {
+  // Read ALL constrained/referenced columns in key order (not just conkey[1]),
+  // so composite foreign keys are introspected faithfully rather than collapsed
+  // to their first column.
   const result = await client.query(
     `SELECT
        con.conname AS constraint_name,
-       a.attname AS column,
        cf.relname AS foreign_table,
-       af.attname AS foreign_column,
        nf.nspname AS foreign_schema,
        con.confdeltype AS on_delete,
        con.confupdtype AS on_update,
        con.condeferrable AS deferrable,
-       con.condeferred AS initially_deferred
+       con.condeferred AS initially_deferred,
+       (SELECT array_agg(a.attname::text ORDER BY k.ord)
+          FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+          JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS columns,
+       (SELECT array_agg(af.attname::text ORDER BY k.ord)
+          FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
+          JOIN pg_catalog.pg_attribute af ON af.attrelid = con.confrelid AND af.attnum = k.attnum) AS foreign_columns
      FROM pg_catalog.pg_constraint con
      JOIN pg_catalog.pg_class cls ON cls.oid = con.conrelid
      JOIN pg_catalog.pg_namespace ns ON ns.oid = cls.relnamespace
      JOIN pg_catalog.pg_class cf ON cf.oid = con.confrelid
      JOIN pg_catalog.pg_namespace nf ON nf.oid = cf.relnamespace
-     JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = con.conkey[1]
-     JOIN pg_catalog.pg_attribute af ON af.attrelid = con.confrelid AND af.attnum = con.confkey[1]
      WHERE con.contype = 'f'
        AND cls.relname = $1
        AND ns.nspname = $2
-     ORDER BY a.attname`,
+     ORDER BY con.conname`,
     [table, schema],
   );
 
   return result.rows.map((r: Record<string, unknown>) => ({
     constraint_name: r.constraint_name as string,
-    column: r.column as string,
+    columns: r.columns as string[],
     foreign_table: r.foreign_table as string,
-    foreign_column: r.foreign_column as string,
+    foreign_columns: r.foreign_columns as string[],
     foreign_schema: r.foreign_schema as string,
     on_delete: FK_ACTION_MAP[r.on_delete as string] || 'NO ACTION',
     on_update: FK_ACTION_MAP[r.on_update as string] || 'NO ACTION',

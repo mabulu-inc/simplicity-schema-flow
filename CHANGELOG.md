@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Composite (multi-column) foreign keys.** A foreign key spanning more than one
+  column can now be declared in a table-level `foreign_keys:` block using a
+  local→referenced column `map` (so the two column lists can't fall out of
+  alignment):
+
+  ```yaml
+  foreign_keys:
+    - references: tenant_roles
+      map: { tenant_id: t_id, role_id: r_id }
+      on_delete: RESTRICT
+  ```
+
+  Single-column foreign keys continue to use column-level `references:`.
+  schema-flow now introspects, diffs, reconciles (add / drop / referential-action
+  change), and `generate`-round-trips composite keys end to end. Previously the
+  introspector read only the first column of a composite key, so they were
+  invisible to `drift`/`plan`.
+
 - **Foreign-key referential actions are now reconciled.** Changing a foreign
   key's `on_delete`/`on_update` (or its target or deferrability) in the YAML is
   now applied — schema-flow drops and re-adds the constraint, since Postgres has
