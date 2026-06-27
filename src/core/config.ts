@@ -36,9 +36,9 @@ export interface SimplicitySchemaConfig {
   json: boolean;
   /**
    * Optional SQL file injected at the start of every executor transaction
-   * (pre-scripts, the main migrate+seeds tx, post-scripts, tighten). Intended
-   * for per-tx session settings — e.g. `SET LOCAL "app.user_id" = '...'` so
-   * audit triggers see a stable actor across the whole pipeline.
+   * (pre-scripts, each per-table DDL group, the seed tx, post-scripts, tighten).
+   * Intended for per-tx session settings — e.g. `SET LOCAL "app.user_id" = '...'`
+   * so audit triggers see a stable actor across the whole pipeline.
    */
   perTxSqlPath?: string;
   /**

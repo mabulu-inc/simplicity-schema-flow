@@ -21,9 +21,11 @@ pnpm dlx @smplcty/schema-flow run --db postgresql://user:pass@localhost:5432/myd
 1. You describe tables, enums, functions, views, roles, and extensions in YAML files under `schema/`
 2. The tool introspects your live PostgreSQL database
 3. It diffs desired state (YAML) vs actual state (DB) and produces a migration plan
-4. It executes the plan with safety rails: advisory locking, `NOT VALID` constraints, `CONCURRENTLY` indexes, transactional DDL
+4. It executes the plan with safety rails: advisory locking, `NOT VALID` constraints, `CONCURRENTLY` indexes, and **one lock-guarded transaction per table** so a migration never holds every table's lock at once
 
 No migration files to manage. No up/down scripts. Just declare the end state.
+
+**Zero-downtime by default** — schema-flow is built to migrate a live database without a maintenance window. It applies the diff as one transaction per table, each guarded by `lock_timeout` and retried on contention, instead of wrapping the whole migration in a single transaction that would acquire and hold `ACCESS EXCLUSIVE` on every table at once and freeze them behind live writers. There is no "online mode" to enable — this is simply how it runs. An interrupted migration leaves a valid partial schema; re-running recomputes the diff from live state and applies only what's left. See [zero-downtime patterns](https://mabulu-inc.github.io/simplicity-schema-flow/safety/zero-downtime/).
 
 **Idempotent pipeline** — Every generated DDL statement is safe to re-run. Running the pipeline twice with no schema changes produces no errors and no side-effects.
 

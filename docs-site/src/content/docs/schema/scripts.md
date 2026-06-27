@@ -5,7 +5,7 @@ description: SQL scripts that run before or after schema migration.
 
 ## `--per-tx-sql` (per-transaction prelude)
 
-A SQL file passed via `--per-tx-sql <path>` (or `perTxSqlPath` in `schema-flow.config.yaml`). The file is read once at executor startup and injected as the first statement after `BEGIN` in **every transaction the executor opens** — each pre-script, the main migrate+seeds transaction, each post-script, and each tighten transaction.
+A SQL file passed via `--per-tx-sql <path>` (or `perTxSqlPath` in `schema-flow.config.yaml`). The file is read once at executor startup and injected as the first statement after `BEGIN` in **every transaction the executor opens** — each pre-script, the bootstrap transaction, each per-table DDL group, the seed transaction, each post-script, and each tighten transaction.
 
 The intended use case is per-transaction session state that audit triggers or RLS policies depend on. PostgreSQL isolates session state across connections, and schema-flow uses a fresh client per phase, so a value set in (say) a pre-script is gone by the time seeds run. `--per-tx-sql` closes that gap.
 

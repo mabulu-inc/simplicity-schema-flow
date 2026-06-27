@@ -67,7 +67,9 @@ Destructive operations are separated into a `blocked` list unless `allowDestruct
 
 ### 6. Execute
 
-Run operations in phased order within transactions. See [execution phases](/simplicity-schema-flow/architecture/execution-phases/).
+Run operations in phased order, committing **one transaction per table** so a
+migration never holds every table's lock at once — each group is guarded by
+`lock_timeout` and retried on contention. See [execution phases](/simplicity-schema-flow/architecture/execution-phases/).
 
 Pre-scripts can mutate the database in ways the plan can't express (e.g. a
 column rename), so after they run the plan is recomputed against the new state

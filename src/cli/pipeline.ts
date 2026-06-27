@@ -157,6 +157,7 @@ export async function runPipeline(
     validateOnly,
     lockTimeout: config.lockTimeout,
     statementTimeout: config.statementTimeout,
+    maxRetries: config.maxRetries,
     logger,
     replanAfterPreScripts,
     perTxSqlPath: config.perTxSqlPath,
@@ -323,6 +324,7 @@ async function convergeAfterApply(
       pgSchema: config.pgSchema,
       lockTimeout: config.lockTimeout,
       statementTimeout: config.statementTimeout,
+      maxRetries: config.maxRetries,
       perTxSqlPath: config.perTxSqlPath,
       logger,
     });

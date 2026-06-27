@@ -10,15 +10,22 @@ description: What schema-flow is and how it works.
 1. You describe tables, enums, functions, views, roles, and extensions in YAML files under `schema/`
 2. The tool introspects your live PostgreSQL database via `pg_catalog` and `information_schema`
 3. It diffs desired state (YAML) vs actual state (DB) and produces a migration plan
-4. It executes the plan with safety rails: advisory locking, `NOT VALID` constraints, `CONCURRENTLY` indexes, transactional DDL
+4. It executes the plan with safety rails: advisory locking, `NOT VALID` constraints, `CONCURRENTLY` indexes, and **one lock-guarded transaction per table** so a migration never holds every table's lock at once
 
 No migration files to manage. No up/down scripts. Just declare the end state.
+
+schema-flow is built for **zero-downtime migrations against a live database**.
+It applies the diff as one transaction per table — each guarded by `lock_timeout`
+and retried on contention — rather than wrapping the whole migration in a single
+transaction that would freeze every table it touches. There is no maintenance
+window to schedule and no "online mode" to remember; this is simply how it runs.
+See [zero-downtime patterns](/simplicity-schema-flow/safety/zero-downtime/).
 
 ## Design principles
 
 - **Declarative** -- Describe _what_ the database should look like, not _how_ to get there
 - **Safe by default** -- Destructive operations blocked unless explicitly allowed; advisory locking prevents concurrent runs
-- **Zero-downtime capable** -- `NOT VALID` constraints, `CONCURRENTLY` indexes, expand/contract column migrations
+- **Zero-downtime by default** -- one lock-guarded transaction per table, plus `NOT VALID` constraints, `CONCURRENTLY` indexes, and expand/contract column migrations
 - **Convention over configuration** -- Works out of the box with a standard `schema/` directory layout
 - **Clean internals** -- Tool state lives in a dedicated `_smplcty_schema_flow` PostgreSQL schema, separate from user objects
 - **Dual interface** -- Full CLI for operators + TypeScript API for programmatic use

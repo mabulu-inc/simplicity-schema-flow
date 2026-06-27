@@ -27,8 +27,9 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
   <Card title="Safe by default" icon="approve-check">
     Destructive operations blocked unless explicitly allowed. Advisory locking prevents concurrent runs.
   </Card>
-  <Card title="Zero-downtime capable" icon="rocket">
-    NOT VALID constraints, CONCURRENTLY indexes, expand/contract column migrations.
+  <Card title="Zero-downtime by default" icon="rocket">
+    One lock-guarded transaction per table — never a single transaction that freezes every table. Plus NOT VALID
+    constraints, CONCURRENTLY indexes, expand/contract migrations.
   </Card>
   <Card title="Dual interface" icon="setting">
     Full CLI for operators. TypeScript API for programmatic use. Testing helpers for integration tests.

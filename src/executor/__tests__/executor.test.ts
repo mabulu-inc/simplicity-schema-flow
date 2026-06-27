@@ -299,7 +299,47 @@ describe('Executor', () => {
       }
     });
 
-    it('should rollback on error during execution', async () => {
+    it('rolls back the failing table group atomically', async () => {
+      // Both ops target the same table, so they share one per-table group
+      // transaction. When the second statement fails the whole group rolls
+      // back — the table created by the first statement must not survive.
+      const ops: Operation[] = [
+        {
+          type: 'create_table',
+          phase: 6,
+          objectName: 'grouped_table',
+          sql: `CREATE TABLE "${testSchema}"."grouped_table" ("id" integer)`,
+          destructive: false,
+        },
+        {
+          type: 'add_column',
+          phase: 6,
+          objectName: 'grouped_table.bad',
+          sql: `ALTER TABLE "${testSchema}"."grouped_table" ADD COLUMN INVALID SQL HERE`,
+          destructive: false,
+        },
+      ];
+
+      await expect(execute({ connectionString: DATABASE_URL, operations: ops, logger })).rejects.toThrow();
+
+      const pool = getPool(DATABASE_URL);
+      const client = await pool.connect();
+      try {
+        const res = await client.query(
+          `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'grouped_table'`,
+          [testSchema],
+        );
+        expect(res.rows.length).toBe(0);
+      } finally {
+        client.release();
+      }
+    });
+
+    it('commits already-applied table groups before a later group fails (partial apply, converges on re-run)', async () => {
+      // Distinct tables are distinct per-table groups: each commits as soon as
+      // it succeeds, so the migration never holds every table's lock at once.
+      // A later failure therefore leaves earlier tables committed — a valid
+      // intermediate schema that re-running converges, not a rollback.
       const ops: Operation[] = [
         {
           type: 'create_table',
@@ -319,17 +359,55 @@ describe('Executor', () => {
 
       await expect(execute({ connectionString: DATABASE_URL, operations: ops, logger })).rejects.toThrow();
 
-      // good_table should NOT exist (transaction rolled back)
       const pool = getPool(DATABASE_URL);
       const client = await pool.connect();
       try {
-        const res = await client.query(
+        // good_table's group committed before bad_table's group failed.
+        const good = await client.query(
           `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'good_table'`,
           [testSchema],
         );
-        expect(res.rows.length).toBe(0);
+        expect(good.rows.length).toBe(1);
+
+        // bad_table never made it.
+        const bad = await client.query(
+          `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'bad_table'`,
+          [testSchema],
+        );
+        expect(bad.rows.length).toBe(0);
       } finally {
         client.release();
+      }
+
+      // Re-running with a corrected plan converges: good_table already exists
+      // (skipped via IF NOT EXISTS), bad_table is created.
+      const fixed: Operation[] = [
+        {
+          type: 'create_table',
+          phase: 6,
+          objectName: 'good_table',
+          sql: `CREATE TABLE IF NOT EXISTS "${testSchema}"."good_table" ("id" integer)`,
+          destructive: false,
+        },
+        {
+          type: 'create_table',
+          phase: 6,
+          objectName: 'bad_table',
+          sql: `CREATE TABLE IF NOT EXISTS "${testSchema}"."bad_table" ("id" integer)`,
+          destructive: false,
+        },
+      ];
+      await execute({ connectionString: DATABASE_URL, operations: fixed, logger });
+
+      const after = await pool.connect();
+      try {
+        const res = await after.query(
+          `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('good_table','bad_table') ORDER BY table_name`,
+          [testSchema],
+        );
+        expect(res.rows.map((r) => r.table_name)).toEqual(['bad_table', 'good_table']);
+      } finally {
+        after.release();
       }
     });
 

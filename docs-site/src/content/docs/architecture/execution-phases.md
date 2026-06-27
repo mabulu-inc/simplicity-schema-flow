@@ -28,11 +28,46 @@ Operations execute in strict dependency order. This ensures PostgreSQL dependenc
 
 ## Transaction boundaries
 
-- Phases 0-6 and 8-16 run within a transaction (atomic commit or rollback)
-- Phase 7 (indexes) runs outside the transaction because `CREATE INDEX CONCURRENTLY` cannot run inside a transaction
-- If any transactional phase fails, all changes in that transaction roll back
-- Ops belonging to a [bootstrap table](/simplicity-schema-flow/schema/tables/#bootstrap-phase) (`bootstrap: true`) are split into a separate transaction that commits **before** the main apply tx, so per-tx hooks opening the main tx can resolve the rows seeded there. The bootstrap tx additionally sets `smplcty.bootstrap = 'true'` plus any `bootstrapSession` GUCs
-- `--per-tx-sql <path>` (if set) is injected as the first statement after `BEGIN` in every executor transaction — pre-scripts, the bootstrap tx, the main migrate+seeds tx, post-scripts, and tighten — so `SET LOCAL` values are visible to everything that runs in the same tx
+schema-flow applies the declarative diff as **one transaction per table**, not
+one transaction for the whole migration. This is what makes it safe to run
+against a live database: a single transaction spanning the whole diff would
+acquire `ACCESS EXCLUSIVE` on every table it touches and hold all of those locks
+until the final commit — queuing behind any active write and freezing every
+table behind it for the duration. Per-table groups hold each table's lock only
+for that table's handful of statements, then commit and release.
+
+- The DDL diff is split into transaction groups: a new group starts whenever the
+  table changes, so each group's lock footprint is a **single table**. Naturally
+  atomic same-table pairs stay together — e.g. `DROP CONSTRAINT fk` immediately
+  followed by `ADD CONSTRAINT fk … NOT VALID` land in one group.
+- Each group runs with `lock_timeout` set (`--lock-timeout`, default `5000`ms) so
+  a blocked group **aborts cleanly instead of queuing** and freezing the table
+  behind it. An aborted group is retried with exponential backoff
+  (`--max-retries`, default `3`); under live traffic each brief lock slips
+  through a micro-gap within a few attempts. Exhausting the retries fails the run
+  with the contended table named.
+- **Seeds** run in their own atomic transaction after the DDL groups — they are
+  insert-only and take row locks, not the table-level locks that make DDL the
+  contention problem.
+- Phase 7 (indexes) runs outside any transaction because `CREATE INDEX
+CONCURRENTLY` cannot run inside one.
+- Per-column `NOT NULL` tightening runs after post-scripts, each column in its
+  own transaction.
+- Ops belonging to a [bootstrap table](/simplicity-schema-flow/schema/tables/#bootstrap-phase) (`bootstrap: true`) are split into a separate transaction that commits **before** the main apply, so per-tx hooks opening later transactions can resolve the rows seeded there. The bootstrap tx additionally sets `smplcty.bootstrap = 'true'` plus any `bootstrapSession` GUCs
+- `--per-tx-sql <path>` (if set) is injected as the first statement after `BEGIN` in every executor transaction — pre-scripts, the bootstrap tx, each per-table group, the seed tx, post-scripts, and tighten — so `SET LOCAL` values are visible to everything that runs in the same tx
+- `validate` is the exception: it applies the **entire** diff in one transaction and rolls it back, because all-or-nothing apply-then-discard is exactly what validation checks.
+
+### Failure recovery: re-run to converge
+
+Because each table commits independently, an interrupted migration leaves a
+**partially-applied schema** — earlier tables committed, the rest not yet
+applied. This is by design, and it is a strength: schema-flow is declarative and
+every statement is guarded (`IF [NOT] EXISTS`, `NOT VALID`, idempotent
+reconciles), so a partial apply is always a **valid intermediate schema**, never
+a corrupt one. Re-running recomputes the diff from live state, skips what already
+landed, and applies only what's left. Recovery is a re-run, not manual surgery —
+which is precisely why per-table commits are safe here when they would not be for
+an imperative migration tool.
 
 ## Post-apply convergence
 

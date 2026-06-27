@@ -28,6 +28,15 @@ export interface ExecuteOptions {
   validateOnly?: boolean;
   lockTimeout?: number;
   statementTimeout?: number;
+  /**
+   * Number of attempts for a declarative DDL transaction that aborts because it
+   * could not acquire its lock within `lockTimeout` (Postgres `55P03`). Each
+   * attempt is a fresh, small per-table transaction retried with exponential
+   * backoff so a brief lock slips through a micro-gap under live traffic.
+   * Defaults to 3 (the shared `maxRetries` config). Exhausting it fails the run
+   * with the contended table named — re-running converges what already landed.
+   */
+  maxRetries?: number;
   logger?: Logger;
   /**
    * Optional callback invoked after pre-scripts execute. Returns the operation
@@ -40,9 +49,10 @@ export interface ExecuteOptions {
   replanAfterPreScripts?: () => Promise<Operation[]>;
   /**
    * Optional path to a SQL file injected at the **start of every executor
-   * transaction** — each pre-script tx, the main migrate+seeds tx, each
-   * post-script tx, and each tighten tx. Reads the file once at executor
-   * startup and runs the same SQL on each fresh client right after `BEGIN`.
+   * transaction** — each pre-script tx, the bootstrap tx, each per-table DDL
+   * group, the seed tx, each post-script tx, and each tighten tx. Reads the file
+   * once at executor startup and runs the same SQL on each fresh client right
+   * after `BEGIN`.
    *
    * Intended for per-transaction session settings that audit triggers or RLS
    * policies depend on, e.g. `SET LOCAL "app.user_id" = '...'`. PostgreSQL
@@ -183,6 +193,46 @@ export async function reindexInvalid(client: pg.PoolClient, schema = 'public', l
   return invalid.length;
 }
 
+/** Postgres error code raised when `lock_timeout` fires before a lock is free. */
+const LOCK_NOT_AVAILABLE = '55P03';
+
+function errorCode(err: unknown): string | undefined {
+  return err && typeof err === 'object' && 'code' in err ? (err as { code?: string }).code : undefined;
+}
+
+/**
+ * Lock-group key for an operation — the object (table) name up to the first
+ * dot. The planner names every table-scoped op `"<table>"` or
+ * `"<table>.<detail>"` uniformly, so this collapses every op touching one table
+ * to a single key. The declarative diff is applied as one transaction per
+ * *consecutive run* of same-key ops, so each transaction's lock footprint is a
+ * single table — held only for that group, not for the whole migration.
+ */
+export function lockGroupKey(op: Operation): string {
+  return op.objectName.split('.')[0];
+}
+
+/**
+ * Cut a phase-sorted op list into transaction groups: a new group starts
+ * whenever the lock-group key changes. Consecutive runs (not a global
+ * regroup-by-table) so the planner's strict phase ordering is preserved —
+ * a later-phase op never jumps ahead of an earlier-phase dependency. Naturally
+ * atomic same-phase pairs (e.g. `DROP CONSTRAINT fk` + `ADD … fk NOT VALID`,
+ * both phase 8 and emitted adjacently) land in the same group.
+ */
+export function groupByLockKey(ops: Operation[]): Operation[][] {
+  const groups: Operation[][] = [];
+  for (const op of ops) {
+    const last = groups[groups.length - 1];
+    if (last && lockGroupKey(last[0]) === lockGroupKey(op)) {
+      last.push(op);
+    } else {
+      groups.push([op]);
+    }
+  }
+  return groups;
+}
+
 interface SeedResult {
   inserted: number;
   unchanged: number;
@@ -291,6 +341,72 @@ WHERE NOT EXISTS (
   return { inserted, unchanged };
 }
 
+interface OnlineGroupContext {
+  connectionString: string;
+  pgSchema: string;
+  lockTimeout?: number;
+  statementTimeout?: number;
+  perTxSql: string | null;
+  maxRetries: number;
+  logger?: Logger;
+  result: ExecuteResult;
+}
+
+/**
+ * Apply one per-table transaction group, retrying the whole (small) group with
+ * exponential backoff when it aborts on `lock_timeout`. Because each group
+ * touches a single table, a contended lock only ever costs that table's group
+ * a retry — never the whole migration. `result` is updated only after COMMIT,
+ * so a failed-and-rolled-back attempt is never counted as executed.
+ */
+async function runOnlineGroup(group: Operation[], ctx: OnlineGroupContext): Promise<void> {
+  const { connectionString, pgSchema, lockTimeout, statementTimeout, perTxSql, maxRetries, logger, result } = ctx;
+  const table = lockGroupKey(group[0]);
+  let delay = 100;
+
+  for (let attempt = 1; ; attempt++) {
+    const client = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
+    try {
+      await client.query('BEGIN');
+      if (perTxSql) await client.query(perTxSql);
+
+      for (const op of group) {
+        logger?.debug(`Executing (tx "${table}"): ${op.type} ${op.objectName}`);
+        await withOpContext(op, () => client.query(op.sql));
+        // Expand-state row must commit atomically with the trigger that created
+        // it — both live in this same per-table group transaction.
+        if (op.type === 'create_dual_write_trigger' && op.expandMeta) {
+          await recordExpandState(client, op.expandMeta);
+        }
+      }
+
+      await client.query('COMMIT');
+      for (const op of group) {
+        result.executed++;
+        result.executedOperations.push(op);
+      }
+      return;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      if (errorCode(err) === LOCK_NOT_AVAILABLE && attempt < maxRetries) {
+        logger?.info(`Lock busy on "${table}" (attempt ${attempt}/${maxRetries}); retrying in ${delay}ms`);
+        await sleep(delay);
+        delay = Math.min(delay * 2, 2_000);
+        continue;
+      }
+      if (errorCode(err) === LOCK_NOT_AVAILABLE && err instanceof Error) {
+        err.message =
+          `Could not acquire lock on table "${table}" after ${attempt} attempt(s) ` +
+          `(lock_timeout=${lockTimeout ?? 'unset'}ms). Another session held a conflicting lock. ` +
+          `Re-run to converge — already-committed groups are skipped.\n  ${err.message}`;
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+}
+
 /**
  * Execute a migration plan.
  *
@@ -306,6 +422,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     validateOnly = false,
     lockTimeout,
     statementTimeout,
+    maxRetries = 3,
     logger,
     replanAfterPreScripts,
     perTxSqlPath,
@@ -527,8 +644,23 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
         }
       }
 
-      // Run transactional operations in a transaction
-      if (transactionalOps.length > 0) {
+      // Apply the declarative diff.
+      //
+      // Validate mode keeps the whole diff in ONE transaction and rolls it back
+      // — that all-or-nothing apply-then-discard *is* the validate contract, and
+      // it can't be expressed incrementally.
+      //
+      // A real apply instead commits the diff as one transaction *per table*
+      // (per-table groups, each guarded by `lock_timeout` and retried on lock
+      // contention), then runs seeds in their own atomic transaction. Holding
+      // every table's `ACCESS EXCLUSIVE` until a single final commit is what
+      // freezes a live database; per-table groups hold each lock only
+      // momentarily. The tradeoff — a failure leaves a partially-applied schema
+      // — is recovered by re-running, which recomputes the diff from live state
+      // and applies only what's left. That convergence is the design, not a
+      // fallback: schema-flow is declarative and every statement is guarded, so
+      // an interrupted run is a valid intermediate schema, never corruption.
+      if (transactionalOps.length > 0 && validateOnly) {
         const opClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
         try {
           await opClient.query('BEGIN');
@@ -544,9 +676,6 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
                 await opClient.query(op.sql);
               }
             });
-            // Record expand state once the trigger is in place; the column has
-            // already been created earlier in this transaction. Idempotent —
-            // re-runs ON CONFLICT DO NOTHING.
             if (op.type === 'create_dual_write_trigger' && op.expandMeta) {
               await recordExpandState(opClient, op.expandMeta);
             }
@@ -554,17 +683,58 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
             result.executedOperations.push(op);
           }
 
-          if (validateOnly) {
-            await opClient.query('ROLLBACK');
-            logger?.info('Validate mode: all operations executed successfully, rolled back');
-          } else {
-            await opClient.query('COMMIT');
-          }
+          await opClient.query('ROLLBACK');
+          logger?.info('Validate mode: all operations executed successfully, rolled back');
         } catch (err) {
           await opClient.query('ROLLBACK').catch(() => {});
           throw err;
         } finally {
           opClient.release();
+        }
+      } else if (transactionalOps.length > 0) {
+        const ddlOps = transactionalOps.filter((op) => op.type !== 'seed_table');
+        const seedOps = transactionalOps.filter((op) => op.type === 'seed_table');
+
+        // DDL: one transaction per consecutive same-table run, lock-guarded.
+        const groups = groupByLockKey(ddlOps);
+        const ctx: OnlineGroupContext = {
+          connectionString,
+          pgSchema,
+          lockTimeout,
+          statementTimeout,
+          perTxSql,
+          maxRetries,
+          logger,
+          result,
+        };
+        for (const group of groups) {
+          await runOnlineGroup(group, ctx);
+        }
+
+        // Seeds: insert-only and atomicity-sensitive, so they stay together in
+        // one transaction (they take row locks, not the table-level locks that
+        // make DDL the contention problem).
+        if (seedOps.length > 0) {
+          const seedClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
+          try {
+            await seedClient.query('BEGIN');
+            if (perTxSql) await seedClient.query(perTxSql);
+            for (const op of seedOps) {
+              logger?.debug(`Seeding: ${op.objectName}`);
+              await withOpContext(op, async () => {
+                const counts = await executeSeedTable(seedClient, op, pgSchema);
+                op.seedResult = counts;
+              });
+              result.executed++;
+              result.executedOperations.push(op);
+            }
+            await seedClient.query('COMMIT');
+          } catch (err) {
+            await seedClient.query('ROLLBACK').catch(() => {});
+            throw err;
+          } finally {
+            seedClient.release();
+          }
         }
       }
 

@@ -3,6 +3,48 @@ title: Zero-downtime patterns
 description: How schema-flow avoids locking and downtime during migrations.
 ---
 
+Zero-downtime is not a mode you opt into — it is how schema-flow applies every
+migration. The lock-friendly SQL below (`NOT VALID` foreign keys, `CONCURRENTLY`
+indexes, safe `NOT NULL`) is only half the story; the other half is **how those
+statements are committed**, which is what the per-table transaction model
+guarantees.
+
+## Per-table transactions
+
+A migration is applied as **one transaction per table**, each guarded by
+`lock_timeout` and retried on contention. It is never wrapped in a single
+transaction spanning the whole diff.
+
+That distinction is the whole game. Lock-friendly DDL generation is wasted if
+every statement runs inside one giant transaction: that transaction acquires
+`ACCESS EXCLUSIVE` on every table it touches and **holds all of those locks
+until the final commit**. Under live traffic it queues behind an active write,
+and a queued `ACCESS EXCLUSIVE` lock blocks every subsequent query on that
+table — freezing it for the entire migration. Splitting per table means each
+lock is held only for that table's handful of statements, then released.
+
+```text
+ALTER TABLE orders …      ┐ one transaction, lock_timeout set,
+ALTER TABLE orders …      ┘ retried with backoff if "orders" is busy
+ALTER TABLE items  …      ┐ next table → next transaction
+ALTER TABLE items  …      ┘
+```
+
+- **`lock_timeout` per group** (`--lock-timeout`, default `5000`ms): a blocked
+  group aborts cleanly instead of queuing and freezing the table behind it.
+- **Retry with backoff** (`--max-retries`, default `3`): under live traffic each
+  brief lock slips through a micro-gap within a few attempts. Exhausting the
+  retries fails the run with the contended table named.
+- **Re-run to converge**: an interrupted migration leaves a valid partial schema
+  (earlier tables committed). Re-running recomputes the diff from live state and
+  applies only what's left — every statement is idempotent, so this is recovery
+  by re-run, not manual surgery. See
+  [failure recovery](/simplicity-schema-flow/architecture/execution-phases/#failure-recovery-re-run-to-converge).
+
+The result: large migrations thread through live writers without a maintenance
+window. There is no single-transaction switch to forget, and no separate "online
+mode" — this is the default and only behaviour.
+
 ## Foreign keys: NOT VALID + VALIDATE
 
 Foreign keys are added in two steps to avoid full table scans under lock:

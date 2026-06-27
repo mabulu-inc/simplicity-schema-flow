@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Migrations now apply as one transaction per table instead of one
+  transaction for the entire diff.** A single transaction spanning the whole
+  migration acquired `ACCESS EXCLUSIVE` on every table it touched and held all of
+  those locks until the final commit — under live traffic it queued behind active
+  writes and froze every affected table for the migration's duration, so large
+  migrations effectively required a maintenance window. schema-flow now commits a
+  separate, lock-guarded transaction per table: each holds its lock only
+  momentarily, naturally-atomic pairs (e.g. drop-and-re-add of a foreign key)
+  stay together, and the migration threads through live writers without
+  downtime. This is the default and only behaviour — there is no flag to set.
+  - Each per-table transaction runs with `lock_timeout` (`--lock-timeout`,
+    default `5000`ms) and retries with exponential backoff on lock contention
+    (`--max-retries`, default `3`); exhausting the retries fails the run with the
+    contended table named.
+  - Seeds continue to run together in their own atomic transaction.
+  - Because tables commit independently, an interrupted migration leaves a valid
+    partial schema rather than rolling everything back. Re-running recomputes the
+    diff from live state and applies only what's left — recovery is a re-run, not
+    manual repair. (`validate` still applies the whole diff in one transaction
+    and rolls it back, since that all-or-nothing check is its purpose.)
+
 ## [0.17.0] - 2026-06-26
 
 ### Added

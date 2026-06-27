@@ -91,8 +91,9 @@ columns:
     }
   });
 
-  // (2) Transactional rollback — migration with invalid SQL rolls back all changes
-  it('rolls back all changes when migration encounters invalid SQL', async () => {
+  // (2) Per-table groups commit independently — a failure on one table leaves
+  //     already-applied tables in place; re-running converges the rest.
+  it('commits applied table groups and converges on re-run after an invalid-SQL failure', async () => {
     ctx = await useTestProject(DATABASE_URL);
 
     // First, create a valid table
@@ -111,9 +112,10 @@ columns:
     await runMigration(ctx);
     await assertTableExists(ctx, 'accounts');
 
-    // Now add a second table that references a non-existent type, causing an error
-    // Both tables' changes are in the same transaction, so adding a column
-    // to the existing table AND creating a new broken table should roll back together
+    // Add a column to the existing table AND a second table that references a
+    // non-existent type. These touch different tables, so they apply as
+    // separate per-table groups: the accounts column commits, the broken table
+    // fails. A failure leaves a valid partial schema, recovered by re-running.
     writeSchema(ctx.dir, {
       'tables/accounts.yaml': `
 table: accounts
@@ -140,8 +142,8 @@ columns:
     // This should fail due to the invalid type
     await expect(runMigration(ctx)).rejects.toThrow();
 
-    // The accounts table should NOT have the new 'status' column
-    // because everything rolled back
+    // The accounts column committed in its own per-table group before the
+    // broken table's group failed.
     const result = await queryDb(
       ctx,
       `SELECT column_name FROM information_schema.columns
@@ -150,9 +152,9 @@ columns:
       [ctx.schema],
     );
     const columns = result.rows.map((r: { column_name: string }) => r.column_name);
-    expect(columns).toEqual(['id', 'email']);
+    expect(columns).toEqual(['id', 'email', 'status']);
 
-    // The broken table should not exist
+    // The broken table's group rolled back, so it does not exist.
     const tableResult = await queryDb(
       ctx,
       `SELECT 1 FROM information_schema.tables
@@ -160,6 +162,23 @@ columns:
       [ctx.schema],
     );
     expect(tableResult.rowCount).toBe(0);
+
+    // Fix the broken type and re-run: schema-flow recomputes the diff from live
+    // state — accounts is already converged, broken is created — no manual
+    // recovery needed.
+    writeSchema(ctx.dir, {
+      'tables/broken.yaml': `
+table: broken
+columns:
+  - name: id
+    type: serial
+    primary_key: true
+  - name: data
+    type: text
+`,
+    });
+    await runMigration(ctx);
+    await assertTableExists(ctx, 'broken');
   });
 
   // (3) Hash-based change detection — run same migration twice, second run produces no operations
