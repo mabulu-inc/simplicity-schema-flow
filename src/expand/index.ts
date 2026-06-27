@@ -27,10 +27,7 @@ import { acquireAdvisoryLock, releaseAdvisoryLock } from '../executor/index.js';
 // ─── Operation types for expand/contract ────────────────────────
 
 export type ExpandOperationType =
-  | 'expand_column'
-  | 'create_dual_write_trigger'
-  | 'contract_column'
-  | 'drop_dual_write_trigger';
+  'expand_column' | 'create_dual_write_trigger' | 'contract_column' | 'drop_dual_write_trigger';
 
 /**
  * Structured metadata threaded through the planner/executor for expand ops,

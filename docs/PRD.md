@@ -166,8 +166,8 @@ indexes:
     name: uq_users_email_tenant
     unique: true
     as_constraint: true
-    nulls_not_distinct: true   # PostgreSQL 15+: treat NULLs as equal
-    deferrable: initially_immediate   # optional; or `initially_deferred`
+    nulls_not_distinct: true # PostgreSQL 15+: treat NULLs as equal
+    deferrable: initially_immediate # optional; or `initially_deferred`
     comment: 'One email per tenant'
 
 exclusion_constraints:

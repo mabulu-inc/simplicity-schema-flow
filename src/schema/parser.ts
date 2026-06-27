@@ -1032,15 +1032,7 @@ export function parseExtend(yamlStr: string): ExtendSchema {
 // ─── Auto-detect Schema Kind ────────────────────────────────────
 
 export type SchemaKind =
-  | 'table'
-  | 'enum'
-  | 'function'
-  | 'view'
-  | 'materialized_view'
-  | 'role'
-  | 'extensions'
-  | 'mixin'
-  | 'extend';
+  'table' | 'enum' | 'function' | 'view' | 'materialized_view' | 'role' | 'extensions' | 'mixin' | 'extend';
 
 export type ParsedSchema =
   | { kind: 'table'; schema: TableSchema }
