@@ -17,6 +17,7 @@ import {
   normalizePolicyRoles,
   normalizeTypeName,
   partitionsConverged,
+  resolveSeedMatchColumns,
   serialSequenceWidth,
 } from '../planner/index.js';
 import type {
@@ -92,8 +93,12 @@ export async function hydrateActualSeeds(
     const at = actualTables.get(dt.table);
     if (!at) continue;
 
-    const pkCols = dt.columns.filter((c) => c.primary_key).map((c) => c.name);
-    if (pkCols.length === 0) continue;
+    // Match each seed the same way apply does — PK if the seed columns cover
+    // it, else the best covered unique key (issue #68). Matching PK-only here
+    // would run `WHERE "<pk>" = NULL` for natural-key seeds that omit a serial
+    // PK, find zero rows, and falsely report `different`.
+    const matchCols = resolveSeedMatchColumns(dt, dt.seeds);
+    if (matchCols.length === 0) continue;
 
     const seedCols = Object.keys(dt.seeds[0]);
 
@@ -101,9 +106,9 @@ export async function hydrateActualSeeds(
     for (const seed of dt.seeds) {
       const whereParts: string[] = [];
       const params: unknown[] = [];
-      for (let i = 0; i < pkCols.length; i++) {
-        params.push(seed[pkCols[i]]);
-        whereParts.push(`"${pkCols[i]}" = $${i + 1}`);
+      for (let i = 0; i < matchCols.length; i++) {
+        params.push(seed[matchCols[i]]);
+        whereParts.push(`"${matchCols[i]}" = $${i + 1}`);
       }
 
       const colList = seedCols.map((c) => `"${c}"`).join(', ');

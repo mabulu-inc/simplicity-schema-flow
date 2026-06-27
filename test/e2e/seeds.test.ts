@@ -464,4 +464,37 @@ seeds:
     const report = await ctx.drift();
     expect(report.items.filter((i) => i.type === 'seed')).toHaveLength(0);
   });
+
+  it('(12) drift is clean for natural-key seeds that omit a bigserial PK (#68)', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/api_types.yaml': `
+table: api_types
+columns:
+  - name: api_type_id
+    type: bigserial
+    primary_key: true
+  - name: name
+    type: varchar(30)
+    nullable: false
+    unique: true
+seeds:
+  - name: digital-fleet-push
+  - name: eroad-events
+`,
+    });
+
+    await runMigration(ctx);
+
+    // Rows are present and correct...
+    const rows = await queryDb(ctx, `SELECT name FROM "${ctx.schema}".api_types ORDER BY name`);
+    expect(rows.rows).toEqual([{ name: 'digital-fleet-push' }, { name: 'eroad-events' }]);
+
+    // ...so drift must report no seed difference. The seed omits the bigserial
+    // PK and matches by the natural unique key `name`; drift must resolve the
+    // same match key as apply instead of comparing N desired vs 0 actual.
+    const report = await ctx.drift();
+    expect(report.items.filter((i) => i.type === 'seed')).toHaveLength(0);
+  });
 });

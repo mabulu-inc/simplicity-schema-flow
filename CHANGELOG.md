@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`drift` no longer reports false "different" seed data for tables seeded by a
+  natural key.** When a table had a serial/bigserial primary key but its seed
+  rows matched on a unique natural key (omitting the generated id), `drift`
+  compared the declared rows against an empty set and flagged every such table as
+  drifted — even though the rows were present and correct and `run`/apply handled
+  them fine. Drift now resolves the seed match key exactly as the apply path does
+  (primary key if the seed columns cover it, otherwise the best covered unique
+  key), so a correctly seeded schema reports zero drift.
+
 ## [0.18.0] - 2026-06-27
 
 ### Fixed

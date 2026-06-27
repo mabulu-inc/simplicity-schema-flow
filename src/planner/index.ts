@@ -3018,7 +3018,7 @@ function createSeedTableOp(table: TableSchema, seeds: Record<string, unknown>[],
  * rows' columns (a column present in only some rows can't key the others), so
  * we compute it once up front rather than re-scanning per candidate.
  */
-function resolveSeedMatchColumns(table: TableSchema, seeds: Record<string, unknown>[]): string[] {
+export function resolveSeedMatchColumns(table: TableSchema, seeds: Record<string, unknown>[]): string[] {
   // Columns present in EVERY seed row — one pass, intersection of all rows.
   let commonCols: Set<string> | null = null;
   for (const row of seeds) {
