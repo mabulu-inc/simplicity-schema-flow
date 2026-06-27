@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`drift` no longer reports unrelated PostgreSQL roles as drift.** Roles are
+  cluster-global — they exist across every database in the server, not just the
+  one schema-flow manages — so `drift` was flagging every non-system role in the
+  cluster (other applications' roles, human accounts, etc.) as "missing in YAML",
+  even though `plan`/`run` never drops an undeclared role. Drift now only
+  considers roles the schema actually references (declared roles, their group
+  memberships, and grantees named by table/column grants, policies, and function
+  grants), keeping the report aligned with what the planner manages.
+
 ### Changed
 
 - **Migrations now apply as one transaction per table instead of one

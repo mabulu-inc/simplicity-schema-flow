@@ -125,7 +125,7 @@ export function detectDrift(desired: DesiredState, actual: ActualState): DriftRe
 
   items.push(...driftExtensions(desired.extensions, actual.extensions));
   items.push(...driftEnums(desired.enums, actual.enums));
-  items.push(...driftRoles(desired.roles, actual.roles));
+  items.push(...driftRoles(desired.roles, actual.roles, collectReferencedRoles(desired)));
   items.push(...driftFunctions(desired.functions, actual.functions));
   items.push(...driftTables(desired.tables, actual.tables));
   items.push(...driftPartitions(desired.tables, actual.tables));
@@ -258,7 +258,44 @@ function driftEnums(desired: EnumSchema[], actual: Map<string, EnumSchema>): Dri
 
 // ─── Roles ──────────────────────────────────────────────────────
 
-function driftRoles(desired: RoleSchema[], actual: Map<string, RoleSchema>): DriftItem[] {
+/**
+ * Roles the schema actually manages or depends on: every declared role, the
+ * groups they're members of, and every grantee named by a table/column grant,
+ * policy `to`, or function grant. Roles are **cluster-global** in PostgreSQL —
+ * `getExistingRoles` returns every non-system role in the whole cluster, which
+ * includes roles owned by other databases/applications (and, in the test suite,
+ * roles created by other test files running in parallel). The planner never
+ * drops an undeclared role (`diffRoles` only ever creates/alters roles it's
+ * told about), so flagging every unrelated cluster role as `missing_in_yaml`
+ * reports drift that `plan` would never act on. Scoping the "undeclared role"
+ * check to this set keeps drift aligned with what the planner manages.
+ */
+function collectReferencedRoles(desired: DesiredState): Set<string> {
+  const roles = new Set<string>();
+  const addList = (to: string | undefined) => {
+    if (!to) return;
+    for (const r of to.split(',')) {
+      const name = r.trim();
+      // PUBLIC is a pseudo-role, never a real cluster role row — skip it.
+      if (name && name.toLowerCase() !== 'public') roles.add(name);
+    }
+  };
+
+  for (const role of desired.roles) {
+    roles.add(role.role);
+    for (const group of role.in ?? []) roles.add(group);
+  }
+  for (const table of desired.tables) {
+    for (const grant of table.grants ?? []) addList(grant.to);
+    for (const policy of table.policies ?? []) addList(policy.to);
+  }
+  for (const fn of desired.functions) {
+    for (const grant of fn.grants ?? []) addList(grant.to);
+  }
+  return roles;
+}
+
+function driftRoles(desired: RoleSchema[], actual: Map<string, RoleSchema>, referencedRoles: Set<string>): DriftItem[] {
   const items: DriftItem[] = [];
 
   for (const dr of desired) {
@@ -291,7 +328,10 @@ function driftRoles(desired: RoleSchema[], actual: Map<string, RoleSchema>): Dri
     }
   }
   for (const [name] of actual) {
-    if (!desired.find((r) => r.role === name)) {
+    // Only flag an undeclared role if the schema actually references it.
+    // Unrelated cluster-global roles are not this schema's concern, and the
+    // planner never drops them — see collectReferencedRoles.
+    if (!desired.find((r) => r.role === name) && referencedRoles.has(name)) {
       items.push({ type: 'role', object: name, status: 'missing_in_yaml' });
     }
   }

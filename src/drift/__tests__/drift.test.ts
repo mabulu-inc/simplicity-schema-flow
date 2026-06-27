@@ -659,6 +659,43 @@ describe('detectDrift', () => {
     expect(item!.detail).toContain('connection_limit');
   });
 
+  it('ignores an undeclared role the schema does not reference (cluster-global roles)', () => {
+    // Roles are cluster-global: `getExistingRoles` returns every non-system
+    // role in the cluster, including ones owned by other databases/apps. The
+    // planner never drops an undeclared role, so drift must not flag a role the
+    // schema neither declares nor references.
+    const desired = emptyDesired();
+    const actual = emptyActual();
+    actual.roles.set('some_unrelated_role', { role: 'some_unrelated_role', login: true });
+    const report = detectDrift(desired, actual);
+    expect(report.items.filter((i) => i.type === 'role')).toEqual([]);
+  });
+
+  it('flags an undeclared role that the schema references via a grant', () => {
+    const desired = emptyDesired();
+    desired.tables = [
+      {
+        table: 'users',
+        columns: [{ name: 'id', type: 'integer', primary_key: true }],
+        grants: [{ to: 'app_user', privileges: ['SELECT'] }],
+      },
+    ];
+    const actual = emptyActual();
+    actual.roles.set('app_user', { role: 'app_user', login: true });
+    actual.roles.set('unrelated', { role: 'unrelated', login: true });
+    actual.tables.set('users', {
+      table: 'users',
+      columns: [{ name: 'id', type: 'integer', primary_key: true }],
+      grants: [{ to: 'app_user', privileges: ['SELECT'] }],
+    });
+    const report = detectDrift(desired, actual);
+    const roleItems = report.items.filter((i) => i.type === 'role');
+    // app_user is referenced but undeclared → flagged; `unrelated` is ignored.
+    expect(roleItems).toEqual([
+      expect.objectContaining({ type: 'role', object: 'app_user', status: 'missing_in_yaml' }),
+    ]);
+  });
+
   it('reports no drift when all role attributes match', () => {
     const desired = emptyDesired();
     desired.roles = [
