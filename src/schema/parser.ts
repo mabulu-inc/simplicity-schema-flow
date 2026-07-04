@@ -114,6 +114,7 @@ export const COLUMN_KEYS = [
   'comment',
   'description',
   'generated',
+  'using',
   'references',
   'expand',
 ] as const;
@@ -213,6 +214,7 @@ function parseColumnDef(raw: Record<string, unknown>, context: string): ColumnDe
   const colComment = resolveComment(raw);
   if (colComment !== undefined) col.comment = colComment;
   if (raw.generated !== undefined) col.generated = String(raw.generated);
+  if (raw.using !== undefined) col.using = String(raw.using);
 
   if (raw.references != null) {
     const ref = raw.references as Record<string, unknown>;

@@ -60,6 +60,15 @@ export interface ColumnDef {
   comment?: string;
   references?: ForeignKeyRef;
   generated?: string;
+  /**
+   * SQL expression used as the `USING` clause when a column's `type` changes
+   * (`ALTER COLUMN … TYPE … USING <expr>`). Supply this for casts that need
+   * custom logic — e.g. `NULLIF(format, '')::jsonb` to treat empty strings as
+   * NULL, or an enum remap. When omitted, the planner defaults the USING clause
+   * to `"<col>"::<newtype>`, which covers the common non-auto-castable pairs
+   * (text↔jsonb, text↔int, text→enum, …). Ignored when the type is unchanged.
+   */
+  using?: string;
   expand?: ExpandDef;
   /**
    * Introspection-only: the element type of the sequence a serial column owns

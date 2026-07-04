@@ -624,6 +624,48 @@ describe('Planner', () => {
       const ops = findOps(result.operations, 'alter_column');
       expect(ops).toHaveLength(1);
       expect(ops[0].sql).toContain('TYPE varchar(255)');
+      // Default USING cast lets non-auto-castable changes succeed (issue #69).
+      expect(ops[0].sql).toContain('USING "name"::varchar(255)');
+    });
+
+    it('emits a default USING cast for non-auto-castable type changes (text → jsonb)', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'events',
+          columns: [{ name: 'format', type: 'jsonb' }],
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('events', {
+        table: 'events',
+        columns: [{ name: 'format', type: 'text' }],
+      });
+      const result = buildPlan(desired, actual);
+      const ops = findOps(result.operations, 'alter_column');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toBe('ALTER TABLE "public"."events" ALTER COLUMN "format" TYPE jsonb USING "format"::jsonb');
+    });
+
+    it('uses a custom using: expression for the type-change cast when provided', () => {
+      const desired = emptyDesired();
+      desired.tables = [
+        {
+          table: 'events',
+          columns: [{ name: 'format', type: 'jsonb', using: "NULLIF(format, '')::jsonb" }],
+        },
+      ];
+      const actual = emptyActual();
+      actual.tables.set('events', {
+        table: 'events',
+        columns: [{ name: 'format', type: 'text' }],
+      });
+      const result = buildPlan(desired, actual);
+      const ops = findOps(result.operations, 'alter_column');
+      expect(ops).toHaveLength(1);
+      expect(ops[0].sql).toBe(
+        `ALTER TABLE "public"."events" ALTER COLUMN "format" TYPE jsonb USING NULLIF(format, '')::jsonb`,
+      );
     });
 
     it('alters column nullability using safe NOT NULL pattern in the tighten phase', () => {

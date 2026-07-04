@@ -1698,13 +1698,21 @@ function diffColumn(
 ): Operation[] {
   const ops: Operation[] = [];
 
-  // Type change
+  // Type change. Emit an explicit `USING` clause so non-auto-castable changes
+  // (text→jsonb, text→int, text→enum, …) succeed — a bare `ALTER … TYPE`
+  // relies on an implicit assignment cast and fails when none exists (issue
+  // #69). The default `"<col>"::<newtype>` is an explicit cast, which is a
+  // superset of the assignment cast Postgres would apply without USING (and a
+  // no-op relabel for binary-coercible pairs like varchar→text, so it never
+  // forces an otherwise-avoidable rewrite). Columns needing custom conversion
+  // (empty-string handling, enum remaps) supply their own `using:` expression.
   if (normalizeTypeName(desired.type) !== normalizeTypeName(existing.type)) {
+    const usingExpr = desired.using ?? `"${desired.name}"::${desired.type}`;
     ops.push({
       type: 'alter_column',
       phase: 6,
       objectName: `${table}.${desired.name}`,
-      sql: `ALTER TABLE "${pgSchema}"."${table}" ALTER COLUMN "${desired.name}" TYPE ${desired.type}`,
+      sql: `ALTER TABLE "${pgSchema}"."${table}" ALTER COLUMN "${desired.name}" TYPE ${desired.type} USING ${usingExpr}`,
       destructive: false,
     });
   }

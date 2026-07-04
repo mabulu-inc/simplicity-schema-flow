@@ -166,6 +166,7 @@ optional. Each has its own section below or its own page.
 | `comment`     | string  | --      | Column comment                                  |
 | `references`  | object  | --      | Foreign key reference                           |
 | `generated`   | string  | --      | `GENERATED ALWAYS AS (expr) STORED`             |
+| `using`       | string  | --      | Cast expression for a `type` change (see below) |
 | `expand`      | object  | --      | Zero-downtime column migration                  |
 
 ### Column types
@@ -189,6 +190,26 @@ All PostgreSQL types are supported:
 | `inet`, `cidr`, `macaddr`       | Network types                       |
 | `text[]`, `integer[]`           | Arrays                              |
 | Custom enum names               | User-defined enums                  |
+
+### Changing a column's type
+
+When a column's `type` changes, schema-flow emits
+`ALTER COLUMN … TYPE … USING <expr>`. By default the `USING` expression is
+`"<col>"::<newtype>` — an explicit cast that handles the common non-auto-castable
+pairs PostgreSQL rejects without one (`text` → `jsonb`, `text` → `integer`,
+`text` → an enum, …) while staying a no-op for binary-coercible changes like
+`varchar` → `text`.
+
+For casts that need custom logic, set `using:` to your own SQL expression. It is
+substituted verbatim into the `USING` clause:
+
+```yaml
+- name: format
+  type: jsonb
+  using: "NULLIF(format, '')::jsonb" # treat empty strings as NULL
+```
+
+`using:` is only applied when the type actually changes; it is ignored otherwise.
 
 ### Foreign key references
 

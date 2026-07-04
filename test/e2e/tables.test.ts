@@ -69,6 +69,92 @@ columns:
     }
   });
 
+  it('changes a column type with a non-auto-castable cast (text → jsonb), preserving data', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+
+    // First run: create the column as text and seed a row.
+    writeSchema(ctx.dir, {
+      'tables/casts.yaml': `
+table: casts
+columns:
+  - name: id
+    type: serial
+    primary_key: true
+  - name: format
+    type: text
+    nullable: true
+`,
+    });
+    await runMigration(ctx);
+    await queryDb(ctx, `INSERT INTO "${ctx.schema}".casts (format) VALUES ('{"a":1}')`);
+
+    // Second run: retype the column to jsonb. Postgres cannot assignment-cast
+    // text → jsonb, so this only works if the planner emits a USING clause.
+    writeSchema(ctx.dir, {
+      'tables/casts.yaml': `
+table: casts
+columns:
+  - name: id
+    type: serial
+    primary_key: true
+  - name: format
+    type: jsonb
+    nullable: true
+`,
+    });
+    await runMigration(ctx);
+
+    const info = await getColumnInfo(ctx, 'casts', 'format');
+    expect(info.type).toBe('jsonb');
+
+    // Existing data survived the cast.
+    const rows = await queryDb(ctx, `SELECT format FROM "${ctx.schema}".casts`);
+    expect(rows.rows[0].format).toEqual({ a: 1 });
+  });
+
+  it('applies a custom using: expression on a type change (empty string → NULL jsonb)', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+
+    writeSchema(ctx.dir, {
+      'tables/custom_cast.yaml': `
+table: custom_cast
+columns:
+  - name: id
+    type: serial
+    primary_key: true
+  - name: format
+    type: text
+    nullable: true
+`,
+    });
+    await runMigration(ctx);
+    // An empty string is not valid JSON — the default "format"::jsonb cast would
+    // fail on this row, so the custom using: expression is required.
+    await queryDb(ctx, `INSERT INTO "${ctx.schema}".custom_cast (format) VALUES (''), ('{"b":2}')`);
+
+    writeSchema(ctx.dir, {
+      'tables/custom_cast.yaml': `
+table: custom_cast
+columns:
+  - name: id
+    type: serial
+    primary_key: true
+  - name: format
+    type: jsonb
+    nullable: true
+    using: "NULLIF(format, '')::jsonb"
+`,
+    });
+    await runMigration(ctx);
+
+    const info = await getColumnInfo(ctx, 'custom_cast', 'format');
+    expect(info.type).toBe('jsonb');
+
+    const rows = await queryDb(ctx, `SELECT format FROM "${ctx.schema}".custom_cast ORDER BY id`);
+    expect(rows.rows[0].format).toBeNull();
+    expect(rows.rows[1].format).toEqual({ b: 2 });
+  });
+
   it('sets column defaults (literal and expression)', async () => {
     ctx = await useTestProject(DATABASE_URL);
 

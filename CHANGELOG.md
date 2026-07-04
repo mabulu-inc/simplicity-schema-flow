@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Column type changes that need an explicit cast no longer fail.** Changing a
+  column's `type` to one PostgreSQL can't implicitly cast from the current type
+  (the classic case being `text` → `jsonb`, but also `text` → `integer`,
+  `text` → an enum, and similar) produced a bare `ALTER COLUMN … TYPE …` with no
+  `USING` clause, which PostgreSQL rejects with _"column cannot be cast
+  automatically"_. schema-flow now emits `USING "<col>"::<newtype>` by default,
+  which handles the common non-auto-castable pairs while staying a no-op for
+  binary-coercible changes like `varchar` → `text`.
+
+### Added
+
+- **`using:` on a column** — supply a custom SQL cast expression for a `type`
+  change, substituted into the `ALTER COLUMN … TYPE … USING <expr>` clause. Use
+  it for conversions that need custom logic, e.g.
+  `using: "NULLIF(format, '')::jsonb"` to treat empty strings as NULL. Ignored
+  when the column type is unchanged.
+
 ## [0.18.1] - 2026-06-27
 
 ### Fixed
