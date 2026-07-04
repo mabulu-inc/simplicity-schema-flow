@@ -546,6 +546,11 @@ describe('getExistingFunctions — options', () => {
       AS $$ SELECT generate_series(1, 10) $$
       LANGUAGE sql
       ROWS 10`);
+    await exec(`CREATE FUNCTION func_empty_search_path() RETURNS integer
+      AS $$ SELECT 1 $$
+      LANGUAGE sql
+      SECURITY DEFINER
+      SET search_path = ''`);
   });
 
   it('reads parallel, strict, leakproof, cost, and set from function', async () => {
@@ -559,6 +564,15 @@ describe('getExistingFunctions — options', () => {
     expect(fn!.cost).toBe(200);
     expect(fn!.security).toBe('definer');
     expect(fn!.set).toEqual({ search_path: 'public' });
+  });
+
+  it('normalizes an empty pinned search_path back to an empty string', async () => {
+    const fns = await getExistingFunctions(client, TEST_SCHEMA);
+    const fn = fns.find((f) => f.name === 'func_empty_search_path');
+    expect(fn).toBeDefined();
+    // Postgres stores an empty list GUC as `""`; introspection must present it
+    // as '' so it round-trips against `set: { search_path: '' }`.
+    expect(fn!.set).toEqual({ search_path: '' });
   });
 
   it('reads rows for set-returning functions', async () => {

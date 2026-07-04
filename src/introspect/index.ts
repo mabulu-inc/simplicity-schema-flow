@@ -192,7 +192,13 @@ export async function getExistingFunctions(client: Client, schema: string): Prom
       for (const entry of config) {
         const eqIdx = entry.indexOf('=');
         if (eqIdx > 0) {
-          setObj[entry.substring(0, eqIdx)] = entry.substring(eqIdx + 1);
+          const key = entry.substring(0, eqIdx);
+          let value = entry.substring(eqIdx + 1);
+          // Postgres stores an empty list GUC (e.g. a pinned-empty `search_path`)
+          // as the quoted-empty form `""`. Normalize it back to `''` so it
+          // round-trips against the declared `set: { search_path: '' }`.
+          if (value === '""') value = '';
+          setObj[key] = value;
         }
       }
       fn.set = setObj;

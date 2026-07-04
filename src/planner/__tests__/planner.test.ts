@@ -491,8 +491,29 @@ describe('Planner', () => {
       ];
       const result = buildPlan(desired, emptyActual());
       const ops = findOps(result.operations, 'create_function');
+      // search_path is a list GUC → emitted bare; other GUCs are scalar and
+      // single-quoted so a value with a unit (`5s`) is valid SQL.
       expect(ops[0].sql).toContain('SET search_path = public');
-      expect(ops[0].sql).toContain('SET statement_timeout = 5s');
+      expect(ops[0].sql).toContain("SET statement_timeout = '5s'");
+    });
+
+    it('pins an empty search_path with a quoted empty string', () => {
+      const desired = emptyDesired();
+      desired.functions = [
+        {
+          name: 'hardened_func',
+          language: 'plpgsql',
+          returns: 'void',
+          body: 'BEGIN END;',
+          security: 'definer',
+          set: { search_path: '' },
+        },
+      ];
+      const result = buildPlan(desired, emptyActual());
+      const ops = findOps(result.operations, 'create_function');
+      // A bare `SET search_path =` is a syntax error; the empty (force
+      // fully-qualified) path must be a quoted empty string.
+      expect(ops[0].sql).toContain("SET search_path = ''");
     });
 
     it('includes all function options combined', () => {

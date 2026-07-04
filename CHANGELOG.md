@@ -7,8 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Pin `search_path` on `SECURITY DEFINER` functions.** The function `set:` map
+  now round-trips `search_path` end-to-end, so definer functions can be hardened
+  against the classic `search_path` shadowing attack declaratively. Pin a schema
+  list (`set: { search_path: pg_catalog, public }`) or force fully-qualified
+  resolution with an empty path (`set: { search_path: '' }`) — both apply and
+  re-plan to a clean no-op. Pinning `search_path` on every `SECURITY DEFINER`
+  function is now the documented recommendation.
+
 ### Fixed
 
+- **Function `set:` values now emit valid SQL.** An empty `search_path` used to
+  emit a syntactically invalid `SET search_path =` (and never reconciled against
+  the database), and scalar config values carrying a unit — e.g.
+  `statement_timeout: '5s'` — emitted an unquoted `SET statement_timeout = 5s`
+  that PostgreSQL rejects. schema-flow now quotes these correctly: `search_path`
+  is written as a bare schema list or a quoted empty string, and every other GUC
+  value is single-quoted.
 - **Column type changes that need an explicit cast no longer fail.** Changing a
   column's `type` to one PostgreSQL can't implicitly cast from the current type
   (the classic case being `text` → `jsonb`, but also `text` → `integer`,

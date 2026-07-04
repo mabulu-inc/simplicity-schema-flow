@@ -704,6 +704,28 @@ function functionReturnTypeChanged(desired: FunctionSchema, existing: FunctionSc
   return normalizeFunctionType(desired.returns) !== normalizeFunctionType(existing.returns);
 }
 
+/**
+ * Render a value for a function-level `SET <key> = <value>` clause as valid SQL
+ * that round-trips through `pg_proc.proconfig` (see the introspect side, which
+ * reads proconfig back into `set`).
+ *
+ * `search_path` is a *list* GUC: Postgres stores and expects a bare comma list
+ * (`pg_catalog, public`), so it's emitted verbatim — with one exception, the
+ * empty value, which pins the path to nothing (the classic `SECURITY DEFINER`
+ * hardening that forces every unqualified name to be schema-resolved). An empty
+ * list must be written as a quoted empty string (`SET search_path = ''`); a bare
+ * `SET search_path =` is a syntax error, and proconfig stores the empty list as
+ * `""`, which the introspect side normalizes back to `''`.
+ *
+ * Every other GUC is scalar and single-quoted, so values carrying units or
+ * spaces (`statement_timeout = '5s'`) are valid — a bare `5s` is rejected as
+ * "trailing junk after numeric literal".
+ */
+function formatFunctionSetValue(key: string, value: string): string {
+  if (key === 'search_path') return value === '' ? "''" : value;
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 function diffFunctions(
   desired: FunctionSchema[],
   actual: Map<string, FunctionSchema>,
@@ -766,7 +788,7 @@ function diffFunctions(
       if (fn.rows != null) parts.push(`ROWS ${fn.rows}`);
       if (fn.set) {
         for (const [key, value] of Object.entries(fn.set)) {
-          parts.push(`SET ${key} = ${value}`);
+          parts.push(`SET ${key} = ${formatFunctionSetValue(key, value)}`);
         }
       }
 
