@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildPlan, type DesiredState, type ActualState } from '../index.js';
+import { buildPlan, functionSetsEqual, type DesiredState, type ActualState } from '../index.js';
 
 // ─── Helpers ───────────────────────────────────────────────────
 
@@ -495,6 +495,26 @@ describe('Planner', () => {
       // single-quoted so a value with a unit (`5s`) is valid SQL.
       expect(ops[0].sql).toContain('SET search_path = public');
       expect(ops[0].sql).toContain("SET statement_timeout = '5s'");
+    });
+
+    it('compares function set maps semantically', () => {
+      // search_path: whitespace and unquoted-case are Postgres-normalized.
+      expect(functionSetsEqual({ search_path: 'pg_catalog,public' }, { search_path: 'pg_catalog, public' })).toBe(true);
+      expect(functionSetsEqual({ search_path: 'MySchema, public' }, { search_path: 'myschema, public' })).toBe(true);
+      // A quoted element preserves case, so it is NOT equal to the folded form.
+      expect(functionSetsEqual({ search_path: '"MySchema", public' }, { search_path: 'myschema, public' })).toBe(false);
+      // Empty pin: '' and Postgres's stored "" are the same (introspect normalizes "" → '').
+      expect(functionSetsEqual({ search_path: '' }, {})).toBe(false);
+      expect(functionSetsEqual({ search_path: '' }, { search_path: '' })).toBe(true);
+      // Order-independent across multiple GUCs.
+      expect(
+        functionSetsEqual(
+          { search_path: 'public', statement_timeout: '5s' },
+          { statement_timeout: '5s', search_path: 'public' },
+        ),
+      ).toBe(true);
+      // A genuine difference is still caught.
+      expect(functionSetsEqual({ search_path: 'public' }, { search_path: 'pg_catalog, public' })).toBe(false);
     });
 
     it('pins an empty search_path with a quoted empty string', () => {

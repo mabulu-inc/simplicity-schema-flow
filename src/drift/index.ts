@@ -9,6 +9,7 @@ import type { PoolClient } from 'pg';
 import type { DesiredState, ActualState } from '../planner/index.js';
 import {
   defaultIndexName,
+  functionSetsEqual,
   indexKeysIdentity,
   normalizeCheckExpression,
   normalizeFunctionType,
@@ -363,9 +364,7 @@ function driftFunctions(desired: FunctionSchema[], actual: Map<string, FunctionS
       if (!!df.leakproof !== !!af.leakproof) diffs.push('leakproof');
       if ((df.cost ?? null) !== (af.cost ?? null)) diffs.push('cost');
       if ((df.rows ?? null) !== (af.rows ?? null)) diffs.push('rows');
-      const dSet = JSON.stringify(df.set || {});
-      const aSet = JSON.stringify(af.set || {});
-      if (dSet !== aSet) diffs.push('set');
+      if (!functionSetsEqual(df.set, af.set)) diffs.push('set');
       const dArgs = (df.args || []).map((a) => `${a.name}:${normalizeFunctionType(a.type)}`).join(',');
       const aArgs = (af.args || []).map((a) => `${a.name}:${normalizeFunctionType(a.type)}`).join(',');
       if (dArgs !== aArgs) diffs.push('args');

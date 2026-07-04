@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A function `set: { search_path: … }` no longer drifts on a non-canonical
+  spelling.** PostgreSQL normalizes a stored `search_path` — collapsing the space
+  after each comma and folding unquoted schema names to lower case — so a
+  declared `pg_catalog,public` (no space) or `MySchema` (unquoted) never matched
+  the introspected value and was replaced on every run. `search_path` is now
+  compared by its canonical schema list, and the whole `set` map is compared
+  independent of key order, so an unchanged function reaches zero pending
+  operations.
 - **Function `set:` values now emit valid SQL.** An empty `search_path` used to
   emit a syntactically invalid `SET search_path =` (and never reconciled against
   the database), and scalar config values carrying a unit — e.g.

@@ -683,9 +683,7 @@ function functionNeedsUpdate(desired: FunctionSchema, existing: FunctionSchema):
   if (!!desired.leakproof !== !!existing.leakproof) return true;
   if ((desired.cost ?? null) !== (existing.cost ?? null)) return true;
   if ((desired.rows ?? null) !== (existing.rows ?? null)) return true;
-  const desiredSet = JSON.stringify(desired.set || {});
-  const existingSet = JSON.stringify(existing.set || {});
-  if (desiredSet !== existingSet) return true;
+  if (!functionSetsEqual(desired.set, existing.set)) return true;
   const desiredArgs = JSON.stringify(normalizeArgTypes(desired.args));
   const existingArgs = JSON.stringify(normalizeArgTypes(existing.args));
   if (desiredArgs !== existingArgs) return true;
@@ -724,6 +722,73 @@ function functionReturnTypeChanged(desired: FunctionSchema, existing: FunctionSc
 function formatFunctionSetValue(key: string, value: string): string {
   if (key === 'search_path') return value === '' ? "''" : value;
   return `'${value.replace(/'/g, "''")}'`;
+}
+
+/**
+ * Parse a `search_path` value into its canonical list of schema names, matching
+ * how Postgres stores it in `proconfig`. Postgres normalizes the list on the way
+ * in — collapsing whitespace, dropping empty elements, and (for unquoted names)
+ * folding case — so `pg_catalog,public`, `pg_catalog,  public`, and
+ * `pg_catalog, public` are all the same path, and unquoted `MySchema` is stored
+ * as `myschema`. Comparing the declared value against the introspected one
+ * literally would flag every non-canonical spelling as perpetual drift; parsing
+ * both to this list form makes the comparison semantic.
+ *
+ * A double-quoted element keeps its case (with `""` → `"` unescaped); an
+ * unquoted element is trimmed and lower-cased. Commas inside quotes are literal.
+ */
+function parseSearchPath(value: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < value.length) {
+    while (i < value.length && /\s/.test(value[i])) i++;
+    if (i >= value.length) break;
+    let elem = '';
+    if (value[i] === '"') {
+      i++; // opening quote
+      while (i < value.length) {
+        if (value[i] === '"') {
+          if (value[i + 1] === '"') {
+            elem += '"';
+            i += 2;
+            continue;
+          }
+          i++; // closing quote
+          break;
+        }
+        elem += value[i++];
+      }
+    } else {
+      while (i < value.length && value[i] !== ',') elem += value[i++];
+      elem = elem.trim().toLowerCase();
+    }
+    while (i < value.length && value[i] !== ',') i++; // trailing whitespace after a quoted element
+    if (i < value.length && value[i] === ',') i++;
+    if (elem !== '') out.push(elem);
+  }
+  return out;
+}
+
+/** Canonical, order-independent form of a function's `set` map for comparison. */
+function canonicalizeFunctionSet(set?: Record<string, string>): string {
+  if (!set) return '';
+  return Object.keys(set)
+    .sort()
+    .map((key) => {
+      const value = set[key];
+      const canonical = key === 'search_path' ? parseSearchPath(value).join(', ') : value;
+      return `${key}=${canonical}`;
+    })
+    .join('\0');
+}
+
+/**
+ * Whether two function `set` maps are semantically equal. Order-independent, and
+ * `search_path` is compared by its canonical schema list so whitespace/case
+ * spellings that Postgres normalizes on storage don't read as drift.
+ */
+export function functionSetsEqual(a?: Record<string, string>, b?: Record<string, string>): boolean {
+  return canonicalizeFunctionSet(a) === canonicalizeFunctionSet(b);
 }
 
 function diffFunctions(

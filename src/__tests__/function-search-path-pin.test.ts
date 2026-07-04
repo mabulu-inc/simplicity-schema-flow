@@ -109,6 +109,45 @@ body: 'SELECT 1'
     expect(fn!.set).toEqual({ search_path: 'pg_catalog, public' });
   });
 
+  it('reconciles a non-canonical search_path spelling to a no-op (no perpetual drift)', async () => {
+    // Author writes the path without the space Postgres canonicalizes to, and
+    // with a mixed-case unquoted schema that Postgres folds to lower case. Both
+    // must reconcile to the stored form instead of drifting on every run.
+    const desired = parseFunction(`
+name: sp_noncanonical
+language: sql
+returns: integer
+security: definer
+set:
+  search_path: 'pg_catalog,Public'
+body: 'SELECT 1'
+`);
+    await applyAndExpectConvergence(desired);
+    // A second no-op re-plan proves it's stable, not just first-apply luck.
+    await applyAndExpectConvergence(desired);
+  });
+
+  it('treats a reordered multi-GUC set as equal (order-independent)', async () => {
+    await client.query(
+      `CREATE FUNCTION "${TEST_SCHEMA}".sp_reorder() RETURNS integer LANGUAGE sql ` +
+        `SET statement_timeout = '5s' SET search_path = public AS 'SELECT 1'`,
+    );
+    // Declared in the opposite order — semantically identical, so no re-CREATE.
+    const desired = parseFunction(`
+name: sp_reorder
+language: sql
+returns: integer
+set:
+  search_path: public
+  statement_timeout: '5s'
+body: 'SELECT 1'
+`);
+    const plan = buildPlan({ ...emptyDesired(), functions: [desired] }, await actualWithFunctions(), {
+      pgSchema: TEST_SCHEMA,
+    });
+    expect(plan.operations.filter((o) => o.type === 'create_function')).toHaveLength(0);
+  });
+
   it('single-quotes scalar GUCs so a unit value applies cleanly and re-plans to a no-op', async () => {
     const desired = parseFunction(`
 name: sp_scalar
