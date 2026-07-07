@@ -23,6 +23,14 @@ export interface ExecuteOptions {
   operations: Operation[];
   preScripts?: SchemaFile[];
   postScripts?: SchemaFile[];
+  /**
+   * Declarative schema files (the YAML under tables/, functions/, …) to record
+   * in `history` once the apply succeeds. Recorded inside the run — after the
+   * apply, before post-scripts — so their `applied_at` reflects true execution
+   * order relative to post-scripts (which depend on them). Omit for the
+   * convergence re-apply and other internal calls that shouldn't touch history.
+   */
+  schemaFiles?: SchemaFile[];
   pgSchema?: string;
   dryRun?: boolean;
   validateOnly?: boolean;
@@ -82,6 +90,10 @@ export interface ExecuteResult {
   validated: boolean;
   /** Operations that were executed (for output reporting) */
   executedOperations: Operation[];
+  /** Relative paths of pre-scripts that ran, in execution order. */
+  executedPreScripts: string[];
+  /** Relative paths of post-scripts that ran, in execution order. */
+  executedPostScripts: string[];
 }
 
 /**
@@ -417,6 +429,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     connectionString,
     preScripts = [],
     postScripts = [],
+    schemaFiles = [],
     pgSchema = 'public',
     dryRun = false,
     validateOnly = false,
@@ -441,6 +454,8 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     dryRun,
     validated: validateOnly,
     executedOperations: [],
+    executedPreScripts: [],
+    executedPostScripts: [],
   };
 
   // Dry-run: populate the result with what would happen and let the caller
@@ -471,6 +486,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           !historyExists || (await fileNeedsApply(historyClient!, script.relativePath, script.hash, pgSchema));
         if (wouldRun) {
           result.preScriptsRun++;
+          result.executedPreScripts.push(script.relativePath);
         } else {
           result.skippedScripts++;
         }
@@ -494,6 +510,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           !historyExists || (await fileNeedsApply(historyClient!, script.relativePath, script.hash, pgSchema));
         if (wouldRun) {
           result.postScriptsRun++;
+          result.executedPostScripts.push(script.relativePath);
         } else {
           result.skippedScripts++;
         }
@@ -547,7 +564,12 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
 
         await recordFile(lockClient, script.relativePath, script.hash, 'pre', pgSchema);
         result.preScriptsRun++;
-        logger?.info(`Executed pre-script: ${script.relativePath}`);
+        result.executedPreScripts.push(script.relativePath);
+        // Rendering is deferred to reportMigrationResult so pre-scripts, the
+        // declarative apply, and post-scripts print in one stream in true
+        // execution order — a live log here would jump ahead of the apply
+        // lines the report emits afterward.
+        logger?.debug(`Executed pre-script: ${script.relativePath}`);
       }
 
       // Pre-scripts may have mutated state in ways the original plan can't
@@ -753,6 +775,16 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
         }
       }
 
+      // Record the declarative schema files now — after the apply, before
+      // post-scripts. post-scripts depend on these objects, so their history
+      // `applied_at` must land after the schema files', not before. (Recording
+      // here rather than back in the pipeline is what keeps that order true.)
+      if (schemaFiles.length > 0 && !validateOnly) {
+        for (const file of schemaFiles) {
+          await recordFile(lockClient, file.relativePath, file.hash, file.phase, pgSchema);
+        }
+      }
+
       // Run post-scripts (each in its own transaction, tracked by hash)
       if (!validateOnly) {
         for (const script of postScripts) {
@@ -779,7 +811,10 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
 
           await recordFile(lockClient, script.relativePath, script.hash, 'post', pgSchema);
           result.postScriptsRun++;
-          logger?.info(`Executed post-script: ${script.relativePath}`);
+          result.executedPostScripts.push(script.relativePath);
+          // Deferred to reportMigrationResult (see pre-script note) so this
+          // prints after the apply lines, matching true execution order.
+          logger?.debug(`Executed post-script: ${script.relativePath}`);
         }
       }
 

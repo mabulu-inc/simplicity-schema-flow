@@ -29,31 +29,26 @@ export function reportMigrationResult(options: ReportOptions): void {
     return;
   }
 
-  // Default and verbose: show per-operation change lines.
-  // In default mode, skip seed ops that wrote nothing — the line would
-  // read "Seeded: X (N unchanged)" which is noise. Still shown in verbose.
+  // Default and verbose: show per-step change lines in true execution order —
+  // pre-scripts, the declarative apply, post-scripts, then the NOT NULL tighten
+  // phase (which runs after post-scripts). The executor records only counts and
+  // ordered lists on `result`; this renderer is the single place output is
+  // formatted, so scripts and ops never interleave the way live logging would.
   if (mode === 'default' || mode === 'verbose') {
-    // When a bootstrap phase is present, label it and the main phase so the
-    // two transactions read distinctly. Headers are skipped when there are no
-    // bootstrap ops, keeping ordinary output unchanged.
-    const hasBootstrap = operations.some((op) => op.bootstrap);
-    let lastHeader: 'bootstrap' | 'main' | null = null;
-    for (const op of operations) {
-      if (mode === 'default' && isNoOpSeed(op)) continue;
-      if (hasBootstrap) {
-        const header = op.bootstrap ? 'bootstrap' : 'main';
-        if (header !== lastHeader) {
-          write(header === 'bootstrap' ? 'Bootstrap phase (separate transaction):' : 'Main phase:');
-          lastHeader = header;
-        }
-      }
-      write(`  ${formatOperationMessage(op, { dryRun })}`);
-      if (dryRun && mode === 'verbose') {
-        for (const line of op.sql.split('\n')) {
-          write(`      ${line}`);
-        }
-      }
+    const verb = dryRun ? 'Would run' : 'Ran';
+    // tighten_not_null ops execute after post-scripts, so split them out and
+    // print them last to keep the stream chronological.
+    const applyOps = operations.filter((op) => op.type !== 'tighten_not_null');
+    const tightenOps = operations.filter((op) => op.type === 'tighten_not_null');
+
+    for (const path of result.executedPreScripts) {
+      write(`  ${verb} pre-script: ${path}`);
     }
+    renderOps(applyOps, mode, dryRun, write);
+    for (const path of result.executedPostScripts) {
+      write(`  ${verb} post-script: ${path}`);
+    }
+    renderOps(tightenOps, mode, dryRun, write);
   }
 
   // Summary line
@@ -73,6 +68,35 @@ export function reportMigrationResult(options: ReportOptions): void {
   }
   if (result.skippedScripts > 0) {
     write(`  Skipped (unchanged): ${result.skippedScripts}`);
+  }
+}
+
+/**
+ * Render a run of operations with bootstrap/main phase headers. When a
+ * bootstrap phase is present, label it and the main phase so the two
+ * transactions read distinctly; headers are skipped when there are no
+ * bootstrap ops, keeping ordinary output unchanged.
+ */
+function renderOps(ops: Operation[], mode: VerbosityMode, dryRun: boolean, write: (msg: string) => void): void {
+  const hasBootstrap = ops.some((op) => op.bootstrap);
+  let lastHeader: 'bootstrap' | 'main' | null = null;
+  for (const op of ops) {
+    // In default mode, skip seed ops that wrote nothing — the line would read
+    // "Seeded: X (N unchanged)" which is noise. Still shown in verbose.
+    if (mode === 'default' && isNoOpSeed(op)) continue;
+    if (hasBootstrap) {
+      const header = op.bootstrap ? 'bootstrap' : 'main';
+      if (header !== lastHeader) {
+        write(header === 'bootstrap' ? 'Bootstrap phase (separate transaction):' : 'Main phase:');
+        lastHeader = header;
+      }
+    }
+    write(`  ${formatOperationMessage(op, { dryRun })}`);
+    if (dryRun && mode === 'verbose') {
+      for (const line of op.sql.split('\n')) {
+        write(`      ${line}`);
+      }
+    }
   }
 }
 

@@ -152,6 +152,9 @@ export async function runPipeline(
     operations,
     preScripts: phaseFilter !== 'migrate' ? preScripts : undefined,
     postScripts: phaseFilter !== 'migrate' ? postScripts : undefined,
+    // Recorded inside execute() (after the apply, before post-scripts) so their
+    // history timestamps reflect true execution order. Only when migrating.
+    schemaFiles: shouldMigrate ? discovered.schema : undefined,
     pgSchema: config.pgSchema,
     dryRun: config.dryRun,
     validateOnly,
@@ -173,18 +176,8 @@ export async function runPipeline(
     await convergeAfterApply(config, logger, desired, result.executedOperations);
   }
 
-  // 7. Record schema files in history after successful migration
-  if (!config.dryRun && !validateOnly && shouldMigrate && discovered.schema.length > 0) {
-    const client = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
-    try {
-      await ensureHistoryTable(client);
-      for (const file of discovered.schema) {
-        await recordFile(client, file.relativePath, file.hash, file.phase, config.pgSchema);
-      }
-    } finally {
-      client.release();
-    }
-  }
+  // Schema files are recorded inside execute() (after the apply, before
+  // post-scripts) so their history `applied_at` reflects true execution order.
 
   return result;
 }

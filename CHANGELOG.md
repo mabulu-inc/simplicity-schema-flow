@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Run output now reads in true execution order.** Pre- and post-script lines
+  were logged the instant each script ran, while the created tables, functions,
+  and other schema changes were only printed in the summary afterward — so a
+  `post/` script appeared _above_ the tables it depends on, and its
+  `history.applied_at` timestamp landed earlier than theirs. This made it look
+  like post-scripts run before the declarative apply. They don't (and never
+  did): the ordering is `pre/` → apply → `post/` → NOT NULL tighten, and a
+  failing post-script still aborts the run and stays out of `history` so a
+  re-run retries it. Output and timestamps now reflect that real order, so the
+  log and history no longer imply a phantom ordering bug.
+
 ## [0.18.2] - 2026-07-04
 
 ### Added

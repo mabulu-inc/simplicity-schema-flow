@@ -164,6 +164,9 @@ describe('reportMigrationResult', () => {
     postScriptsRun: 0,
     dryRun: false,
     validated: false,
+    executedOperations: [],
+    executedPreScripts: [],
+    executedPostScripts: [],
   };
 
   const sampleOps: Operation[] = [

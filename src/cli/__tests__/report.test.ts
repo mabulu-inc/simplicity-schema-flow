@@ -12,6 +12,8 @@ function emptyResult(overrides: Partial<ExecuteResult> = {}): ExecuteResult {
     dryRun: false,
     validated: false,
     executedOperations: [],
+    executedPreScripts: [],
+    executedPostScripts: [],
     ...overrides,
   };
 }
@@ -80,6 +82,64 @@ describe('reportMigrationResult', () => {
       write,
     });
     expect(lines.some((l) => l.startsWith('Bootstrap phase') || l === 'Main phase:')).toBe(false);
+  });
+
+  // Regression for mabulu-inc/simplicity-schema-flow#71: output must read in
+  // true execution order — pre-scripts, the declarative apply, post-scripts,
+  // then the NOT NULL tighten phase (which runs after post-scripts). Previously
+  // scripts were logged live during execute() while ops were rendered
+  // afterward, so post-scripts appeared *above* the tables they depend on.
+  it('renders pre-scripts, apply, post-scripts, then tighten in execution order (#71)', () => {
+    const ops: Operation[] = [
+      { type: 'create_table', phase: 6, objectName: 'stage_daily_stats', sql: 'CREATE ...', destructive: false },
+      {
+        type: 'tighten_not_null',
+        phase: 30,
+        objectName: 'stage_daily_stats.is_wet',
+        sql: 'ALTER ...',
+        destructive: false,
+      },
+    ];
+    const { write, lines } = capture();
+    reportMigrationResult({
+      result: emptyResult({
+        executed: 2,
+        executedOperations: ops,
+        preScriptsRun: 1,
+        postScriptsRun: 1,
+        executedPreScripts: ['pre/001-seed-lookup.sql'],
+        executedPostScripts: ['post/202607051200-process-split.sql'],
+      }),
+      operations: ops,
+      mode: 'default',
+      write,
+    });
+    const preIdx = lines.findIndex((l) => l.includes('pre/001-seed-lookup.sql'));
+    const applyIdx = lines.findIndex((l) => l.includes('stage_daily_stats') && !l.includes('is_wet'));
+    const postIdx = lines.findIndex((l) => l.includes('post/202607051200-process-split.sql'));
+    const tightenIdx = lines.findIndex((l) => l.includes('is_wet'));
+    expect(preIdx).toBeGreaterThanOrEqual(0);
+    expect(applyIdx).toBeGreaterThan(preIdx);
+    expect(postIdx).toBeGreaterThan(applyIdx);
+    expect(tightenIdx).toBeGreaterThan(postIdx);
+    expect(lines.some((l) => l.includes('Ran pre-script'))).toBe(true);
+    expect(lines.some((l) => l.includes('Ran post-script'))).toBe(true);
+  });
+
+  it('uses "Would run" for scripts in dry-run/plan output (#71)', () => {
+    const { write, lines } = capture();
+    reportMigrationResult({
+      result: emptyResult({
+        dryRun: true,
+        postScriptsRun: 1,
+        executedPostScripts: ['post/backfill.sql'],
+      }),
+      operations: [],
+      mode: 'default',
+      write,
+      dryRun: true,
+    });
+    expect(lines.some((l) => l === '  Would run post-script: post/backfill.sql')).toBe(true);
   });
 
   it('still shows no-op seed ops in verbose mode', () => {
