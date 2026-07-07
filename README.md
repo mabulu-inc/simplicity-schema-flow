@@ -338,6 +338,63 @@ The same invariant — `new IS DISTINCT FROM transform(old)` — gates the trigg
 
 > Need a non-identity migration (e.g. `lower(email)`, `price_cents → price_dollars`)? Same flow. Optionally set `reverse:` for bidirectional dual-write during the transition.
 
+## Interval / validity indexes (GiST)
+
+Tables that model entity history as half-open validity intervals — one row per
+contiguous state-period, `[valid_from, valid_to)` with `valid_to IS NULL`
+meaning "current" — resolve point-in-time reads by interval containment:
+_"which interval contains instant `T`?"_ The read-optimal shape for that access
+pattern is a **GiST index over a range**, keyed alongside the tenant so the scan
+stays tenant-selective under RLS. A scalar key (e.g. `bigint tenant_id`) can
+share a GiST index with the range once the **`btree_gist`** extension is
+installed.
+
+Declare the extension, materialize the range as a `STORED` generated column, and
+key a `gist` index on `(tenant_id, state_range)`:
+
+```yaml
+# schema/extensions.yaml
+extensions:
+  - btree_gist
+```
+
+```yaml
+# schema/tables/entity_state.yaml
+table: entity_state
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+    default: gen_random_uuid()
+  - name: tenant_id
+    type: bigint
+    nullable: false
+  - name: valid_from
+    type: timestamptz
+    nullable: false
+  - name: valid_to
+    type: timestamptz
+  - name: state_range # materialized range, kept in sync by Postgres
+    type: tstzrange
+    generated: tstzrange(valid_from, valid_to)
+indexes:
+  - name: idx_entity_state_range
+    method: gist
+    columns: [tenant_id, state_range]
+```
+
+The point-in-time read then uses the range containment operator — `O(log n)`,
+exactly one row per entity per instant:
+
+```sql
+SELECT * FROM entity_state
+WHERE tenant_id = $1 AND state_range @> $2::timestamptz;
+```
+
+Prefer not to add a column? Key the GiST index on an **expression** instead —
+`columns:` accepts `{ expression: tstzrange(valid_from, valid_to) }`. Either
+form re-applies as a clean no-op (no drop-and-recreate churn on `run`).
+
 ## Documentation
 
 Full documentation at **[mabulu-inc.github.io/simplicity-schema-flow](https://mabulu-inc.github.io/simplicity-schema-flow/)**:

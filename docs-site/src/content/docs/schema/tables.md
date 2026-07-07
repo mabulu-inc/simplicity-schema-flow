@@ -376,6 +376,76 @@ indexes:
 
 Useful when an index is meant to satisfy a specific `ORDER BY` (Postgres can use a non-default-ordered index to skip an external sort). Writing the default modifiers explicitly is a no-op; the diff resolves both sides to the same canonical (order, nulls) pair before comparing, so an explicit `ASC NULLS LAST` doesn't churn against an introspected bare column.
 
+### Expression keys
+
+An index key can be an arbitrary SQL expression instead of a plain column —
+use the object form `{ expression: … }`. Postgres wraps the expression in
+parentheses (`CREATE INDEX … ((lower(email))))`) so it can be used to satisfy
+queries that filter or order by that expression:
+
+```yaml
+indexes:
+  - name: idx_users_lower_email
+    columns:
+      - expression: lower(email)
+```
+
+Expression keys can be mixed with plain columns in the same index. The diff
+normalizes each expression (whitespace and case) before comparing, so the form
+Postgres re-renders on introspection doesn't churn against your YAML.
+
+### GiST interval / validity indexes
+
+Tables that model entity history as half-open validity intervals —
+`[valid_from, valid_to)`, with `valid_to IS NULL` meaning "current" — resolve
+point-in-time reads by interval containment (_"which interval contains instant
+`T`?"_). The read-optimal shape is a **GiST index over a range**, keyed
+alongside a scalar tenant column so the scan stays tenant-selective under RLS.
+Sharing a GiST index between a scalar (`bigint tenant_id`) and a range requires
+the [`btree_gist`](/simplicity-schema-flow/schema/extensions/) extension.
+
+Materialize the range as a `STORED` [generated column](#generated-columns) and
+key a `gist` index on `(tenant_id, state_range)`:
+
+```yaml
+# schema/extensions.yaml
+extensions:
+  - btree_gist
+```
+
+```yaml
+# schema/tables/entity_state.yaml
+table: entity_state
+columns:
+  - name: tenant_id
+    type: bigint
+    nullable: false
+  - name: valid_from
+    type: timestamptz
+    nullable: false
+  - name: valid_to
+    type: timestamptz
+  - name: state_range
+    type: tstzrange
+    generated: tstzrange(valid_from, valid_to)
+indexes:
+  - name: idx_entity_state_range
+    method: gist
+    columns: [tenant_id, state_range]
+```
+
+Point-in-time reads then use the range containment operator — `O(log n)`,
+exactly one row per entity per instant:
+
+```sql
+SELECT * FROM entity_state
+WHERE tenant_id = $1 AND state_range @> $2::timestamptz;
+```
+
+Prefer not to add a column? Key the GiST index on an
+[expression](#expression-keys) instead — `expression: tstzrange(valid_from,
+valid_to)`. Either form re-applies as a clean no-op.
+
 ### Reconciling a same-named constraint
 
 When a declared index's name matches an object already in the database whose

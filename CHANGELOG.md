@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Documented GiST interval / validity index support.** Tables that model
+  history as `[valid_from, valid_to)` validity intervals can now be indexed for
+  read-optimal point-in-time lookups declaratively: a `method: gist` index over
+  a materialized `tstzrange` (via a `STORED` generated column) or an expression
+  key, with a scalar `tenant_id` sharing the index through the `btree_gist`
+  extension. Point-in-time reads switch from a btree range scan to the range
+  containment operator (`state_range @> $T`). This shape already worked; it is
+  now covered by end-to-end tests and documented in the README, including the
+  guarantee that it re-applies as a no-op.
+
 ### Fixed
 
 - **Run output now reads in true execution order.** Pre- and post-script lines
