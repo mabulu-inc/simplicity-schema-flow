@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-07-07
+
 ### Added
 
 - **Documented GiST interval / validity index support.** Tables that model
@@ -436,7 +438,8 @@ existing function`. The drop is gated behind `--allow-destructive` (the
   coupling to any app's identity model, while keeping the common case
   param-free. Unknown or unset params fail with a clear error.
 
-[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.2...HEAD
+[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.3...HEAD
+[0.18.3]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.17.0...v0.18.0
