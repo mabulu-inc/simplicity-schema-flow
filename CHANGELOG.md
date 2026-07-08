@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.4] - 2026-07-08
+
 ### Fixed
 
 - **`--allow-destructive` no longer drops a declared unique constraint as
@@ -449,7 +451,8 @@ existing function`. The drop is gated behind `--allow-destructive` (the
   coupling to any app's identity model, while keeping the common case
   param-free. Unknown or unset params fail with a clear error.
 
-[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.3...HEAD
+[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.4...HEAD
+[0.18.4]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.0...v0.18.1
