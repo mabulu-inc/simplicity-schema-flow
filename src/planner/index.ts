@@ -1401,6 +1401,18 @@ function alterTableOps(
   const existingColMap = new Map(existing.columns.map((c) => [c.name, c]));
   const desiredColMap = new Map(desired.columns.map((c) => [c.name, c]));
 
+  // Unique constraints the desired schema declares via `indexes:` (as
+  // `as_constraint: true` entries) rather than as a column-level `unique: true`.
+  // A single-column one of these introspects back as `col.unique`, so diffColumn
+  // must know it's declared — otherwise it would schedule the constraint for a
+  // destructive drop that diffIndexes never re-adds (issue #73).
+  const declaredUniqueConstraintNames = new Set<string>();
+  for (const idx of desired.indexes ?? []) {
+    if (idx.unique && idx.as_constraint) {
+      declaredUniqueConstraintNames.add(idx.name || defaultIndexName(desired.table, idx));
+    }
+  }
+
   // Add new columns
   for (const col of desired.columns) {
     const existingCol = existingColMap.get(col.name);
@@ -1461,7 +1473,9 @@ function alterTableOps(
       }
     } else {
       // Alter existing column if different
-      ops.push(...diffColumn(desired.table, col, existingCol, pgSchema, !!desired.partition_by));
+      ops.push(
+        ...diffColumn(desired.table, col, existingCol, pgSchema, !!desired.partition_by, declaredUniqueConstraintNames),
+      );
     }
   }
 
@@ -1782,6 +1796,7 @@ function diffColumn(
   existing: ColumnDef,
   pgSchema: string,
   partitioned = false,
+  declaredUniqueConstraintNames: Set<string> = new Set(),
 ): Operation[] {
   const ops: Operation[] = [];
 
@@ -1912,13 +1927,23 @@ function diffColumn(
     ops.push(...createIndexOps(table, columnUniqueIndex(table, desired), pgSchema, partitioned));
   } else if (!desired.unique && !!existing.unique) {
     const name = existing.unique_name || `${table}_${desired.name}_key`;
-    ops.push({
-      type: 'drop_unique_constraint',
-      phase: 6,
-      objectName: `${table}.${name}`,
-      sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${name}"`,
-      destructive: true,
-    });
+    // The same constraint may instead be declared in the table's `indexes:` as
+    // an `as_constraint: true` unique index. Introspection folds a single-column
+    // unique constraint into `existing.unique` (it never appears in
+    // `existing.indexes`), so from the column's view it looks undeclared — but
+    // diffIndexes already recognizes the `indexes:` entry as present-and-correct
+    // and emits nothing. Dropping it here would make the additive and destructive
+    // planners disagree, silently removing a declared constraint under
+    // --allow-destructive (issue #73). Leave it to diffIndexes when it's claimed.
+    if (!declaredUniqueConstraintNames.has(name)) {
+      ops.push({
+        type: 'drop_unique_constraint',
+        phase: 6,
+        objectName: `${table}.${name}`,
+        sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${name}"`,
+        destructive: true,
+      });
+    }
   }
 
   // Comment change

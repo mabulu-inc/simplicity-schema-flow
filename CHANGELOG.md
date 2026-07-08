@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--allow-destructive` no longer drops a declared unique constraint as
+  collateral.** A single-column unique constraint declared in a table's
+  `indexes:` as `unique: true` + `as_constraint: true` was correctly treated as
+  unchanged by a plain `plan`/`run`, but a `run --allow-destructive` (needed for
+  any legitimate `DROP TABLE`/`DROP COLUMN`) silently scheduled that same
+  constraint for removal — allowing duplicate rows afterward on a populated
+  database. The additive and destructive planners now agree: a constraint
+  declared in YAML is never classified as extraneous, regardless of run mode.
+
 ## [0.18.3] - 2026-07-07
 
 ### Added

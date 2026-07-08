@@ -272,6 +272,56 @@ indexes:
     expect(relevantOps).toHaveLength(0);
   });
 
+  it('does not drop a declared as_constraint unique index under --allow-destructive (GH #73)', async () => {
+    // Regression for #73: introspection folds the single-column unique constraint
+    // into `col.unique`, but the YAML declares it via `indexes:` with
+    // as_constraint:true. The additive planner treats it as unchanged; the
+    // destructive planner must agree. Before the fix, diffColumn saw
+    // desired.unique=false + existing.unique=true and scheduled a destructive
+    // drop_unique_constraint — silently removing a declared constraint whenever
+    // an unrelated --allow-destructive change (e.g. a DROP TABLE) ran.
+    const table = await introspectTable(client, 'tenant_auth_config', TEST_SCHEMA);
+
+    const desired = parseTable(`
+table: tenant_auth_config
+columns:
+  - name: id
+    type: uuid
+    primary_key: true
+  - name: tenant_id
+    type: uuid
+    nullable: false
+indexes:
+  - name: tenant_auth_config_tenant_id_key
+    columns: [tenant_id]
+    unique: true
+    as_constraint: true
+`);
+
+    const desiredState: DesiredState = {
+      tables: [desired],
+      enums: [],
+      functions: [],
+      views: [],
+      materializedViews: [],
+      roles: [],
+      extensions: null,
+    };
+
+    const actualState: ActualState = {
+      ...emptyActual(),
+      tables: new Map([['tenant_auth_config', table]]),
+    };
+
+    // With destructive ops allowed (the mode where the bug fired), the declared
+    // constraint must remain untouched — no drop in operations OR blocked.
+    const plan = buildPlan(desiredState, actualState, { pgSchema: TEST_SCHEMA, allowDestructive: true });
+    const allDropOps = [...plan.operations, ...plan.blocked].filter(
+      (op) => op.type === 'drop_unique_constraint' || op.type === 'drop_index',
+    );
+    expect(allDropOps).toHaveLength(0);
+  });
+
   it('does not spuriously drop constraints when column-level unique: true is used', async () => {
     // This tests that changing introspection doesn't break the column-level unique path
     await client.query(`
