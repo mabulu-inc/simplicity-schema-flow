@@ -313,7 +313,7 @@ describe('tracker', () => {
       return rows.length === 1;
     }
 
-    it('moves legacy tables out of _simplicity without renaming the schema', async () => {
+    it('moves legacy tables out of _simplicity and drops the schema once emptied', async () => {
       await client.query('CREATE SCHEMA _simplicity');
       await client.query(LEGACY_HISTORY);
       await client.query(`
@@ -323,9 +323,7 @@ describe('tracker', () => {
 
       await ensureHistoryTable(client, logger);
 
-      // The schema itself stays; only schema-flow's table left it.
-      expect(await schemaExists('_simplicity')).toBe(true);
-      expect(await tablesIn('_simplicity')).toEqual([]);
+      expect(await schemaExists('_simplicity')).toBe(false);
 
       // Data should be preserved. Legacy rows back-fill pg_schema='public'
       // via the ALTER TABLE ADD COLUMN default applied in the upgrade.
@@ -336,6 +334,7 @@ describe('tracker', () => {
 
       expect(logMessages).toEqual([
         { level: 'info', message: 'Migrated internal table: _simplicity.history → _smplcty_schema_flow.history' },
+        { level: 'info', message: 'Dropped legacy schema _simplicity (empty after migration)' },
       ]);
 
       // Idempotent: a second run is silent and changes nothing.
@@ -358,7 +357,8 @@ describe('tracker', () => {
 
       await ensureHistoryTable(client, logger);
 
-      expect(await tablesIn('_simplicity')).toEqual([]);
+      // Owned serial sequences moved with their tables, so nothing is left behind.
+      expect(await schemaExists('_simplicity')).toBe(false);
       expect(await tablesIn('_smplcty_schema_flow')).toEqual(['expand_state', 'history', 'snapshots']);
 
       const snapshots = await client.query('SELECT operations FROM _smplcty_schema_flow.snapshots');
@@ -391,6 +391,29 @@ describe('tracker', () => {
       await ensureHistoryTable(client, logger);
       expect(logMessages).toEqual([]);
       expect(await tablesIn('_simplicity')).toEqual(['users']);
+    });
+
+    it('keeps _simplicity when a non-table application object remains after the move', async () => {
+      await client.query('CREATE SCHEMA _simplicity');
+      await client.query(LEGACY_HISTORY);
+      await client.query(`CREATE TYPE _simplicity.role AS ENUM ('admin', 'member')`);
+
+      await ensureHistoryTable(client, logger);
+
+      expect(await schemaExists('_simplicity')).toBe(true);
+      expect(await tablesIn('_simplicity')).toEqual([]);
+      const type = await client.query(`SELECT to_regtype('_simplicity.role') IS NOT NULL AS ok`);
+      expect(type.rows[0].ok).toBe(true);
+    });
+
+    it('never drops an empty _simplicity it did not empty (fresh application bootstrap)', async () => {
+      await client.query('CREATE SCHEMA _simplicity');
+
+      await ensureHistoryTable(client, logger);
+      await ensureHistoryTable(client, logger);
+
+      expect(await schemaExists('_simplicity')).toBe(true);
+      expect(logMessages).toEqual([]);
     });
 
     it('leaves an application-only _simplicity untouched, even a lookalike history table', async () => {

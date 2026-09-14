@@ -14,8 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `_smplcty_schema_flow` on every run, so a database whose own tables lived in
   `_simplicity` had them silently relocated (and a fresh bootstrap that created
   `_simplicity` failed). Now only schema-flow's own legacy bookkeeping tables
-  (`history`, `snapshots`, `expand_state`) are moved; the `_simplicity` schema
-  and everything else in it stay where they are. Each table that moves is
+  (`history`, `snapshots`, `expand_state`) are moved, and everything else in
+  `_simplicity` stays where it is. If moving those tables leaves `_simplicity`
+  empty, the leftover schema is dropped; an empty `_simplicity` that
+  schema-flow did not empty is never removed. Each table that moves is
   reported, even when no logger is configured, and the spurious "both schemas
   exist — reconcile manually" warning is gone.
 - The legacy dual-write trigger/function rename now matches the literal

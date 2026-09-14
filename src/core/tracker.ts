@@ -50,6 +50,7 @@ async function migrateLegacySchema(client: pg.PoolClient, logger: Logger): Promi
     [Object.keys(LEGACY_TABLES)],
   );
 
+  let moved = 0;
   for (const row of rows) {
     const table = row.relname as string;
     const columns = new Set(row.columns as string[]);
@@ -67,6 +68,24 @@ async function migrateLegacySchema(client: pg.PoolClient, logger: Logger): Promi
     });
     await client.query(`ALTER TABLE _simplicity.${table} SET SCHEMA _smplcty_schema_flow`);
     logger.info(`Migrated internal table: _simplicity.${table} → _smplcty_schema_flow.${table}`);
+    moved++;
+  }
+
+  // Drop `_simplicity` only when this run emptied it. An empty `_simplicity`
+  // we did not empty may be an application's, created just before this run
+  // (a fresh simplicity-admin bootstrap), and must survive. Every object in a
+  // schema records a dependency on it, so no pg_depend rows means empty.
+  if (moved > 0) {
+    const { rowCount } = await client.query(
+      `SELECT 1 FROM pg_depend
+       WHERE refclassid = 'pg_namespace'::regclass
+         AND refobjid = (SELECT oid FROM pg_namespace WHERE nspname = '_simplicity')
+       LIMIT 1`,
+    );
+    if (rowCount === 0) {
+      await client.query('DROP SCHEMA _simplicity RESTRICT');
+      logger.info('Dropped legacy schema _simplicity (empty after migration)');
+    }
   }
 
   await renameLegacyDualWriteObjects(client, logger);

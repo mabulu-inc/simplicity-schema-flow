@@ -41,6 +41,7 @@ columns:
       for (let run = 0; run < 2; run++) {
         await project.migrate();
 
+        // Application tables remain, so the schema must not be dropped.
         const users = await pool.query('SELECT id FROM _simplicity.users');
         expect(users.rows).toEqual([{ id: 1 }]);
         const legacy = await pool.query(`SELECT to_regclass('_simplicity.history') AS t`);
