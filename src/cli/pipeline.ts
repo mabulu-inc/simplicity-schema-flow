@@ -74,7 +74,7 @@ export async function runPipeline(
   const shouldMigrate = !phaseFilter || phaseFilter === 'migrate';
 
   let operations: ReturnType<typeof buildPlan>['operations'] = [];
-  let blocked: ReturnType<typeof buildPlan>['blocked'] = []; // eslint-disable-line no-useless-assignment
+  let blocked: ReturnType<typeof buildPlan>['blocked'] = [];
   let desired: DesiredState | null = null;
 
   if (shouldMigrate && discovered.schema.length > 0) {

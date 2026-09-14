@@ -29,7 +29,7 @@
     "schema-flow": "./dist/cli/index.js"
   },
   "scripts": {
-    "lint": "eslint src/",
+    "lint": "oxlint src/",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
     "typecheck": "tsc --noEmit",
@@ -46,7 +46,7 @@
   },
   "lint-staged": {
     "*.{ts,js}": [
-      "eslint --fix",
+      "oxlint --fix",
       "prettier --write"
     ],
     "*.{json,md,yaml,yml}": [
@@ -64,20 +64,18 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
     "@release-it/keep-a-changelog": "^7.1.0",
     "@testcontainers/postgresql": "^12.0.4",
     "@types/node": "^26.1.0",
     "@types/pg": "^8.20.0",
     "@vitest/coverage-v8": "^4.1.10",
-    "eslint": "^10.6.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.8",
+    "oxlint": "^1.83.0",
     "prettier": "^3.9.4",
     "release-it": "^20.2.1",
     "testcontainers": "12.0.4",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.63.0",
     "vitest": "^4.1.10"
   }
 }
