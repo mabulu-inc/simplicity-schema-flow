@@ -406,7 +406,7 @@ export async function runBaseline(config: SimplicitySchemaConfig, logger: Logger
   const client = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
 
   try {
-    await ensureHistoryTable(client);
+    await ensureHistoryTable(client, logger);
 
     const discovered = await discoverAllSources(config);
     const allFiles = [...discovered.pre, ...discovered.schema, ...discovered.post];
@@ -469,12 +469,12 @@ export async function runValidate(config: SimplicitySchemaConfig, logger: Logger
   return runPipeline(config, logger, { validateOnly: true });
 }
 
-export async function getStatus(config: SimplicitySchemaConfig, _logger: Logger): Promise<StatusResult> {
+export async function getStatus(config: SimplicitySchemaConfig, logger: Logger): Promise<StatusResult> {
   const client = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
 
   try {
     // Ensure history table exists (won't error on fresh DBs)
-    await ensureHistoryTable(client);
+    await ensureHistoryTable(client, logger);
     const history = await getHistory(client, config.pgSchema);
 
     // Discover current files

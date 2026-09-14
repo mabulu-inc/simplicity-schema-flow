@@ -7,7 +7,7 @@
 
 import type pg from 'pg';
 import type { Phase } from './files.js';
-import type { Logger } from './logger.js';
+import { createLogger, type Logger } from './logger.js';
 import { runBootstrapDDL } from './db.js';
 
 export interface HistoryEntry {
@@ -18,27 +18,55 @@ export interface HistoryEntry {
 }
 
 /**
- * Migrate the legacy `_simplicity` schema to `_smplcty_schema_flow` if needed.
- * Also renames dual-write triggers/functions from `_simplicity_dw_` to `_smplcty_sf_dw_`.
+ * Bookkeeping tables schema-flow created in the legacy `_simplicity` schema,
+ * with the columns that identify each as ours (from the original DDL).
+ * `_simplicity` is also a real application schema name (simplicity-admin keeps
+ * its system tables there), so a table only counts as ours when both its name
+ * and its columns match.
  */
-async function migrateLegacySchema(client: pg.PoolClient, logger?: Logger): Promise<void> {
-  const { rows } = await client.query(`
-    SELECT nspname FROM pg_namespace WHERE nspname IN ('_simplicity', '_smplcty_schema_flow')
-  `);
-  const schemas = new Set(rows.map((r) => r.nspname as string));
-  const hasOld = schemas.has('_simplicity');
-  const hasNew = schemas.has('_smplcty_schema_flow');
+const LEGACY_TABLES: Record<string, string[]> = {
+  history: ['file_path', 'file_hash', 'phase', 'applied_at'],
+  snapshots: ['id', 'operations', 'created_at'],
+  expand_state: ['id', 'table_name', 'new_column', 'old_column', 'transform', 'trigger_name', 'status', 'created_at'],
+};
 
-  if (hasOld && hasNew) {
-    logger?.warn(
-      'Both _simplicity and _smplcty_schema_flow schemas exist. Leaving _simplicity untouched — reconcile manually.',
-    );
-    return;
-  }
+/**
+ * Move schema-flow's legacy bookkeeping tables out of `_simplicity` into
+ * `_smplcty_schema_flow`. The `_simplicity` schema itself and everything else
+ * in it are never renamed, moved, or dropped (issue #78). Also renames
+ * dual-write triggers/functions from `_simplicity_dw_` to `_smplcty_sf_dw_`.
+ */
+async function migrateLegacySchema(client: pg.PoolClient, logger: Logger): Promise<void> {
+  const { rows } = await client.query(
+    `SELECT c.relname,
+            array_agg(a.attname::text) AS columns,
+            to_regclass('_smplcty_schema_flow.' || quote_ident(c.relname)) IS NOT NULL AS target_exists
+     FROM pg_class c
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+     WHERE n.nspname = '_simplicity' AND c.relkind = 'r' AND c.relname = ANY($1)
+     GROUP BY c.relname
+     ORDER BY c.relname`,
+    [Object.keys(LEGACY_TABLES)],
+  );
 
-  if (hasOld && !hasNew) {
-    await client.query('ALTER SCHEMA _simplicity RENAME TO _smplcty_schema_flow');
-    logger?.info('Migrated internal schema: _simplicity \u2192 _smplcty_schema_flow');
+  for (const row of rows) {
+    const table = row.relname as string;
+    const columns = new Set(row.columns as string[]);
+    if (!LEGACY_TABLES[table].every((col) => columns.has(col))) continue;
+
+    if (row.target_exists) {
+      logger.warn(
+        `Legacy _simplicity.${table} left in place: _smplcty_schema_flow.${table} already exists — reconcile manually.`,
+      );
+      continue;
+    }
+
+    await runBootstrapDDL(async () => {
+      await client.query('CREATE SCHEMA IF NOT EXISTS _smplcty_schema_flow');
+    });
+    await client.query(`ALTER TABLE _simplicity.${table} SET SCHEMA _smplcty_schema_flow`);
+    logger.info(`Migrated internal table: _simplicity.${table} → _smplcty_schema_flow.${table}`);
   }
 
   await renameLegacyDualWriteObjects(client, logger);
@@ -46,21 +74,23 @@ async function migrateLegacySchema(client: pg.PoolClient, logger?: Logger): Prom
 
 /**
  * Rename dual-write triggers and functions from `_simplicity_dw_` prefix to `_smplcty_sf_dw_`.
+ * Matched with `starts_with`, not `LIKE`: in a LIKE pattern every `_` is a
+ * single-character wildcard, so names that merely resemble the prefix match.
  */
-async function renameLegacyDualWriteObjects(client: pg.PoolClient, logger?: Logger): Promise<void> {
+async function renameLegacyDualWriteObjects(client: pg.PoolClient, logger: Logger): Promise<void> {
   // Rename triggers
   const triggers = await client.query(`
     SELECT t.tgname, c.relname, n.nspname
     FROM pg_trigger t
     JOIN pg_class c ON c.oid = t.tgrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE t.tgname LIKE '_simplicity_dw_%'
+    WHERE starts_with(t.tgname, '_simplicity_dw_')
   `);
   for (const row of triggers.rows) {
     const oldName = row.tgname as string;
     const newName = oldName.replace('_simplicity_dw_', '_smplcty_sf_dw_');
     await client.query(`ALTER TRIGGER "${oldName}" ON "${row.nspname}"."${row.relname}" RENAME TO "${newName}"`);
-    logger?.info(`Renamed trigger: ${oldName} \u2192 ${newName}`);
+    logger.info(`Renamed trigger: ${oldName} → ${newName}`);
   }
 
   // Rename functions
@@ -68,26 +98,28 @@ async function renameLegacyDualWriteObjects(client: pg.PoolClient, logger?: Logg
     SELECT p.proname, n.nspname, pg_get_function_identity_arguments(p.oid) AS args
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE p.proname LIKE '_simplicity_dw_%'
+    WHERE starts_with(p.proname, '_simplicity_dw_')
   `);
   for (const row of functions.rows) {
     const oldName = row.proname as string;
     const newName = oldName.replace('_simplicity_dw_', '_smplcty_sf_dw_');
     await client.query(`ALTER FUNCTION "${row.nspname}"."${oldName}"(${row.args}) RENAME TO "${newName}"`);
-    logger?.info(`Renamed function: ${oldName} \u2192 ${newName}`);
+    logger.info(`Renamed function: ${oldName} → ${newName}`);
   }
 }
 
 /**
  * Ensure the _smplcty_schema_flow schema and history table exist.
- * On first run, migrates any legacy `_simplicity` schema automatically.
+ * Relocates any legacy schema-flow tables from `_simplicity` first. Without a
+ * logger, relocation messages still go to stdout/stderr — a move must never
+ * be silent.
  * Also upgrades pre-pgSchema-aware tables in place: adds the `pg_schema`
  * column (defaulting existing rows to 'public') and re-keys the primary
  * key on `(file_path, pg_schema)` so a single database can manage multiple
  * pgSchemas independently.
  */
 export async function ensureHistoryTable(client: pg.PoolClient, logger?: Logger): Promise<void> {
-  await migrateLegacySchema(client, logger);
+  await migrateLegacySchema(client, logger ?? createLogger({ verbose: false, quiet: false, json: false }));
   // Tolerate concurrent first-runs: parallel migrations against one database
   // (one schema each) can race on creating this shared schema/table, where
   // CREATE ... IF NOT EXISTS still throws a catalog duplicate. The block is

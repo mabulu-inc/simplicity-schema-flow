@@ -537,7 +537,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
 
     try {
       // Ensure _smplcty_schema_flow schema and history table
-      await ensureHistoryTable(lockClient);
+      await ensureHistoryTable(lockClient, logger);
 
       // Run pre-scripts (each in its own transaction, tracked by hash)
       for (const script of preScripts) {

@@ -272,17 +272,50 @@ describe('tracker', () => {
       expect(migrationLogs).toHaveLength(0);
     });
 
-    it('renames _simplicity to _smplcty_schema_flow when only old schema exists', async () => {
-      // Set up legacy schema with history table and data
+    // Legacy DDL as schema-flow originally created it in _simplicity.
+    const LEGACY_HISTORY = `
+      CREATE TABLE _simplicity.history (
+        file_path  text PRIMARY KEY,
+        file_hash  text NOT NULL,
+        phase      text NOT NULL,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )`;
+    const LEGACY_SNAPSHOTS = `
+      CREATE TABLE _simplicity.snapshots (
+        id          serial PRIMARY KEY,
+        operations  jsonb NOT NULL,
+        pg_schema   text NOT NULL DEFAULT 'public',
+        created_at  timestamptz NOT NULL DEFAULT now()
+      )`;
+    const LEGACY_EXPAND_STATE = `
+      CREATE TABLE _simplicity.expand_state (
+        id SERIAL PRIMARY KEY,
+        table_name TEXT NOT NULL,
+        new_column TEXT NOT NULL,
+        old_column TEXT NOT NULL,
+        transform TEXT NOT NULL,
+        trigger_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'expanded',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`;
+
+    async function tablesIn(schema: string): Promise<string[]> {
+      const { rows } = await client.query(
+        `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = $1 AND c.relkind = 'r' ORDER BY c.relname`,
+        [schema],
+      );
+      return rows.map((r) => r.relname as string);
+    }
+
+    async function schemaExists(schema: string): Promise<boolean> {
+      const { rows } = await client.query('SELECT 1 FROM pg_namespace WHERE nspname = $1', [schema]);
+      return rows.length === 1;
+    }
+
+    it('moves legacy tables out of _simplicity without renaming the schema', async () => {
       await client.query('CREATE SCHEMA _simplicity');
-      await client.query(`
-        CREATE TABLE _simplicity.history (
-          file_path  text PRIMARY KEY,
-          file_hash  text NOT NULL,
-          phase      text NOT NULL,
-          applied_at timestamptz NOT NULL DEFAULT now()
-        )
-      `);
+      await client.query(LEGACY_HISTORY);
       await client.query(`
         INSERT INTO _simplicity.history (file_path, file_hash, phase)
         VALUES ('tables/users.yaml', 'legacy_hash', 'schema')
@@ -290,17 +323,9 @@ describe('tracker', () => {
 
       await ensureHistoryTable(client, logger);
 
-      // Old schema should no longer exist
-      const oldSchema = await client.query(`
-        SELECT nspname FROM pg_namespace WHERE nspname = '_simplicity'
-      `);
-      expect(oldSchema.rows).toHaveLength(0);
-
-      // New schema should exist with the migrated data
-      const newSchema = await client.query(`
-        SELECT nspname FROM pg_namespace WHERE nspname = '_smplcty_schema_flow'
-      `);
-      expect(newSchema.rows).toHaveLength(1);
+      // The schema itself stays; only schema-flow's table left it.
+      expect(await schemaExists('_simplicity')).toBe(true);
+      expect(await tablesIn('_simplicity')).toEqual([]);
 
       // Data should be preserved. Legacy rows back-fill pg_schema='public'
       // via the ALTER TABLE ADD COLUMN default applied in the upgrade.
@@ -309,79 +334,126 @@ describe('tracker', () => {
       expect(history[0].filePath).toBe('tables/users.yaml');
       expect(history[0].fileHash).toBe('legacy_hash');
 
-      // Info-level migration message should be logged
-      const infoLogs = logMessages.filter(
-        (l) => l.level === 'info' && l.message.includes('_simplicity') && l.message.includes('_smplcty_schema_flow'),
-      );
-      expect(infoLogs.length).toBeGreaterThanOrEqual(1);
+      expect(logMessages).toEqual([
+        { level: 'info', message: 'Migrated internal table: _simplicity.history → _smplcty_schema_flow.history' },
+      ]);
+
+      // Idempotent: a second run is silent and changes nothing.
+      logMessages.length = 0;
+      await ensureHistoryTable(client, logger);
+      expect(logMessages).toEqual([]);
+      expect(await getHistory(client, 'public')).toHaveLength(1);
     });
 
     it('preserves snapshots and expand_state tables during migration', async () => {
-      // Set up legacy schema with additional tables
       await client.query('CREATE SCHEMA _simplicity');
+      await client.query(LEGACY_HISTORY);
+      await client.query(LEGACY_SNAPSHOTS);
+      await client.query(`INSERT INTO _simplicity.snapshots (operations) VALUES ('[{"type":"x"}]')`);
+      await client.query(LEGACY_EXPAND_STATE);
       await client.query(`
-        CREATE TABLE _simplicity.history (
-          file_path  text PRIMARY KEY,
-          file_hash  text NOT NULL,
-          phase      text NOT NULL,
-          applied_at timestamptz NOT NULL DEFAULT now()
-        )
+        INSERT INTO _simplicity.expand_state (table_name, new_column, old_column, transform, trigger_name)
+        VALUES ('public.users', 'b', 'a', 'a', 'trg')
       `);
-      await client.query(`
-        CREATE TABLE _simplicity.snapshots (
-          id serial PRIMARY KEY,
-          data text NOT NULL
-        )
-      `);
-      await client.query(`INSERT INTO _simplicity.snapshots (data) VALUES ('snapshot_data')`);
-      await client.query(`
-        CREATE TABLE _simplicity.expand_state (
-          id serial PRIMARY KEY,
-          state text NOT NULL
-        )
-      `);
-      await client.query(`INSERT INTO _simplicity.expand_state (state) VALUES ('expand_data')`);
 
       await ensureHistoryTable(client, logger);
 
-      // Verify all data was preserved in new schema
-      const snapshots = await client.query('SELECT data FROM _smplcty_schema_flow.snapshots');
-      expect(snapshots.rows).toHaveLength(1);
-      expect(snapshots.rows[0].data).toBe('snapshot_data');
+      expect(await tablesIn('_simplicity')).toEqual([]);
+      expect(await tablesIn('_smplcty_schema_flow')).toEqual(['expand_state', 'history', 'snapshots']);
 
-      const expandState = await client.query('SELECT state FROM _smplcty_schema_flow.expand_state');
-      expect(expandState.rows).toHaveLength(1);
-      expect(expandState.rows[0].state).toBe('expand_data');
+      const snapshots = await client.query('SELECT operations FROM _smplcty_schema_flow.snapshots');
+      expect(snapshots.rows).toEqual([{ operations: [{ type: 'x' }] }]);
+      // The serial sequence moved with its table and still works.
+      await client.query(`INSERT INTO _smplcty_schema_flow.snapshots (operations) VALUES ('[]')`);
+
+      const expandState = await client.query('SELECT new_column FROM _smplcty_schema_flow.expand_state');
+      expect(expandState.rows).toEqual([{ new_column: 'b' }]);
     });
 
-    it('logs warning and leaves _simplicity alone when both schemas exist', async () => {
-      // Create both schemas
+    it('moves only legacy tables when _simplicity also holds application objects', async () => {
       await client.query('CREATE SCHEMA _simplicity');
-      await client.query(`
-        CREATE TABLE _simplicity.history (
-          file_path  text PRIMARY KEY,
-          file_hash  text NOT NULL,
-          phase      text NOT NULL,
-          applied_at timestamptz NOT NULL DEFAULT now()
-        )
-      `);
-      await client.query(`
-        INSERT INTO _simplicity.history (file_path, file_hash, phase)
-        VALUES ('tables/old.yaml', 'old_hash', 'schema')
-      `);
+      await client.query(LEGACY_HISTORY);
+      await client.query('CREATE TABLE _simplicity.users (id int PRIMARY KEY, email text)');
+      await client.query(`INSERT INTO _simplicity.users VALUES (1, 'a@example.com')`);
+      await client.query('CREATE FUNCTION _simplicity.app_fn() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$');
+
+      await ensureHistoryTable(client, logger);
+
+      expect(await tablesIn('_simplicity')).toEqual(['users']);
+      const users = await client.query('SELECT id, email FROM _simplicity.users');
+      expect(users.rows).toEqual([{ id: 1, email: 'a@example.com' }]);
+      const fn = await client.query('SELECT _simplicity.app_fn() AS v');
+      expect(fn.rows[0].v).toBe(1);
+      expect(await tablesIn('_smplcty_schema_flow')).toEqual(['history']);
+
+      // Second run: application schema next to ours is normal — no warning.
+      logMessages.length = 0;
+      await ensureHistoryTable(client, logger);
+      expect(logMessages).toEqual([]);
+      expect(await tablesIn('_simplicity')).toEqual(['users']);
+    });
+
+    it('leaves an application-only _simplicity untouched, even a lookalike history table', async () => {
+      await client.query('CREATE SCHEMA _simplicity');
+      await client.query('CREATE TABLE _simplicity.users (id int)');
+      await client.query('CREATE TABLE _simplicity.history (id int, event text)');
+      await client.query(`INSERT INTO _simplicity.history VALUES (7, 'login')`);
+
+      await ensureHistoryTable(client, logger);
+      await ensureHistoryTable(client, logger);
+
+      expect(await tablesIn('_simplicity')).toEqual(['history', 'users']);
+      const rows = await client.query('SELECT id, event FROM _simplicity.history');
+      expect(rows.rows).toEqual([{ id: 7, event: 'login' }]);
+      expect(await tablesIn('_smplcty_schema_flow')).toEqual(['history']);
+      expect(logMessages).toEqual([]);
+    });
+
+    it('moves legacy tables into an already-existing, empty _smplcty_schema_flow schema', async () => {
+      await client.query('CREATE SCHEMA _simplicity');
+      await client.query(LEGACY_HISTORY);
       await client.query('CREATE SCHEMA _smplcty_schema_flow');
 
       await ensureHistoryTable(client, logger);
 
-      // Old schema should still exist (not renamed)
-      const oldSchema = await client.query(`
-        SELECT nspname FROM pg_namespace WHERE nspname = '_simplicity'
-      `);
-      expect(oldSchema.rows).toHaveLength(1);
+      expect(await tablesIn('_simplicity')).toEqual([]);
+      expect(await tablesIn('_smplcty_schema_flow')).toEqual(['history']);
+      expect(logMessages.filter((l) => l.level === 'warn')).toEqual([]);
+    });
 
-      // Warning should be logged
-      const warnings = logMessages.filter((l) => l.level === 'warn' && l.message.includes('_simplicity'));
-      expect(warnings.length).toBeGreaterThanOrEqual(1);
+    it('warns and leaves a legacy table in place when its target already exists', async () => {
+      await ensureHistoryTable(client, logger);
+      await recordFile(client, 'tables/new.yaml', 'new_hash', 'schema', 'public');
+      await client.query('CREATE SCHEMA _simplicity');
+      await client.query(LEGACY_HISTORY);
+      await client.query(`
+        INSERT INTO _simplicity.history (file_path, file_hash, phase)
+        VALUES ('tables/old.yaml', 'old_hash', 'schema')
+      `);
+
+      await ensureHistoryTable(client, logger);
+
+      expect(await tablesIn('_simplicity')).toEqual(['history']);
+      const history = await getHistory(client, 'public');
+      expect(history.map((h) => h.filePath)).toEqual(['tables/new.yaml']);
+      const warnings = logMessages.filter((l) => l.level === 'warn');
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].message).toContain('_simplicity.history');
+    });
+
+    it('does not rename objects that merely resemble the _simplicity_dw_ prefix', async () => {
+      // LIKE '_simplicity_dw_%' would match this: each `_` is a wildcard.
+      await client.query(
+        'CREATE FUNCTION public.xsimplicityxdwxlookalike() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$',
+      );
+      try {
+        await ensureHistoryTable(client, logger);
+        const fns = await client.query(`SELECT 1 FROM pg_proc WHERE proname = 'xsimplicityxdwxlookalike'`);
+        expect(fns.rows).toHaveLength(1);
+        expect(logMessages).toEqual([]);
+      } finally {
+        await client.query('DROP FUNCTION IF EXISTS public.xsimplicityxdwxlookalike()');
+      }
     });
 
     it('renames dual-write triggers with old _simplicity_dw_ prefix', async () => {
@@ -448,6 +520,26 @@ describe('tracker', () => {
         SELECT nspname FROM pg_namespace WHERE nspname = '_smplcty_schema_flow'
       `);
       expect(result.rows).toHaveLength(1);
+    });
+
+    it('reports a relocation on stdout when no logger is passed', async () => {
+      await client.query('CREATE SCHEMA _simplicity');
+      await client.query(LEGACY_HISTORY);
+
+      const written: string[] = [];
+      const originalWrite = process.stdout.write.bind(process.stdout);
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      try {
+        await ensureHistoryTable(client);
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+
+      expect(written.join('')).toContain('_simplicity.history');
+      expect(await tablesIn('_simplicity')).toEqual([]);
     });
   });
 });

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Upgrading no longer moves an application schema named `_simplicity`.** The
+  legacy-schema upgrade used to rename any `_simplicity` schema to
+  `_smplcty_schema_flow` on every run, so a database whose own tables lived in
+  `_simplicity` had them silently relocated (and a fresh bootstrap that created
+  `_simplicity` failed). Now only schema-flow's own legacy bookkeeping tables
+  (`history`, `snapshots`, `expand_state`) are moved; the `_simplicity` schema
+  and everything else in it stay where they are. Each table that moves is
+  reported, even when no logger is configured, and the spurious "both schemas
+  exist — reconcile manually" warning is gone.
+- The legacy dual-write trigger/function rename now matches the literal
+  `_simplicity_dw_` prefix only, instead of any name that merely resembled it.
+
 ## [0.18.4] - 2026-07-08
 
 ### Fixed
