@@ -58,24 +58,24 @@
     "node": ">=20"
   },
   "dependencies": {
-    "chalk": "^5.6.2",
     "glob": "^13.0.6",
-    "pg": "^8.22.0",
-    "yaml": "^2.9.0"
+    "pg": "^8.23.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@release-it/keep-a-changelog": "^7.1.0",
-    "@testcontainers/postgresql": "^12.0.4",
-    "@types/node": "^26.1.0",
-    "@types/pg": "^8.20.0",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@release-it/keep-a-changelog": "^8.0.1",
+    "@testcontainers/postgresql": "^12.1.0",
+    "@types/node": "^26.5.1",
+    "@types/pg": "^8.23.1",
+    "@vitest/coverage-v8": "^5.0.0",
     "husky": "^9.1.7",
-    "lint-staged": "^17.0.8",
+    "lint-staged": "^17.5.1",
     "oxlint": "^1.83.0",
-    "prettier": "^3.9.4",
-    "release-it": "^20.2.1",
-    "testcontainers": "12.0.4",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "prettier": "^3.9.6",
+    "release-it": "^21.0.3",
+    "testcontainers": "12.1.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0"
   }
 }

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`chalk` is no longer installed with schema-flow.** It was listed as a
+  runtime dependency but never used, so installing the package pulled it in for
+  nothing.
+
 ### Fixed
 
 - **Upgrading no longer moves an application schema named `_simplicity`.** The
