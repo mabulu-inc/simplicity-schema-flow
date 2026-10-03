@@ -57,6 +57,10 @@ export type OperationType =
   | 'drop_unique_constraint'
   | 'add_exclusion_constraint'
   | 'drop_exclusion_constraint'
+  | 'add_primary_key'
+  | 'replace_primary_key'
+  | 'rename_primary_key'
+  | 'drop_primary_key'
   // Enums
   | 'create_enum'
   | 'add_enum_value'
@@ -149,6 +153,17 @@ export interface Operation {
   seedResult?: { inserted: number; unchanged: number };
   /** Expand metadata — populated for expand_column and create_dual_write_trigger ops */
   expandMeta?: ExpandMeta;
+}
+
+/**
+ * Ops at or after this phase run after post-scripts, each in its own
+ * transaction, so a backfill a post-script performs lands before the
+ * constraint that needs it (NOT NULL, a primary key over a new column).
+ */
+export const POST_SCRIPT_PHASE = 30;
+
+export function runsAfterPostScripts(op: Operation): boolean {
+  return op.phase >= POST_SCRIPT_PHASE;
 }
 
 // ─── Desired State (parsed from YAML) ──────────────────────────
@@ -1057,7 +1072,7 @@ function buildTightenNotNullOp(table: string, column: string, pgSchema: string):
 
   return {
     type: 'tighten_not_null',
-    phase: 30,
+    phase: POST_SCRIPT_PHASE,
     objectName: `${table}.${column}`,
     sql,
     destructive: false,
@@ -1400,6 +1415,7 @@ function alterTableOps(
 
   const existingColMap = new Map(existing.columns.map((c) => [c.name, c]));
   const desiredColMap = new Map(desired.columns.map((c) => [c.name, c]));
+  const desiredPk = new Set(primaryKeyColumns(desired));
 
   // Unique constraints the desired schema declares via `indexes:` (as
   // `as_constraint: true` entries) rather than as a column-level `unique: true`.
@@ -1445,7 +1461,7 @@ function alterTableOps(
         sql: `ALTER TABLE "${pgSchema}"."${desired.table}" ADD COLUMN ${def}`,
         destructive: false,
       });
-      if (col.nullable === false && !col.primary_key) {
+      if (col.nullable === false && !desiredPk.has(col.name)) {
         ops.push(buildTightenNotNullOp(desired.table, col.name, pgSchema));
       }
 
@@ -1474,7 +1490,15 @@ function alterTableOps(
     } else {
       // Alter existing column if different
       ops.push(
-        ...diffColumn(desired.table, col, existingCol, pgSchema, !!desired.partition_by, declaredUniqueConstraintNames),
+        ...diffColumn(
+          desired.table,
+          col,
+          existingCol,
+          pgSchema,
+          !!desired.partition_by,
+          declaredUniqueConstraintNames,
+          desiredPk.has(col.name),
+        ),
       );
     }
   }
@@ -1496,6 +1520,8 @@ function alterTableOps(
       });
     }
   }
+
+  ops.push(...diffPrimaryKey(desired, existing, pgSchema));
 
   // Diff exclusion constraints
   ops.push(
@@ -1567,6 +1593,89 @@ function alterTableOps(
   }
 
   return ops;
+}
+
+/**
+ * A table's primary-key columns in key order, from either spelling: the
+ * table-level `primary_key: [...]` or column-level `primary_key: true`.
+ * Introspection sets both for a composite key, so the table-level list wins.
+ */
+export function primaryKeyColumns(table: TableSchema): string[] {
+  if (table.primary_key && table.primary_key.length > 0) return table.primary_key;
+  return table.columns.filter((c) => c.primary_key).map((c) => c.name);
+}
+
+/**
+ * Converge the live primary key on the declared one (issue #76). Postgres
+ * drops a key along with any of its columns, so a plan that drops a key
+ * column destroys the key itself; diffing here is what puts it back.
+ *
+ * Adding or replacing a key runs after post-scripts, like the NOT NULL
+ * tighten: a new key column usually needs a backfill first. A replacement is
+ * one statement — `DROP CONSTRAINT IF EXISTS` (the column drop may already
+ * have taken it) plus `ADD` — so the old key holds until the new one exists
+ * and a failed build leaves it in place. Replacing or dropping a key loosens
+ * what the table enforces, so both are destructive.
+ */
+function diffPrimaryKey(desired: TableSchema, existing: TableSchema, pgSchema: string): Operation[] {
+  const table = desired.table;
+  const qualified = `"${pgSchema}"."${table}"`;
+  const want = primaryKeyColumns(desired);
+  const have = primaryKeyColumns(existing);
+  const defaultName = `${table}_pkey`;
+  const wantName = desired.primary_key_name ?? defaultName;
+  const haveName = existing.primary_key_name ?? defaultName;
+  const keySql = `CONSTRAINT "${wantName}" PRIMARY KEY (${want.map((c) => `"${c}"`).join(', ')})`;
+  const objectName = `${table} (${want.join(', ')})`;
+
+  if (want.join(',') === have.join(',')) {
+    // Same key. Rename only when the YAML names it, matching drift: an
+    // undeclared name leaves whatever the database has.
+    if (want.length === 0 || !desired.primary_key_name || wantName === haveName) return [];
+    return [
+      {
+        type: 'rename_primary_key',
+        phase: 6,
+        objectName: `${table} (${haveName} → ${wantName})`,
+        sql: `ALTER TABLE ${qualified} RENAME CONSTRAINT "${haveName}" TO "${wantName}"`,
+        destructive: false,
+      },
+    ];
+  }
+
+  if (want.length === 0) {
+    return [
+      {
+        type: 'drop_primary_key',
+        phase: POST_SCRIPT_PHASE + 1,
+        objectName: `${table} (${have.join(', ')})`,
+        sql: `ALTER TABLE ${qualified} DROP CONSTRAINT IF EXISTS "${haveName}"`,
+        destructive: true,
+      },
+    ];
+  }
+
+  if (have.length === 0) {
+    return [
+      {
+        type: 'add_primary_key',
+        phase: POST_SCRIPT_PHASE + 1,
+        objectName,
+        sql: `ALTER TABLE ${qualified} ADD ${keySql}`,
+        destructive: false,
+      },
+    ];
+  }
+
+  return [
+    {
+      type: 'replace_primary_key',
+      phase: POST_SCRIPT_PHASE + 1,
+      objectName,
+      sql: `ALTER TABLE ${qualified} DROP CONSTRAINT IF EXISTS "${haveName}", ADD ${keySql}`,
+      destructive: true,
+    },
+  ];
 }
 
 /**
@@ -1797,6 +1906,7 @@ function diffColumn(
   pgSchema: string,
   partitioned = false,
   declaredUniqueConstraintNames: Set<string> = new Set(),
+  inDesiredPk = !!desired.primary_key,
 ): Operation[] {
   const ops: Operation[] = [];
 
@@ -1819,18 +1929,22 @@ function diffColumn(
     });
   }
 
-  // Nullable change — skip for primary key columns (PK columns are always NOT NULL)
-  const isPrimaryKey = desired.primary_key || existing.primary_key;
+  // Nullable change — skip for columns of the declared key, which the key
+  // itself holds NOT NULL.
   const desiredNullable = desired.nullable !== false;
   const existingNullable = existing.nullable !== false;
-  if (!isPrimaryKey && desiredNullable !== existingNullable) {
+  if (!inDesiredPk && desiredNullable !== existingNullable) {
     if (desiredNullable) {
+      // A column leaving the live key can't drop NOT NULL until diffPrimaryKey
+      // has replaced or dropped that key, so it follows it — and is blocked
+      // with it, since that change is destructive.
+      const leavingKey = !!existing.primary_key;
       ops.push({
         type: 'alter_column',
-        phase: 6,
+        phase: leavingKey ? POST_SCRIPT_PHASE + 2 : 6,
         objectName: `${table}.${desired.name}`,
         sql: `ALTER TABLE "${pgSchema}"."${table}" ALTER COLUMN "${desired.name}" DROP NOT NULL`,
-        destructive: false,
+        destructive: leavingKey,
       });
     } else {
       // Safe NOT NULL pattern (PRD §8.3) — deferred to the tighten phase so

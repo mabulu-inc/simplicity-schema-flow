@@ -9,6 +9,7 @@ import type { PoolClient } from 'pg';
 import type { DesiredState, ActualState } from '../planner/index.js';
 import {
   defaultIndexName,
+  primaryKeyColumns,
   functionSetsEqual,
   indexKeysIdentity,
   normalizeCheckExpression,
@@ -396,7 +397,7 @@ function driftTables(desired: TableSchema[], actual: Map<string, TableSchema>): 
     if (!at) {
       items.push({ type: 'table', object: dt.table, status: 'missing_in_db' });
     } else {
-      items.push(...driftCompositePk(dt.table, dt, at));
+      items.push(...driftPrimaryKey(dt.table, dt, at));
       items.push(...driftColumns(dt.table, dt.columns, at.columns));
       items.push(...driftForeignKeys(dt.table, dt.columns, at.columns));
       items.push(...driftCompositeForeignKeys(dt.table, dt.foreign_keys || [], at.foreign_keys || []));
@@ -453,37 +454,37 @@ function driftRls(desired: TableSchema, actual: TableSchema): DriftItem[] {
   return items;
 }
 
-function driftCompositePk(table: string, desiredTable: TableSchema, actualTable: TableSchema): DriftItem[] {
-  const desired = desiredTable.primary_key;
-  const actual = actualTable.primary_key;
+function driftPrimaryKey(table: string, desiredTable: TableSchema, actualTable: TableSchema): DriftItem[] {
+  const desired = primaryKeyColumns(desiredTable);
+  const actual = primaryKeyColumns(actualTable);
   const items: DriftItem[] = [];
-  const dPk = (desired || []).join(',');
-  const aPk = (actual || []).join(',');
+  const dPk = desired.join(', ');
+  const aPk = actual.join(', ');
   if (dPk !== aPk) {
     if (dPk && !aPk) {
       items.push({
         type: 'constraint',
         object: `${table}.primary_key`,
         status: 'missing_in_db',
-        expected: `(${desired!.join(', ')})`,
-        detail: `Composite PK expected: (${desired!.join(', ')})`,
+        expected: `(${dPk})`,
+        detail: `Primary key expected: (${dPk})`,
       });
     } else if (!dPk && aPk) {
       items.push({
         type: 'constraint',
         object: `${table}.primary_key`,
         status: 'missing_in_yaml',
-        actual: `(${actual!.join(', ')})`,
-        detail: `Composite PK in DB: (${actual!.join(', ')})`,
+        actual: `(${aPk})`,
+        detail: `Primary key in DB: (${aPk})`,
       });
     } else {
       items.push({
         type: 'constraint',
         object: `${table}.primary_key`,
         status: 'different',
-        expected: `(${desired!.join(', ')})`,
-        actual: `(${actual!.join(', ')})`,
-        detail: `Composite PK differs: expected (${desired!.join(', ')}), actual (${actual!.join(', ')})`,
+        expected: `(${dPk})`,
+        actual: `(${aPk})`,
+        detail: `Primary key differs: expected (${dPk}), actual (${aPk})`,
       });
     }
   }

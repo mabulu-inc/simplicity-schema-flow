@@ -2,7 +2,7 @@
  * Migration result reporting with verbosity modes.
  */
 
-import type { Operation } from '../planner/index.js';
+import { runsAfterPostScripts, type Operation } from '../planner/index.js';
 import type { ExecuteResult } from '../executor/index.js';
 import { formatOperationMessage } from '../executor/format-operation.js';
 
@@ -36,10 +36,10 @@ export function reportMigrationResult(options: ReportOptions): void {
   // formatted, so scripts and ops never interleave the way live logging would.
   if (mode === 'default' || mode === 'verbose') {
     const verb = dryRun ? 'Would run' : 'Ran';
-    // tighten_not_null ops execute after post-scripts, so split them out and
+    // Tighten ops (NOT NULL, primary keys) execute after post-scripts, so split them out and
     // print them last to keep the stream chronological.
-    const applyOps = operations.filter((op) => op.type !== 'tighten_not_null');
-    const tightenOps = operations.filter((op) => op.type === 'tighten_not_null');
+    const applyOps = operations.filter((op) => !runsAfterPostScripts(op));
+    const tightenOps = operations.filter(runsAfterPostScripts);
 
     for (const path of result.executedPreScripts) {
       write(`  ${verb} pre-script: ${path}`);

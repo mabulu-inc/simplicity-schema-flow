@@ -7,7 +7,7 @@
 
 import type pg from 'pg';
 import { readFile } from 'node:fs/promises';
-import type { Operation } from '../planner/index.js';
+import { runsAfterPostScripts, type Operation } from '../planner/index.js';
 import type { SchemaFile } from '../core/files.js';
 import type { Logger } from '../core/logger.js';
 import { acquireClient } from '../core/db.js';
@@ -494,9 +494,9 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
       // order in the plan so the output reads chronologically. Bootstrap ops
       // run in their own tx ahead of the main apply tx, so list them first.
       const dryRunMain = operations
-        .filter((op) => op.type !== 'tighten_not_null')
+        .filter((op) => !runsAfterPostScripts(op))
         .sort((a, b) => Number(b.bootstrap ?? false) - Number(a.bootstrap ?? false));
-      const dryRunTighten = operations.filter((op) => op.type === 'tighten_not_null');
+      const dryRunTighten = operations.filter(runsAfterPostScripts);
 
       for (const op of dryRunMain) {
         result.executed++;
@@ -585,13 +585,13 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
 
       // Execute operations (sorted by phase)
       // Split prechecks, concurrent, transactional, and tighten operations.
-      // tighten_not_null ops are deferred until after post-scripts so any
-      // backfill the consumer wrote gets to land before NOT NULL is enforced.
+      // Tighten ops (NOT NULL, primary keys) are deferred until after
+      // post-scripts so any backfill the consumer wrote lands before the
+      // constraint is enforced.
       const sorted = [...operations].sort((a, b) => a.phase - b.phase);
       const precheckOps = sorted.filter((op) => op.type === 'run_precheck');
-      const tightenOps = sorted.filter((op) => op.type === 'tighten_not_null');
-      const isMainTxOp = (op: Operation) =>
-        !op.concurrent && op.type !== 'run_precheck' && op.type !== 'tighten_not_null';
+      const tightenOps = sorted.filter(runsAfterPostScripts);
+      const isMainTxOp = (op: Operation) => !op.concurrent && op.type !== 'run_precheck' && !runsAfterPostScripts(op);
       // Bootstrap ops apply in their own transaction that commits before the
       // main apply tx, so per-tx hooks in the main tx see the rows seeded here.
       const bootstrapOps = sorted.filter((op) => op.bootstrap && isMainTxOp(op));

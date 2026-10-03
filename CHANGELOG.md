@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Primary keys on existing tables now follow the YAML.** Changing
+  `primary_key` used to do nothing to a table that already existed. Worse,
+  dropping a column that was part of the key silently removed the key, and the
+  plan still reported `0 blocked`. The table was left with no primary key, and
+  `INSERT … ON CONFLICT` on it failed later. `plan` now shows the change, and
+  `run` makes it:
+  - It adds a key that is missing.
+  - It replaces a key whose columns changed. This is a single statement, so
+    the old key stays until the new one is built.
+  - It renames a key whose `primary_key_name` changed.
+  - It drops a key the YAML no longer declares.
+
+  Adding or replacing a key runs after post-scripts, so a post-script can
+  backfill a new key column first. Replacing or dropping a key needs
+  `--allow-destructive`. A column that leaves the key gets the nullability its
+  YAML declares. `drift` now also reports single-column primary key
+  differences.
+
 - **`validate` no longer applies pending pre-scripts.** It is meant to change
   nothing, but it ran pre-scripts and committed them, so a pre-script tried out
   with `validate` was permanently applied and marked as done. Pre-scripts are
