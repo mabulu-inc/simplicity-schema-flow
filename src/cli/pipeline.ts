@@ -73,8 +73,6 @@ export async function runPipeline(
   const postScripts = phaseFilter === 'pre' || phaseFilter === 'migrate' ? [] : discovered.post;
   const shouldMigrate = !phaseFilter || phaseFilter === 'migrate';
 
-  let operations: ReturnType<typeof buildPlan>['operations'] = [];
-  let blocked: ReturnType<typeof buildPlan>['blocked'] = [];
   let desired: DesiredState | null = null;
 
   if (shouldMigrate && discovered.schema.length > 0) {
@@ -85,6 +83,7 @@ export async function runPipeline(
     //    table CHECK constraints, and partial-index WHERE clauses. Without
     //    this, every migrate would emit drop+recreate ops for objects whose
     //    source text differs only in PG's added casts and parens (issue #26).
+    //    Done up front so a bad expression fails before any pre-script commits.
     const normClient = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
     try {
       await normalizePolicyExpressions(normClient, desired.tables);
@@ -92,64 +91,18 @@ export async function runPipeline(
       await normalizeIndexWhereClauses(normClient, desired.tables);
       await normalizeColumnDefaults(normClient, desired.tables);
       await normalizeViewBodies(normClient, desired.views);
-      await filterUnchangedSeeds(normClient, desired.tables, config.pgSchema);
     } finally {
       normClient.release();
     }
-
-    // 4. Introspect database
-    const actual = await introspectDatabase(config, logger);
-
-    // 5. Build plan
-    const plan = buildPlan(desired, actual, {
-      allowDestructive: config.allowDestructive,
-      pgSchema: config.pgSchema,
-    });
-    operations = plan.operations;
-    blocked = plan.blocked;
-
-    if (blocked.length > 0) {
-      for (const op of blocked) {
-        logger.warn(`Blocked (destructive): ${op.type} ${op.objectName} — use --allow-destructive to allow`);
-      }
-    }
-
-    // In dry-run (plan) the report renders its own "Plan:" summary, so
-    // skip this line to avoid two redundant "Plan:" headers.
-    if (!config.dryRun) {
-      logger.info(`Plan: ${operations.length} operations (${blocked.length} blocked)`);
-    }
-
-    // Surface what a planned `DROP FUNCTION … CASCADE` will take out before it
-    // runs — declared dependents are recreated by the convergence re-plan, but
-    // undeclared ones (an ad-hoc view/policy a consumer created) would be lost
-    // silently. Warn so that's an explicit signal, not silent drift. (#62)
-    if (operations.some((op) => op.type === 'drop_function')) {
-      await warnCascadeFunctionDrops(config, logger, operations, desired);
-    }
   }
 
-  // Re-plan against the post-pre-script DB state. Pre-scripts can mutate the
-  // DB in ways the original plan can't reflect (e.g. column renames the
-  // planner cannot express declaratively). Without this, the apply phase
-  // collides with state pre-scripts already established. (Issue #28.)
-  const desiredForReplan = desired;
-  const replanAfterPreScripts =
-    shouldMigrate && desiredForReplan
-      ? async () => {
-          const actual = await introspectDatabase(config, logger);
-          const plan = buildPlan(desiredForReplan, actual, {
-            allowDestructive: config.allowDestructive,
-            pgSchema: config.pgSchema,
-          });
-          return plan.operations;
-        }
-      : undefined;
-
-  // 6. Execute
+  // 4. Execute. The plan is built inside execute() — once, under the advisory
+  //    lock, after pre-scripts — so it reflects what pre-scripts changed
+  //    (issue #28) and nothing can change the DB between planning and applying.
+  const desiredState = desired;
   const result = await execute({
     connectionString: config.connectionString,
-    operations,
+    operations: async () => (desiredState ? planAgainstDatabase(config, logger, desiredState) : []),
     preScripts: phaseFilter !== 'migrate' ? preScripts : undefined,
     postScripts: phaseFilter !== 'migrate' ? postScripts : undefined,
     // Recorded inside execute() (after the apply, before post-scripts) so their
@@ -162,7 +115,6 @@ export async function runPipeline(
     statementTimeout: config.statementTimeout,
     maxRetries: config.maxRetries,
     logger,
-    replanAfterPreScripts,
     perTxSqlPath: config.perTxSqlPath,
     bootstrapSession: config.bootstrapSession,
   });
@@ -180,6 +132,51 @@ export async function runPipeline(
   // post-scripts) so their history `applied_at` reflects true execution order.
 
   return result;
+}
+
+/**
+ * Plan `desired` against the live database and surface what the plan holds
+ * back or will take out. Called by execute() after pre-scripts, so every
+ * warning describes the operations that actually run.
+ */
+async function planAgainstDatabase(
+  config: SimplicitySchemaConfig,
+  logger: Logger,
+  desired: DesiredState,
+): Promise<Operation[]> {
+  // Seeds are compared against live rows, which pre-scripts may have changed.
+  const seedClient = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
+  try {
+    await filterUnchangedSeeds(seedClient, desired.tables, config.pgSchema);
+  } finally {
+    seedClient.release();
+  }
+
+  const actual = await introspectDatabase(config, logger);
+  const { operations, blocked } = buildPlan(desired, actual, {
+    allowDestructive: config.allowDestructive,
+    pgSchema: config.pgSchema,
+  });
+
+  for (const op of blocked) {
+    logger.warn(`Blocked (destructive): ${op.type} ${op.objectName} — use --allow-destructive to allow`);
+  }
+
+  // In dry-run (plan) the report renders its own "Plan:" summary, so
+  // skip this line to avoid two redundant "Plan:" headers.
+  if (!config.dryRun) {
+    logger.info(`Plan: ${operations.length} operations (${blocked.length} blocked)`);
+  }
+
+  // Surface what a planned `DROP FUNCTION … CASCADE` will take out before it
+  // runs — declared dependents are recreated by the convergence re-plan, but
+  // undeclared ones (an ad-hoc view/policy a consumer created) would be lost
+  // silently. Warn so that's an explicit signal, not silent drift. (#62)
+  if (operations.some((op) => op.type === 'drop_function')) {
+    await warnCascadeFunctionDrops(config, logger, operations, desired);
+  }
+
+  return operations;
 }
 
 /**

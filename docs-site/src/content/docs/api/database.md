@@ -48,6 +48,15 @@ const result = await execute({
   logger,
 });
 
+// Or pass a function: execute() calls it once, under the advisory lock and
+// after pre-scripts, so the plan reflects what pre-scripts changed.
+await execute({
+  connectionString,
+  operations: async () => planAgainstLiveDb(), // your own function returning Operation[]
+  preScripts,
+  logger,
+});
+
 // Manual lock management
 await withClient(connectionString, async (client) => {
   await acquireAdvisoryLock(client);

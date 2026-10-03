@@ -35,7 +35,7 @@ DELETE FROM temp_data WHERE created_at < now() - interval '30 days';
 
 ### Schema changes from pre-scripts
 
-After pre-scripts run, schema-flow re-introspects the database and re-plans the apply phase against the post-pre-script state. This means a pre-script can perform schema changes the declarative planner can't express — most commonly, column or table renames — and the corresponding YAML change won't collide with a stale `add_column` op.
+schema-flow plans the apply phase after pre-scripts run, against the database as they left it. This means a pre-script can perform schema changes the declarative planner can't express — most commonly, column or table renames — and the corresponding YAML change won't collide with a stale `add_column` op.
 
 ```sql
 -- schema/pre/202604281000-rename-tenant-to-org.sql

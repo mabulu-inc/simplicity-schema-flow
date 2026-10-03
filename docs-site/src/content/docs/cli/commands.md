@@ -43,7 +43,7 @@ npx @smplcty/schema-flow plan --json
 
 ### `schema-flow validate`
 
-Execute the migration plan inside a transaction that is always rolled back. Verifies SQL validity without making changes.
+Execute the migration plan inside a transaction that is always rolled back. Verifies SQL validity without making changes. Pre- and post-scripts are skipped, since each commits in its own transaction.
 
 ### `schema-flow baseline`
 

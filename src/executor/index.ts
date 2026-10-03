@@ -20,7 +20,14 @@ const ADVISORY_LOCK_KEY = 737_513; // "ss" in ASCII-inspired number
 
 export interface ExecuteOptions {
   connectionString: string;
-  operations: Operation[];
+  /**
+   * The operations to apply, or a function that plans them. A function is
+   * called exactly once — under the advisory lock and after pre-scripts — so
+   * the plan sees what pre-scripts changed (e.g. a column rename the planner
+   * cannot express declaratively, issue #28) and no concurrent run can change
+   * the database between planning and applying.
+   */
+  operations: Operation[] | (() => Promise<Operation[]>);
   preScripts?: SchemaFile[];
   postScripts?: SchemaFile[];
   /**
@@ -46,15 +53,6 @@ export interface ExecuteOptions {
    */
   maxRetries?: number;
   logger?: Logger;
-  /**
-   * Optional callback invoked after pre-scripts execute. Returns the operation
-   * list to apply, computed against the post-pre-script DB state. Pre-scripts
-   * routinely mutate the DB in ways the original plan can't reflect (e.g.
-   * column renames the planner cannot express declaratively), so the apply
-   * phase must use a fresh plan or it collides with state the pre-script
-   * already established. (Issue #28.)
-   */
-  replanAfterPreScripts?: () => Promise<Operation[]>;
   /**
    * Optional path to a SQL file injected at the **start of every executor
    * transaction** — each pre-script tx, the bootstrap tx, each per-table DDL
@@ -437,14 +435,13 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     statementTimeout,
     maxRetries = 3,
     logger,
-    replanAfterPreScripts,
     perTxSqlPath,
     bootstrapSession,
   } = options;
 
   // Read once; injected after BEGIN in every executor transaction below.
   const perTxSql = perTxSqlPath ? await readFile(perTxSqlPath, 'utf-8') : null;
-  let operations = options.operations;
+  const plan = async () => (typeof options.operations === 'function' ? await options.operations() : options.operations);
 
   const result: ExecuteResult = {
     executed: 0,
@@ -468,6 +465,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
   // rather than calling ensureHistoryTable so `plan` against a fresh DB
   // has no side effects.
   if (dryRun) {
+    const operations = await plan();
     if (perTxSqlPath) {
       logger?.debug(`[dry-run] Would inject per-tx SQL into every transaction: ${perTxSqlPath}`);
     }
@@ -539,8 +537,10 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
       // Ensure _smplcty_schema_flow schema and history table
       await ensureHistoryTable(lockClient, logger);
 
-      // Run pre-scripts (each in its own transaction, tracked by hash)
-      for (const script of preScripts) {
+      // Run pre-scripts (each in its own transaction, tracked by hash). Validate
+      // skips them, as it skips post-scripts: each commits on its own, and
+      // validate must leave the database as it found it.
+      for (const script of validateOnly ? [] : preScripts) {
         const changed = await fileNeedsApply(lockClient, script.relativePath, script.hash, pgSchema);
         if (!changed) {
           result.skippedScripts++;
@@ -572,17 +572,11 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
         logger?.debug(`Executed pre-script: ${script.relativePath}`);
       }
 
-      // Pre-scripts may have mutated state in ways the original plan can't
-      // reflect (e.g. column renames). Re-plan against the current DB so
-      // the apply phase doesn't collide with state pre-scripts established.
-      if (result.preScriptsRun > 0 && replanAfterPreScripts) {
-        operations = await replanAfterPreScripts();
-        logger?.debug(`Re-planned after pre-scripts: ${operations.length} operations`);
-      }
+      const operations = await plan();
 
       // Auto-save a migration snapshot of the operations actually about to
-      // execute (post-replan, if any). Saving here — rather than before
-      // pre-scripts — keeps the snapshot in sync with what gets applied.
+      // execute. Saving here — after pre-scripts and planning — keeps the
+      // snapshot in sync with what gets applied.
       if (operations.length > 0 && !validateOnly) {
         await ensureSnapshotsTable(lockClient);
         await saveSnapshot(lockClient, operations, pgSchema);

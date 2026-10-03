@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`validate` no longer applies pending pre-scripts.** It is meant to change
+  nothing, but it ran pre-scripts and committed them, so a pre-script tried out
+  with `validate` was permanently applied and marked as done. Pre-scripts are
+  now skipped, just like post-scripts.
+- **A `run` plans once, after pre-scripts, while holding the migration lock.**
+  Previously it also planned before pre-scripts, which caused three problems:
+  - The "Blocked (destructive)" and CASCADE warnings could describe a plan that
+    was then thrown away.
+  - A seed row a pre-script deleted was not restored in the same run.
+  - Two runs at once could both plan against the same starting state.
+
+### Changed
+
+- **`execute()` accepts a planning function as `operations`.** It is called
+  once, under the advisory lock and after pre-scripts. Passing an array still
+  works.
+
+### Removed
+
+- **The `replanAfterPreScripts` option of `execute()`.** Pass a function as
+  `operations` instead.
+
 ## [0.18.5] - 2026-09-14
 
 ### Removed
