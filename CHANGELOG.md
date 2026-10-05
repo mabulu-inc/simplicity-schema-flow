@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A blocked index or constraint change is no longer reported as applied.**
+  Changing an existing index, unique constraint or exclusion constraint means
+  dropping and re-creating it. Without `--allow-destructive` the drop was
+  blocked, but the re-create was still printed as "Added …" and counted as
+  executed, even though it did nothing and the old definition stayed. Now both
+  halves are listed as blocked and nothing is reported as added.
 - **Primary keys on existing tables now follow the YAML.** Changing
   `primary_key` used to do nothing to a table that already existed. Worse,
   dropping a column that was part of the key silently removed the key, and the

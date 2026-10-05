@@ -228,7 +228,7 @@ export function buildPlan(desired: DesiredState, actual: ActualState, options: P
   allOps.push(...diffFunctions(desired.functions, actual.functions, pgSchema, allowDestructive));
 
   // Diff tables (without FKs first)
-  allOps.push(...diffTables(desired.tables, actual.tables, pgSchema, actual.sequenceGrants, allowDestructive));
+  allOps.push(...diffTables(desired.tables, actual.tables, pgSchema, actual.sequenceGrants));
 
   // Partition maintenance (pg_partman config + pg_cron schedule)
   allOps.push(
@@ -988,7 +988,6 @@ function diffTables(
   actual: Map<string, TableSchema>,
   pgSchema: string,
   sequenceGrants?: Map<string, Map<string, Set<string>>>,
-  allowDestructive = false,
 ): Operation[] {
   validateBootstrapForeignKeys(desired);
 
@@ -998,7 +997,7 @@ function diffTables(
     const existing = actual.get(desiredTable.table);
     if (existing) assertPartitioningUnchanged(desiredTable, existing);
     const tableOps = existing
-      ? alterTableOps(desiredTable, existing, pgSchema, sequenceGrants, allowDestructive)
+      ? alterTableOps(desiredTable, existing, pgSchema, sequenceGrants)
       : createTableOps(desiredTable, pgSchema, sequenceGrants);
     // Composite (multi-column) foreign keys are table-level, so they're
     // reconciled here for both new and existing tables (existing → undefined
@@ -1395,7 +1394,6 @@ function alterTableOps(
   existing: TableSchema,
   pgSchema: string,
   sequenceGrants?: Map<string, Map<string, Set<string>>>,
-  allowDestructive = false,
 ): Operation[] {
   const ops: Operation[] = [];
 
@@ -1544,7 +1542,6 @@ function alterTableOps(
       pgSchema,
       droppedColNames,
       existing.columns,
-      allowDestructive,
       !!desired.partition_by,
     ),
   );
@@ -2170,7 +2167,6 @@ function diffIndexes(
   pgSchema: string,
   droppedColNames: Set<string> = new Set(),
   existingColumns: ColumnDef[] = [],
-  allowDestructive = false,
   partitioned = false,
 ): Operation[] {
   const ops: Operation[] = [];
@@ -2221,12 +2217,10 @@ function diffIndexes(
           sql: `ALTER TABLE "${pgSchema}"."${table}" DROP CONSTRAINT IF EXISTS "${name}"`,
           destructive: true,
         });
-        // The create only succeeds once the constraint is dropped. If the drop
-        // is blocked (no --allow-destructive), skip the create so the blocked
-        // drop is surfaced instead of a "create" that silently does nothing.
-        if (!allowDestructive) continue;
+        ops.push(...recreateOps(createIndexOps(table, { ...idx, name }, pgSchema, partitioned)));
+      } else {
+        ops.push(...createIndexOps(table, { ...idx, name }, pgSchema, partitioned));
       }
-      ops.push(...createIndexOps(table, { ...idx, name }, pgSchema, partitioned));
     } else if (indexNeedsRecreate(idx, existingIdx)) {
       // Keys, where-clause, include-list, uniqueness, nulls-not-distinct,
       // constraint-wrapper, or deferrable changed. PG has no ALTER INDEX
@@ -2234,7 +2228,7 @@ function diffIndexes(
       // constraint-backed entries (DROP INDEX errors out — the index is
       // owned by the constraint).
       ops.push(buildDropIndexOp(table, existingIdx, name, pgSchema));
-      ops.push(...createIndexOps(table, { ...idx, name }, pgSchema, partitioned));
+      ops.push(...recreateOps(createIndexOps(table, { ...idx, name }, pgSchema, partitioned)));
     }
     if (idx.comment && idx.comment !== existingIdx?.comment) {
       const isConstraint = idx.unique && idx.as_constraint;
@@ -2265,6 +2259,18 @@ function diffIndexes(
   }
 
   return ops;
+}
+
+/**
+ * The create half of a drop-and-recreate. Its SQL is guarded on the object's
+ * name, which the destructive drop frees, so it can only take effect once
+ * that drop has run. Marking it destructive blocks it together with the drop:
+ * without --allow-destructive the pair is reported blocked, rather than the
+ * create no-opping against the old object and being reported as executed
+ * (issues #61, #80).
+ */
+function recreateOps(creates: Operation[]): Operation[] {
+  return creates.map((op) => ({ ...op, destructive: true }));
 }
 
 function indexNeedsRecreate(desired: IndexDef, existing: IndexDef): boolean {
@@ -2519,13 +2525,14 @@ function diffExclusionConstraints(
       // EXCLUDE constraints don't support NOT VALID, so this validates
       // immediately against existing rows. Issue #30 calls this out — it
       // can't be made non-blocking like CHECK / FK can.
-      ops.push({
+      const add: Operation = {
         type: 'add_exclusion_constraint',
         phase: 6,
         objectName: `${table}.${name}`,
         sql: `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${name}' AND conrelid = '"${pgSchema}"."${table}"'::regclass) THEN ALTER TABLE "${pgSchema}"."${table}" ADD CONSTRAINT "${name}" ${exclusionClause(ec)}; END IF; END $$`,
         destructive: false,
-      });
+      };
+      ops.push(...(needsRecreate ? recreateOps([add]) : [add]));
     }
     if (ec.comment && (!existingEc || ec.comment !== existingEc.comment)) {
       ops.push({
