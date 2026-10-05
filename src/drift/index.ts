@@ -136,7 +136,7 @@ export function detectDrift(desired: DesiredState, actual: ActualState): DriftRe
   items.push(...driftEnums(desired.enums, actual.enums));
   items.push(...driftRoles(desired.roles, actual.roles, collectReferencedRoles(desired)));
   items.push(...driftFunctions(desired.functions, actual.functions));
-  // Objects marked unmanaged aren't drift — they belong to another author (#77).
+  // Objects a table's YAML declares unmanaged aren't drift — another author owns them (#77).
   const { tables } = separateUnmanaged(desired.tables, actual.tables);
   items.push(...driftTables(desired.tables, tables));
   items.push(...driftPartitions(desired.tables, actual.tables));

@@ -303,6 +303,10 @@ export interface PartitionMaintenanceDef {
 
 export type StorageParameterValue = string | number | boolean;
 
+export const UNMANAGED_KINDS = ['indexes', 'checks', 'exclusion_constraints', 'triggers', 'policies'] as const;
+export type UnmanagedKind = (typeof UNMANAGED_KINDS)[number];
+export type UnmanagedPatterns = Partial<Record<UnmanagedKind, string[]>>;
+
 export interface TableSchema {
   table: string;
   columns: ColumnDef[];
@@ -316,6 +320,11 @@ export interface TableSchema {
    * parameters and resets undeclared ones; absent leaves them alone.
    */
   storage?: Record<string, StorageParameterValue>;
+  /**
+   * Name patterns (`*`, `?`) for objects on this table that someone else
+   * owns. schema-flow never drops a matching object it doesn't declare.
+   */
+  unmanaged?: UnmanagedPatterns;
   indexes?: IndexDef[];
   checks?: CheckDef[];
   /** Composite (multi-column) foreign keys. Single-column FKs use column-level `references:`. */

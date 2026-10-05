@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Objects schema-flow should never drop are now declared in the table's
+  YAML.** List name patterns under `unmanaged:`, for example
+  `unmanaged: { indexes: ['tenant*_cf_*'] }`. The application that creates
+  those objects no longer has to mark each one, and every other undeclared
+  object on the table is still cleaned up. Patterns cover `indexes` (including
+  unique constraints), `checks`, `exclusion_constraints`, `triggers` and
+  `policies`.
+
+### Removed
+
+- **The `schema-flow:unmanaged` comment marker from 0.19.0.** A comment no
+  longer protects an object. Use an `unmanaged:` pattern in the table's YAML
+  instead.
+
 ## [0.19.0] - 2026-10-05
 
 ### Added

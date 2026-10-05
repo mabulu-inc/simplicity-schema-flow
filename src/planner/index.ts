@@ -8,6 +8,7 @@
 import type {
   TableSchema,
   StorageParameterValue,
+  UnmanagedKind,
   ColumnDef,
   ForeignKeyRef,
   ForeignKeyDef,
@@ -211,7 +212,7 @@ export interface PlanResult {
   operations: Operation[];
   /** Operations that were blocked because allowDestructive is false */
   blocked: Operation[];
-  /** Objects on managed tables marked unmanaged, which the plan leaves alone (#77). */
+  /** Objects a table's YAML declares unmanaged, which the plan leaves alone (#77). */
   unmanaged: UnmanagedObject[];
 }
 
@@ -220,24 +221,22 @@ export interface UnmanagedObject {
   name: string;
 }
 
-/**
- * A comment starting with this marks an object attached to a managed table —
- * an index, unique/check/exclusion constraint, trigger or policy — as owned
- * by someone else: schema-flow never drops it, even with --allow-destructive
- * (issue #77). Anything after the marker is free text for its creator.
- */
-export const UNMANAGED_MARKER = 'schema-flow:unmanaged';
-
-export function isUnmanaged(comment: string | undefined): boolean {
-  return comment?.startsWith(UNMANAGED_MARKER) ?? false;
+/** Whether `name` matches a glob pattern (`*` any run, `?` one character), whole name only. */
+function matchesPattern(name: string, pattern: string): boolean {
+  const regex = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
+  return new RegExp(`^${regex}$`).test(name);
 }
 
 /**
- * Remove marked objects from the live tables, so every diff treats them as if
- * they weren't there: never dropped, never reported as drift. An object whose
- * name the YAML declares stays managed whatever its comment says. Standalone
- * objects aren't covered — something schema-flow shouldn't own belongs in a
- * schema it doesn't target.
+ * Remove the objects a table's YAML declares unmanaged (`unmanaged:` name
+ * patterns) from the live tables, so every diff treats them as if they weren't
+ * there: never dropped, never reported as drift (issue #77). An object whose
+ * name the YAML declares stays managed even if a pattern matches it.
+ * Standalone objects aren't covered — something schema-flow shouldn't own
+ * belongs in a schema it doesn't target.
  */
 export function separateUnmanaged(
   desired: TableSchema[],
@@ -256,22 +255,23 @@ export function separateUnmanaged(
       ...(want?.triggers ?? []).map((t) => t.name),
       ...(want?.policies ?? []).map((p) => p.name),
     ]);
-    const keep = <T extends { comment?: string }>(items: T[] | undefined, nameOf: (item: T) => string) => {
-      if (!items) return undefined;
+    const keep = <T>(items: T[] | undefined, kind: UnmanagedKind, nameOf: (item: T) => string) => {
+      const patterns = want?.unmanaged?.[kind];
+      if (!items || !patterns) return items;
       return items.filter((item) => {
         const itemName = nameOf(item);
-        if (!isUnmanaged(item.comment) || declared.has(itemName)) return true;
+        if (declared.has(itemName) || !patterns.some((p) => matchesPattern(itemName, p))) return true;
         unmanaged.push({ table: name, name: itemName });
         return false;
       });
     };
     tables.set(name, {
       ...live,
-      indexes: keep(live.indexes, (i) => i.name || defaultIndexName(name, i)),
-      checks: keep(live.checks, (c) => c.name),
-      exclusion_constraints: keep(live.exclusion_constraints, (e) => exclusionName(name, e)),
-      triggers: keep(live.triggers, (t) => t.name),
-      policies: keep(live.policies, (p) => p.name),
+      indexes: keep(live.indexes, 'indexes', (i) => i.name || defaultIndexName(name, i)),
+      checks: keep(live.checks, 'checks', (c) => c.name),
+      exclusion_constraints: keep(live.exclusion_constraints, 'exclusion_constraints', (e) => exclusionName(name, e)),
+      triggers: keep(live.triggers, 'triggers', (t) => t.name),
+      policies: keep(live.policies, 'policies', (p) => p.name),
     });
   }
   return { tables, unmanaged };

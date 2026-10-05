@@ -121,29 +121,30 @@ comment: 'Core user accounts table'
 Every key a table file accepts. `table` and `columns` are required; the rest are
 optional. Each has its own section below or its own page.
 
-| Key                     | Type    | Description                                                                                                     |
-| ----------------------- | ------- | --------------------------------------------------------------------------------------------------------------- |
-| `table`                 | string  | Table name (required)                                                                                           |
-| `columns`               | list    | Column definitions — see [Columns](#columns) (required)                                                         |
-| `primary_key`           | list    | Composite primary key columns (alternative to column-level `primary_key`)                                       |
-| `primary_key_name`      | string  | Custom primary-key constraint name                                                                              |
-| `storage`               | map     | Storage parameters such as autovacuum settings and `fillfactor` — see [Storage parameters](#storage-parameters) |
-| `indexes`               | list    | Indexes, including table-level unique constraints (`as_constraint`)                                             |
-| `checks`                | list    | Named check constraints                                                                                         |
-| `foreign_keys`          | list    | Composite (multi-column) foreign keys — see [Composite foreign keys](#composite-foreign-keys)                   |
-| `exclusion_constraints` | list    | Exclusion constraints                                                                                           |
-| `triggers`              | list    | Triggers                                                                                                        |
-| `rls`                   | boolean | Enable row-level security                                                                                       |
-| `force_rls`             | boolean | Force RLS for the table owner too                                                                               |
-| `policies`              | list    | RLS policies                                                                                                    |
-| `grants`                | list    | Privilege grants                                                                                                |
-| `prechecks`             | list    | Pre-apply assertions that must hold before the migration runs                                                   |
-| `seeds`                 | list    | Insert-only seed rows — see [Seeds](/simplicity-schema-flow/schema/seeds/)                                      |
-| `mixins`                | list    | Reusable column/constraint sets — see [Mixins](/simplicity-schema-flow/schema/mixins/)                          |
-| `partition_by`          | object  | Declarative partitioning — see [Partitioning](/simplicity-schema-flow/schema/partitioning/)                     |
-| `partitions`            | object  | pg_partman rolling-partition maintenance                                                                        |
-| `bootstrap`             | boolean | Apply this table in the bootstrap transaction — see [Bootstrap](/simplicity-schema-flow/schema/bootstrap/)      |
-| `comment`               | string  | Table comment (alias: `description`)                                                                            |
+| Key                     | Type    | Description                                                                                                                                                                          |
+| ----------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `table`                 | string  | Table name (required)                                                                                                                                                                |
+| `columns`               | list    | Column definitions — see [Columns](#columns) (required)                                                                                                                              |
+| `primary_key`           | list    | Composite primary key columns (alternative to column-level `primary_key`)                                                                                                            |
+| `primary_key_name`      | string  | Custom primary-key constraint name                                                                                                                                                   |
+| `storage`               | map     | Storage parameters such as autovacuum settings and `fillfactor` — see [Storage parameters](#storage-parameters)                                                                      |
+| `unmanaged`             | map     | Name patterns for objects on this table that someone else owns — see [Destructive protection](/simplicity-schema-flow/safety/destructive-protection/#objects-schema-flow-doesnt-own) |
+| `indexes`               | list    | Indexes, including table-level unique constraints (`as_constraint`)                                                                                                                  |
+| `checks`                | list    | Named check constraints                                                                                                                                                              |
+| `foreign_keys`          | list    | Composite (multi-column) foreign keys — see [Composite foreign keys](#composite-foreign-keys)                                                                                        |
+| `exclusion_constraints` | list    | Exclusion constraints                                                                                                                                                                |
+| `triggers`              | list    | Triggers                                                                                                                                                                             |
+| `rls`                   | boolean | Enable row-level security                                                                                                                                                            |
+| `force_rls`             | boolean | Force RLS for the table owner too                                                                                                                                                    |
+| `policies`              | list    | RLS policies                                                                                                                                                                         |
+| `grants`                | list    | Privilege grants                                                                                                                                                                     |
+| `prechecks`             | list    | Pre-apply assertions that must hold before the migration runs                                                                                                                        |
+| `seeds`                 | list    | Insert-only seed rows — see [Seeds](/simplicity-schema-flow/schema/seeds/)                                                                                                           |
+| `mixins`                | list    | Reusable column/constraint sets — see [Mixins](/simplicity-schema-flow/schema/mixins/)                                                                                               |
+| `partition_by`          | object  | Declarative partitioning — see [Partitioning](/simplicity-schema-flow/schema/partitioning/)                                                                                          |
+| `partitions`            | object  | pg_partman rolling-partition maintenance                                                                                                                                             |
+| `bootstrap`             | boolean | Apply this table in the bootstrap transaction — see [Bootstrap](/simplicity-schema-flow/schema/bootstrap/)                                                                           |
+| `comment`               | string  | Table comment (alias: `description`)                                                                                                                                                 |
 
 ## Columns
 

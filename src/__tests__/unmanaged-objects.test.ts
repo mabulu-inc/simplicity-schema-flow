@@ -3,7 +3,6 @@ import pg from 'pg';
 import { useTestProject, writeSchema, type TestProject } from '../testing/index.js';
 import { buildPlan } from '../planner/index.js';
 import { buildDesiredAndActual } from '../cli/pipeline.js';
-import { generateFromDb } from '../scaffold/index.js';
 import { parseTable } from '../schema/parser.js';
 import { createLogger } from '../core/logger.js';
 import { closePool } from '../core/db.js';
@@ -41,83 +40,88 @@ async function plan(project: TestProject) {
 
 interface Kind {
   kind: string;
+  /** The `unmanaged:` key that covers this kind. */
+  key: string;
   /** Creates the object, named `x_<suffix>`, as a second author would. */
   create: (suffix: string) => string;
-  comment: (suffix: string, text: string) => string;
   exists: (suffix: string) => string;
   drop: string;
+  /** Whether a second, unmatched object of this kind can sit on the same table. */
+  stale: boolean;
 }
 
 const KINDS: Kind[] = [
   {
     kind: 'index',
+    key: 'indexes',
     create: (s) => `CREATE INDEX x_${s} ON t (tenant_id, n) WHERE tenant_id = 298`,
-    comment: (s, c) => `COMMENT ON INDEX x_${s} IS '${c}'`,
     exists: (s) => `SELECT 1 FROM pg_class WHERE relname = 'x_${s}'`,
     drop: 'drop_index',
+    stale: true,
   },
   {
     kind: 'unique constraint',
+    key: 'indexes',
     create: (s) => `ALTER TABLE t ADD CONSTRAINT x_${s} UNIQUE (tenant_id, n)`,
-    comment: (s, c) => `COMMENT ON CONSTRAINT x_${s} ON t IS '${c}'`,
     exists: (s) => `SELECT 1 FROM pg_constraint WHERE conname = 'x_${s}'`,
     drop: 'drop_unique_constraint',
+    stale: false,
   },
   {
     kind: 'check',
+    key: 'checks',
     create: (s) => `ALTER TABLE t ADD CONSTRAINT x_${s} CHECK (n >= 0)`,
-    comment: (s, c) => `COMMENT ON CONSTRAINT x_${s} ON t IS '${c}'`,
     exists: (s) => `SELECT 1 FROM pg_constraint WHERE conname = 'x_${s}'`,
     drop: 'drop_check',
+    stale: true,
   },
   {
     kind: 'exclusion constraint',
+    key: 'exclusion_constraints',
     create: (s) => `ALTER TABLE t ADD CONSTRAINT x_${s} EXCLUDE USING gist (during WITH &&)`,
-    comment: (s, c) => `COMMENT ON CONSTRAINT x_${s} ON t IS '${c}'`,
     exists: (s) => `SELECT 1 FROM pg_constraint WHERE conname = 'x_${s}'`,
     drop: 'drop_exclusion_constraint',
+    stale: false,
   },
   {
     kind: 'trigger',
+    key: 'triggers',
+    // The function is standalone, so it lives outside the managed schema.
     create: (s) =>
-      // The function is standalone, so it lives outside the managed schema.
       `CREATE SCHEMA IF NOT EXISTS x_app;
        CREATE OR REPLACE FUNCTION x_app.noop() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;
        CREATE TRIGGER x_${s} BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION x_app.noop()`,
-    comment: (s, c) => `COMMENT ON TRIGGER x_${s} ON t IS '${c}'`,
     exists: (s) => `SELECT 1 FROM pg_trigger WHERE tgname = 'x_${s}'`,
     drop: 'drop_trigger',
+    stale: true,
   },
   {
     kind: 'policy',
+    key: 'policies',
     create: (s) => `CREATE POLICY x_${s} ON t FOR SELECT USING (tenant_id = 298)`,
-    comment: (s, c) => `COMMENT ON POLICY x_${s} ON t IS '${c}'`,
     exists: (s) => `SELECT 1 FROM pg_policy WHERE polname = 'x_${s}'`,
     drop: 'drop_policy',
+    stale: true,
   },
 ];
 
 // schema-flow treated every undeclared object on a managed table as stale, so
 // one routine `run --allow-destructive` dropped indexes an application had
 // created per tenant — with no error, only slower queries later (issue #77).
-// A comment starting `schema-flow:unmanaged` now marks an object as owned by
-// someone else.
+// A table's YAML now declares, by name pattern, which objects someone else owns.
 describe('unmanaged objects on a managed table (#77)', () => {
-  it.each(KINDS)('keeps a marked $kind and still drops an unmarked one', async (k) => {
+  it.each(KINDS)('keeps a $kind matching an unmanaged pattern and drops one that does not', async (k) => {
     const project = await useTestProject(DATABASE_URL);
     try {
-      writeSchema(project.dir, { 'tables/t.yaml': TABLE });
+      writeSchema(project.dir, { 'tables/t.yaml': `${TABLE}unmanaged:\n  ${k.key}: ['x_mark*']\n` });
       await project.migrate();
       await sql(project, k.create('marked'));
-      await sql(project, k.comment('marked', 'schema-flow:unmanaged — tenant 298 filter'));
-      if (k.kind !== 'unique constraint' && k.kind !== 'exclusion constraint') {
-        await sql(project, k.create('stale'));
-      }
+      if (k.stale) await sql(project, k.create('stale'));
 
       const p = await plan(project);
       expect(p.unmanaged).toEqual([{ table: 't', name: 'x_marked' }]);
       expect(p.operations.filter((o) => o.objectName.includes('x_marked'))).toEqual([]);
-      if (k.kind !== 'unique constraint' && k.kind !== 'exclusion constraint') {
+      if (k.stale) {
         expect(p.operations.filter((o) => o.objectName.includes('x_stale')).map((o) => o.type)).toEqual([k.drop]);
       }
 
@@ -132,13 +136,34 @@ describe('unmanaged objects on a managed table (#77)', () => {
     }
   });
 
-  it('a comment that does not start with the marker leaves the object stale', async () => {
+  it('a pattern covers only its own kind, and only whole names', async () => {
+    const project = await useTestProject(DATABASE_URL);
+    try {
+      // `x_?` matches x_a but not x_ab; a `checks` pattern doesn't cover an index.
+      writeSchema(project.dir, { 'tables/t.yaml': `${TABLE}unmanaged:\n  indexes: ['x_?']\n  checks: ['x_idx']\n` });
+      await project.migrate();
+      await sql(project, `CREATE INDEX x_a ON t (n)`);
+      await sql(project, `CREATE INDEX x_ab ON t (n)`);
+      await sql(project, `CREATE INDEX x_idx ON t (n)`);
+
+      const p = await plan(project);
+      expect(p.unmanaged).toEqual([{ table: 't', name: 'x_a' }]);
+      expect(p.operations.map((o) => `${o.type} ${o.objectName}`).sort()).toEqual([
+        'drop_index x_ab',
+        'drop_index x_idx',
+      ]);
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it('a comment is not a marker', async () => {
     const project = await useTestProject(DATABASE_URL);
     try {
       writeSchema(project.dir, { 'tables/t.yaml': TABLE });
       await project.migrate();
       await sql(project, `CREATE INDEX x_note ON t (n)`);
-      await sql(project, `COMMENT ON INDEX x_note IS 'see schema-flow:unmanaged'`);
+      await sql(project, `COMMENT ON INDEX x_note IS 'schema-flow:unmanaged'`);
 
       const p = await plan(project);
       expect(p.unmanaged).toEqual([]);
@@ -148,16 +173,15 @@ describe('unmanaged objects on a managed table (#77)', () => {
     }
   });
 
-  it('an object the YAML declares stays managed, whatever its comment says', async () => {
+  it('an object the YAML declares stays managed, even if a pattern matches it', async () => {
     const project = await useTestProject(DATABASE_URL);
     try {
       writeSchema(project.dir, { 'tables/t.yaml': TABLE });
       await project.migrate();
       await sql(project, `CREATE INDEX x_declared ON t (n)`);
-      await sql(project, `COMMENT ON INDEX x_declared IS 'schema-flow:unmanaged'`);
 
       writeSchema(project.dir, {
-        'tables/t.yaml': `${TABLE}indexes:\n  - { name: x_declared, columns: [tenant_id] }\n`,
+        'tables/t.yaml': `${TABLE}indexes:\n  - { name: x_declared, columns: [tenant_id] }\nunmanaged:\n  indexes: ['x_*']\n`,
       });
       const p = await plan(project);
       expect(p.unmanaged).toEqual([]);
@@ -167,26 +191,8 @@ describe('unmanaged objects on a managed table (#77)', () => {
     }
   });
 
-  it('generate leaves unmanaged objects out of the YAML', async () => {
-    const project = await useTestProject(DATABASE_URL);
-    try {
-      writeSchema(project.dir, { 'tables/t.yaml': `${TABLE}indexes:\n  - { name: t_n, columns: [n] }\n` });
-      await project.migrate();
-      await sql(project, `CREATE INDEX x_marked ON t (tenant_id) WHERE tenant_id = 298`);
-      await sql(project, `COMMENT ON INDEX x_marked IS 'schema-flow:unmanaged'`);
-
-      const { actual } = await buildDesiredAndActual(project.config, logger);
-      const [file] = generateFromDb({
-        tables: [actual.tables.get('t')!],
-        enums: [],
-        functions: [],
-        views: [],
-        materializedViews: [],
-        roles: [],
-      });
-      expect(parseTable(file.content).indexes?.map((i) => i.name)).toEqual(['t_n']);
-    } finally {
-      await project.cleanup();
-    }
+  it('rejects an unknown kind or a non-list of patterns', () => {
+    expect(() => parseTable(`${TABLE}unmanaged:\n  tables: ['x']\n`)).toThrow(/unmanaged/);
+    expect(() => parseTable(`${TABLE}unmanaged:\n  indexes: 'x_*'\n`)).toThrow(/unmanaged/);
   });
 });

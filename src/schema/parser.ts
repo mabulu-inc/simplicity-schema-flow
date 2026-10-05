@@ -2,6 +2,8 @@ import { parse as parseYaml } from 'yaml';
 import type {
   TableSchema,
   StorageParameterValue,
+  UnmanagedKind,
+  UnmanagedPatterns,
   ColumnDef,
   IndexDef,
   IndexKey,
@@ -44,6 +46,7 @@ import type {
   MixinParam,
   ExtendSchema,
 } from './types.js';
+import { UNMANAGED_KINDS } from './types.js';
 
 const sqlTag = {
   tag: '!sql',
@@ -585,6 +588,21 @@ function parseStorage(raw: unknown, ctx: string): Record<string, StorageParamete
   return storage;
 }
 
+function parseUnmanaged(raw: unknown, ctx: string): UnmanagedPatterns {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${ctx}: must be a map of object kinds to name patterns`);
+  }
+  checkKeys(raw as Record<string, unknown>, UNMANAGED_KINDS, ctx);
+  const patterns: UnmanagedPatterns = {};
+  for (const [kind, list] of Object.entries(raw) as [UnmanagedKind, unknown][]) {
+    if (!Array.isArray(list) || list.some((p) => typeof p !== 'string' || p === '')) {
+      throw new Error(`${ctx}.${kind}: must be a list of name patterns`);
+    }
+    patterns[kind] = list as string[];
+  }
+  return patterns;
+}
+
 // Exported as the single source of truth for the set of accepted table-level
 // keys — the docs "Table-level keys" reference is kept in sync with it by test.
 export const TABLE_KEYS = [
@@ -595,6 +613,7 @@ export const TABLE_KEYS = [
   'primary_key',
   'primary_key_name',
   'storage',
+  'unmanaged',
   'indexes',
   'checks',
   'foreign_keys',
@@ -639,6 +658,7 @@ export function parseTable(yamlStr: string): TableSchema {
   if (raw.primary_key !== undefined) table.primary_key = raw.primary_key as string[];
   if (raw.primary_key_name !== undefined) table.primary_key_name = String(raw.primary_key_name);
   if (raw.storage !== undefined) table.storage = parseStorage(raw.storage, `${ctx}.storage`);
+  if (raw.unmanaged !== undefined) table.unmanaged = parseUnmanaged(raw.unmanaged, `${ctx}.unmanaged`);
   if (raw.indexes !== undefined)
     table.indexes = (raw.indexes as Record<string, unknown>[]).map((idx, i) =>
       parseIndexDef(idx, `${ctx}.indexes[${i}]`),

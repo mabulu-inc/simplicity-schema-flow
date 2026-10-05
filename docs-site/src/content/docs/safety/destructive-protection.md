@@ -87,26 +87,29 @@ touched.
 
 **Objects attached to a managed table** (indexes, unique, check and
 exclusion constraints, triggers, RLS policies) have to live with their table.
-Mark them with a comment that starts with `schema-flow:unmanaged`:
+Declare them in the table's YAML with name patterns under `unmanaged:`:
 
-```sql
-CREATE INDEX CONCURRENTLY tenant298_cf_fiscal_quarters
-  ON opportunities (tenant_id, ((custom_fields ->> 'Fiscal_Quarters__c')))
-  WHERE tenant_id = 298;
-COMMENT ON INDEX tenant298_cf_fiscal_quarters IS 'schema-flow:unmanaged — tenant filter';
+```yaml
+table: opportunities
+unmanaged:
+  indexes: ['tenant*_cf_*'] # also: checks, exclusion_constraints, triggers, policies
 ```
 
-A marked object:
+`*` matches any run of characters and `?` matches one, against the whole
+name. `indexes` also covers unique constraints. An object matching a pattern:
 
 - is never dropped, even with `--allow-destructive`
 - is counted in `plan` and `run` output (`Unmanaged (left alone): N objects`),
   and named with `--verbose`
-- isn't reported by `drift`, and isn't written into the YAML by `generate`
+- isn't reported by `drift`
 
-If the YAML declares an object with the same name, the YAML wins and
-schema-flow manages it whatever the comment says. An object without the
-marker is still treated as stale, so code that creates these objects should
-set the comment in the same step.
+An object the YAML declares by name stays managed even if a pattern matches it.
+An undeclared object that matches no pattern is still stale, so keep the names
+your application uses inside the pattern.
+
+`generate` has no YAML to consult, so it writes every object it finds. After
+generating, delete the entries for objects you don't own and add the matching
+`unmanaged:` pattern.
 
 ## Advisory locking
 
