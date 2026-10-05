@@ -1165,10 +1165,11 @@ columns:
 
   // ── 11. type narrowing (text → varchar(50)) ────────────────────
   // Note: The planner marks type changes as destructive: false.
-  // Type narrowing is detected by lint as a warning, not blocked.
-  // This test verifies the type change goes through (not blocked).
+  // The type change casts explicitly (`"name"::varchar(50)`), and an explicit
+  // cast to varchar(n) truncates instead of failing, so narrowing is blocked
+  // like any other change that can lose data (issue #74).
 
-  it('(11) type narrowing (text → varchar) is not blocked', async () => {
+  it('(11) blocks type narrowing (text → varchar) without --allow-destructive', async () => {
     ctx = await useTestProject(DATABASE_URL);
 
     writeSchema(ctx.dir, {
@@ -1202,10 +1203,18 @@ columns:
 `,
     });
 
-    // Runs without --allow-destructive — type narrowing is not blocked
+    // Without --allow-destructive the column keeps its type.
     await runMigration(ctx);
+    const before = await queryDb(
+      ctx,
+      `SELECT data_type FROM information_schema.columns
+       WHERE table_schema = $1 AND table_name = 'narrow_tbl' AND column_name = 'name'`,
+      [ctx.schema],
+    );
+    expect(before.rows[0].data_type).toBe('text');
 
-    // Type should have been changed
+    // With it, the type changes.
+    await runMigration(ctx, { allowDestructive: true });
     const after = await queryDb(
       ctx,
       `SELECT data_type, character_maximum_length

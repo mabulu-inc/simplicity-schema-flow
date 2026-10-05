@@ -22,7 +22,10 @@ These operations are **blocked by default** and require `--allow-destructive`:
 - `disable_rls` -- disabling row-level security
 - `drop_policy` -- dropping RLS policies
 - `drop_trigger` -- dropping triggers
-- Column type narrowing (e.g., `text` -> `varchar(50)`)
+- A column type change whose cast can change values without an error, unless
+  the column sets `using:`: time-zone-dependent (`timestamptz` -> `date`),
+  rounding (`numeric` -> `integer`) or truncating (`text` -> `varchar(50)`).
+  See [Changing a column's type](/simplicity-schema-flow/schema/tables/#changing-a-columns-type).
 - Enum value removal (`remove_enum_value`)
 
 ## Behavior

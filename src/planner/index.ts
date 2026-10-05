@@ -1915,6 +1915,10 @@ function diffColumn(
   // no-op relabel for binary-coercible pairs like varchar→text, so it never
   // forces an otherwise-avoidable rewrite). Columns needing custom conversion
   // (empty-string handling, enum remaps) supply their own `using:` expression.
+  //
+  // Without a `using:`, a cast that can change values without an error —
+  // resolved against the session TimeZone, rounded, or truncated — is
+  // destructive (issue #74). A declared `using:` states the conversion.
   if (normalizeTypeName(desired.type) !== normalizeTypeName(existing.type)) {
     const usingExpr = desired.using ?? `"${desired.name}"::${desired.type}`;
     ops.push({
@@ -1922,7 +1926,7 @@ function diffColumn(
       phase: 6,
       objectName: `${table}.${desired.name}`,
       sql: `ALTER TABLE "${pgSchema}"."${table}" ALTER COLUMN "${desired.name}" TYPE ${desired.type} USING ${usingExpr}`,
-      destructive: false,
+      destructive: desired.using === undefined && castMayChangeValues(existing.type, desired.type),
     });
   }
 
@@ -3343,6 +3347,67 @@ export function normalizeTypeName(t: string): string {
   };
   const canonicalBase = aliases[base] || base;
   return `${canonicalBase}${params}`;
+}
+
+const INTEGER_TYPES = new Set(['smallint', 'integer', 'bigint']);
+const FLOAT_TYPES = new Set(['real', 'double precision']);
+const ZONED_TYPES = new Set(['timestamp with time zone', 'time with time zone']);
+const DATETIME_TYPES = new Set([
+  'date',
+  'timestamp without time zone',
+  'timestamp with time zone',
+  'time without time zone',
+  'time with time zone',
+]);
+const STRING_TYPES = new Set(['text', 'character varying', 'character']);
+
+function splitTypeName(t: string): { base: string; params: number[] } {
+  const normalized = normalizeTypeName(t);
+  const match = normalized.match(/^([^()]+)\(([^()]*)\)$/);
+  if (!match) return { base: normalized, params: [] };
+  return { base: match[1], params: match[2].split(',').map(Number) };
+}
+
+/**
+ * Whether the explicit cast a type change applies (`"<col>"::<newtype>`) can
+ * change a value without raising an error. Those casts succeed on every row
+ * and report nothing, so the planner treats them as destructive (issue #74).
+ * Casts that fail loudly on a bad value — `text` → `integer`, `text` → an
+ * enum, a too-small `numeric(p)` — don't count: the migrate stops instead.
+ */
+export function castMayChangeValues(fromType: string, toType: string): boolean {
+  const from = splitTypeName(fromType);
+  const to = splitTypeName(toType);
+
+  if (DATETIME_TYPES.has(from.base) && DATETIME_TYPES.has(to.base)) {
+    // Adding or removing a zone resolves against the session TimeZone.
+    if (ZONED_TYPES.has(from.base) !== ZONED_TYPES.has(to.base)) return true;
+    // Timestamp → date drops the time of day; timestamp → time drops the date.
+    if (from.base.startsWith('timestamp') && !to.base.startsWith('timestamp')) return true;
+    return false;
+  }
+
+  const fromFractional = FLOAT_TYPES.has(from.base) || from.base === 'numeric';
+  if (fromFractional && INTEGER_TYPES.has(to.base)) return true;
+  if (from.base === 'double precision' && to.base === 'real') return true;
+  if (to.base === 'numeric' && to.params.length > 0) {
+    // numeric(p,s) rounds to s digits. Integers have none to lose.
+    const toScale = to.params[1] ?? 0;
+    if (FLOAT_TYPES.has(from.base)) return true;
+    if (from.base === 'numeric') return from.params.length === 0 || (from.params[1] ?? 0) > toScale;
+  }
+
+  // An explicit cast to a length-limited string truncates instead of failing.
+  // A bare `character` is `character(1)`.
+  const maxLength = (t: { base: string; params: number[] }) =>
+    t.base === 'character' ? (t.params[0] ?? 1) : t.base === 'character varying' ? t.params[0] : undefined;
+  const toLength = maxLength(to);
+  if (toLength !== undefined) {
+    const fromLength = STRING_TYPES.has(from.base) ? maxLength(from) : undefined;
+    return fromLength === undefined || fromLength > toLength;
+  }
+
+  return false;
 }
 
 /** Split on top-level commas, ignoring commas inside parentheses. */

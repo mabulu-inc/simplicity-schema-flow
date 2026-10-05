@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A column type change that could quietly alter data now needs
+  `--allow-destructive`.** Some casts succeed on every row but change what is
+  stored: `timestamptz` → `date` (the day depends on the session time zone, so
+  two people running the same migration can get different dates), `numeric` →
+  `integer` (rounds), and `text` → `varchar(5)` (cuts values short). These
+  changes used to run without a prompt. Now they are blocked unless you pass
+  `--allow-destructive` or set `using:` on the column to say how to convert,
+  for example `using: "(closed_at AT TIME ZONE 'UTC')::date"`. Casts that fail
+  loudly on bad values, such as `text` → `integer`, are unchanged.
 - **A blocked index or constraint change is no longer reported as applied.**
   Changing an existing index, unique constraint or exclusion constraint means
   dropping and re-creating it. Without `--allow-destructive` the drop was

@@ -211,6 +211,32 @@ substituted verbatim into the `USING` clause:
 
 `using:` is only applied when the type actually changes; it is ignored otherwise.
 
+#### Casts that can change values are blocked
+
+Some casts succeed on every row but change what is stored, with no error. A
+type change that relies on one of these is **destructive**: it is blocked
+without `--allow-destructive`, unless you set `using:`.
+
+| Kind                             | Examples                                                                                                               |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Depends on the session time zone | `timestamptz` → `date` / `timestamp` / `time`, `timestamp` or `date` → `timestamptz`                                   |
+| Drops part of the value          | `timestamp` → `date`, `timestamp` → `time`                                                                             |
+| Rounds                           | `numeric` / `real` / `double precision` → an integer type, `double precision` → `real`, fewer `numeric` decimal places |
+| Truncates                        | Anything → a shorter `varchar(n)` / `char(n)` (an explicit cast cuts the value instead of failing)                     |
+
+The time-zone case is the dangerous one: the same schema applied by two people
+in different session time zones gives two different results. Say which zone
+you mean:
+
+```yaml
+- name: closed_at
+  type: date
+  using: "(closed_at AT TIME ZONE 'UTC')::date"
+```
+
+Casts that fail on a bad value (`text` → `integer`, `text` → an enum) are not
+blocked: the migration stops with an error instead of changing data.
+
 ### Foreign key references
 
 ```yaml

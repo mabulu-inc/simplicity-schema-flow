@@ -659,7 +659,7 @@ describe('Planner', () => {
       const actual = emptyActual();
       actual.tables.set('users', {
         table: 'users',
-        columns: [{ name: 'name', type: 'text' }],
+        columns: [{ name: 'name', type: 'varchar(100)' }],
       });
       const result = buildPlan(desired, actual);
       const ops = findOps(result.operations, 'alter_column');
