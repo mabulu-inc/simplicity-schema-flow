@@ -211,13 +211,79 @@ export interface PlanResult {
   operations: Operation[];
   /** Operations that were blocked because allowDestructive is false */
   blocked: Operation[];
+  /** Objects on managed tables marked unmanaged, which the plan leaves alone (#77). */
+  unmanaged: UnmanagedObject[];
+}
+
+export interface UnmanagedObject {
+  table: string;
+  name: string;
+}
+
+/**
+ * A comment starting with this marks an object attached to a managed table —
+ * an index, unique/check/exclusion constraint, trigger or policy — as owned
+ * by someone else: schema-flow never drops it, even with --allow-destructive
+ * (issue #77). Anything after the marker is free text for its creator.
+ */
+export const UNMANAGED_MARKER = 'schema-flow:unmanaged';
+
+export function isUnmanaged(comment: string | undefined): boolean {
+  return comment?.startsWith(UNMANAGED_MARKER) ?? false;
+}
+
+/**
+ * Remove marked objects from the live tables, so every diff treats them as if
+ * they weren't there: never dropped, never reported as drift. An object whose
+ * name the YAML declares stays managed whatever its comment says. Standalone
+ * objects aren't covered — something schema-flow shouldn't own belongs in a
+ * schema it doesn't target.
+ */
+export function separateUnmanaged(
+  desired: TableSchema[],
+  actual: Map<string, TableSchema>,
+): { tables: Map<string, TableSchema>; unmanaged: UnmanagedObject[] } {
+  const desiredByName = new Map(desired.map((t) => [t.table, t]));
+  const tables = new Map<string, TableSchema>();
+  const unmanaged: UnmanagedObject[] = [];
+
+  for (const [name, live] of actual) {
+    const want = desiredByName.get(name);
+    const declared = new Set<string>([
+      ...(want?.indexes ?? []).map((i) => i.name || defaultIndexName(name, i)),
+      ...(want?.checks ?? []).map((c) => c.name),
+      ...(want?.exclusion_constraints ?? []).map((e) => exclusionName(name, e)),
+      ...(want?.triggers ?? []).map((t) => t.name),
+      ...(want?.policies ?? []).map((p) => p.name),
+    ]);
+    const keep = <T extends { comment?: string }>(items: T[] | undefined, nameOf: (item: T) => string) => {
+      if (!items) return undefined;
+      return items.filter((item) => {
+        const itemName = nameOf(item);
+        if (!isUnmanaged(item.comment) || declared.has(itemName)) return true;
+        unmanaged.push({ table: name, name: itemName });
+        return false;
+      });
+    };
+    tables.set(name, {
+      ...live,
+      indexes: keep(live.indexes, (i) => i.name || defaultIndexName(name, i)),
+      checks: keep(live.checks, (c) => c.name),
+      exclusion_constraints: keep(live.exclusion_constraints, (e) => exclusionName(name, e)),
+      triggers: keep(live.triggers, (t) => t.name),
+      policies: keep(live.policies, (p) => p.name),
+    });
+  }
+  return { tables, unmanaged };
 }
 
 // ─── Main Planner ──────────────────────────────────────────────
 
-export function buildPlan(desired: DesiredState, actual: ActualState, options: PlanOptions = {}): PlanResult {
+export function buildPlan(desired: DesiredState, liveState: ActualState, options: PlanOptions = {}): PlanResult {
   const { allowDestructive = false, pgSchema = 'public' } = options;
   const allOps: Operation[] = [];
+  const { tables, unmanaged } = separateUnmanaged(desired.tables, liveState.tables);
+  const actual: ActualState = { ...liveState, tables };
 
   // Diff extensions
   allOps.push(...diffExtensions(desired.extensions, actual.extensions));
@@ -266,7 +332,7 @@ export function buildPlan(desired: DesiredState, actual: ActualState, options: P
     }
   }
 
-  return { operations, blocked };
+  return { operations, blocked, unmanaged };
 }
 
 // ─── Extensions ────────────────────────────────────────────────

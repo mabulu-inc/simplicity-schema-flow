@@ -154,13 +154,19 @@ async function planAgainstDatabase(
   }
 
   const actual = await introspectDatabase(config, logger);
-  const { operations, blocked } = buildPlan(desired, actual, {
+  const { operations, blocked, unmanaged } = buildPlan(desired, actual, {
     allowDestructive: config.allowDestructive,
     pgSchema: config.pgSchema,
   });
 
   for (const op of blocked) {
     logger.warn(`Blocked (destructive): ${op.type} ${op.objectName} — use --allow-destructive to allow`);
+  }
+
+  // Never silent: a count by default, each object with --verbose (#77).
+  if (unmanaged.length > 0) {
+    logger.info(`Unmanaged (left alone): ${unmanaged.length} object${unmanaged.length === 1 ? '' : 's'}`);
+    for (const u of unmanaged) logger.debug(`  ${u.table}.${u.name}`);
   }
 
   // In dry-run (plan) the report renders its own "Plan:" summary, so

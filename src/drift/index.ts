@@ -10,6 +10,7 @@ import type { DesiredState, ActualState } from '../planner/index.js';
 import {
   defaultIndexName,
   primaryKeyColumns,
+  separateUnmanaged,
   storageValuesEqual,
   functionSetsEqual,
   indexKeysIdentity,
@@ -135,7 +136,9 @@ export function detectDrift(desired: DesiredState, actual: ActualState): DriftRe
   items.push(...driftEnums(desired.enums, actual.enums));
   items.push(...driftRoles(desired.roles, actual.roles, collectReferencedRoles(desired)));
   items.push(...driftFunctions(desired.functions, actual.functions));
-  items.push(...driftTables(desired.tables, actual.tables));
+  // Objects marked unmanaged aren't drift — they belong to another author (#77).
+  const { tables } = separateUnmanaged(desired.tables, actual.tables);
+  items.push(...driftTables(desired.tables, tables));
   items.push(...driftPartitions(desired.tables, actual.tables));
   items.push(...driftPartitionSchedule(desired.tables, desired.extensions, actual.partitionMaintenance));
   items.push(...driftViews(desired.views, actual.views));

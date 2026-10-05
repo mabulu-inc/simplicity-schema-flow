@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Mark objects schema-flow should never drop.** An index, constraint,
+  trigger or policy that your application adds to a managed table is no longer
+  dropped by `run --allow-destructive` if its comment starts with
+  `schema-flow:unmanaged`, for example
+  `COMMENT ON INDEX tenant298_cf_fiscal_quarters IS 'schema-flow:unmanaged'`.
+  Before, one routine destructive run removed every such index without an
+  error. Marked objects are counted in `plan` and `run` output, named with
+  `--verbose`, left out of `drift`, and not written into YAML by `generate`.
+  For tables, views or functions schema-flow shouldn't manage, use a Postgres
+  schema it doesn't target.
 - **Declare a table's storage parameters in its YAML.** Autovacuum settings,
   `fillfactor` and their `toast.` variants go under a `storage:` key. `plan`
   shows the change, `run` applies it with `ALTER TABLE … SET (…)` (safe on a

@@ -5,6 +5,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { stringify as yamlStringify } from 'yaml';
+import { separateUnmanaged } from '../planner/index.js';
 import type {
   TableSchema,
   EnumSchema,
@@ -39,7 +40,9 @@ export interface GeneratedFile {
 export function generateFromDb(input: GenerateInput, outputDir?: string): GeneratedFile[] {
   const files: GeneratedFile[] = [];
 
-  for (const table of input.tables) {
+  // Writing an unmanaged object into the YAML would take ownership of it (#77).
+  const { tables } = separateUnmanaged([], new Map(input.tables.map((t) => [t.table, t])));
+  for (const table of tables.values()) {
     files.push({
       filename: `tables/${table.table}.yaml`,
       content: yamlStringify(buildTableYaml(table)),

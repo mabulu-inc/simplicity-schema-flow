@@ -1043,6 +1043,7 @@ async function getTriggers(client: Client, table: string, schema: string): Promi
   const result = await client.query(
     `SELECT
        t.tgname AS name,
+       obj_description(t.oid, 'pg_trigger') AS comment,
        CASE
          WHEN (t.tgtype & 2) != 0 THEN 'BEFORE'
          WHEN (t.tgtype & 64) != 0 THEN 'INSTEAD OF'
@@ -1084,6 +1085,7 @@ async function getTriggers(client: Client, table: string, schema: string): Promi
 
     const whenClause = extractWhenClause(r.full_definition as string);
     if (whenClause) trigger.when = whenClause;
+    if (r.comment) trigger.comment = r.comment as string;
 
     return trigger;
   });
@@ -1116,6 +1118,7 @@ async function getPolicies(client: Client, table: string, schema: string): Promi
   const result = await client.query(
     `SELECT
        pol.polname AS name,
+       obj_description(pol.oid, 'pg_policy') AS comment,
        CASE pol.polcmd
          WHEN 'r' THEN 'SELECT'
          WHEN 'a' THEN 'INSERT'
@@ -1152,6 +1155,7 @@ async function getPolicies(client: Client, table: string, schema: string): Promi
     };
     if (r.using_expr) policy.using = r.using_expr as string;
     if (r.check_expr) policy.check = r.check_expr as string;
+    if (r.comment) policy.comment = r.comment as string;
     return policy;
   });
 }
