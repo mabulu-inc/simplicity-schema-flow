@@ -301,6 +301,8 @@ export interface PartitionMaintenanceDef {
 
 // ─── Table ──────────────────────────────────────────────────────
 
+export type StorageParameterValue = string | number | boolean;
+
 export interface TableSchema {
   table: string;
   columns: ColumnDef[];
@@ -308,6 +310,12 @@ export interface TableSchema {
   partitions?: PartitionsDef;
   primary_key?: string[];
   primary_key_name?: string;
+  /**
+   * Storage parameters (`WITH (...)`), `toast.`-prefixed for the TOAST table.
+   * Present — even empty — means schema-flow owns all of the table's
+   * parameters and resets undeclared ones; absent leaves them alone.
+   */
+  storage?: Record<string, StorageParameterValue>;
   indexes?: IndexDef[];
   checks?: CheckDef[];
   /** Composite (multi-column) foreign keys. Single-column FKs use column-level `references:`. */

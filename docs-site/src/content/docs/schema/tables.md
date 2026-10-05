@@ -121,28 +121,29 @@ comment: 'Core user accounts table'
 Every key a table file accepts. `table` and `columns` are required; the rest are
 optional. Each has its own section below or its own page.
 
-| Key                     | Type    | Description                                                                                                |
-| ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
-| `table`                 | string  | Table name (required)                                                                                      |
-| `columns`               | list    | Column definitions — see [Columns](#columns) (required)                                                    |
-| `primary_key`           | list    | Composite primary key columns (alternative to column-level `primary_key`)                                  |
-| `primary_key_name`      | string  | Custom primary-key constraint name                                                                         |
-| `indexes`               | list    | Indexes, including table-level unique constraints (`as_constraint`)                                        |
-| `checks`                | list    | Named check constraints                                                                                    |
-| `foreign_keys`          | list    | Composite (multi-column) foreign keys — see [Composite foreign keys](#composite-foreign-keys)              |
-| `exclusion_constraints` | list    | Exclusion constraints                                                                                      |
-| `triggers`              | list    | Triggers                                                                                                   |
-| `rls`                   | boolean | Enable row-level security                                                                                  |
-| `force_rls`             | boolean | Force RLS for the table owner too                                                                          |
-| `policies`              | list    | RLS policies                                                                                               |
-| `grants`                | list    | Privilege grants                                                                                           |
-| `prechecks`             | list    | Pre-apply assertions that must hold before the migration runs                                              |
-| `seeds`                 | list    | Insert-only seed rows — see [Seeds](/simplicity-schema-flow/schema/seeds/)                                 |
-| `mixins`                | list    | Reusable column/constraint sets — see [Mixins](/simplicity-schema-flow/schema/mixins/)                     |
-| `partition_by`          | object  | Declarative partitioning — see [Partitioning](/simplicity-schema-flow/schema/partitioning/)                |
-| `partitions`            | object  | pg_partman rolling-partition maintenance                                                                   |
-| `bootstrap`             | boolean | Apply this table in the bootstrap transaction — see [Bootstrap](/simplicity-schema-flow/schema/bootstrap/) |
-| `comment`               | string  | Table comment (alias: `description`)                                                                       |
+| Key                     | Type    | Description                                                                                                     |
+| ----------------------- | ------- | --------------------------------------------------------------------------------------------------------------- |
+| `table`                 | string  | Table name (required)                                                                                           |
+| `columns`               | list    | Column definitions — see [Columns](#columns) (required)                                                         |
+| `primary_key`           | list    | Composite primary key columns (alternative to column-level `primary_key`)                                       |
+| `primary_key_name`      | string  | Custom primary-key constraint name                                                                              |
+| `storage`               | map     | Storage parameters such as autovacuum settings and `fillfactor` — see [Storage parameters](#storage-parameters) |
+| `indexes`               | list    | Indexes, including table-level unique constraints (`as_constraint`)                                             |
+| `checks`                | list    | Named check constraints                                                                                         |
+| `foreign_keys`          | list    | Composite (multi-column) foreign keys — see [Composite foreign keys](#composite-foreign-keys)                   |
+| `exclusion_constraints` | list    | Exclusion constraints                                                                                           |
+| `triggers`              | list    | Triggers                                                                                                        |
+| `rls`                   | boolean | Enable row-level security                                                                                       |
+| `force_rls`             | boolean | Force RLS for the table owner too                                                                               |
+| `policies`              | list    | RLS policies                                                                                                    |
+| `grants`                | list    | Privilege grants                                                                                                |
+| `prechecks`             | list    | Pre-apply assertions that must hold before the migration runs                                                   |
+| `seeds`                 | list    | Insert-only seed rows — see [Seeds](/simplicity-schema-flow/schema/seeds/)                                      |
+| `mixins`                | list    | Reusable column/constraint sets — see [Mixins](/simplicity-schema-flow/schema/mixins/)                          |
+| `partition_by`          | object  | Declarative partitioning — see [Partitioning](/simplicity-schema-flow/schema/partitioning/)                     |
+| `partitions`            | object  | pg_partman rolling-partition maintenance                                                                        |
+| `bootstrap`             | boolean | Apply this table in the bootstrap transaction — see [Bootstrap](/simplicity-schema-flow/schema/bootstrap/)      |
+| `comment`               | string  | Table comment (alias: `description`)                                                                            |
 
 ## Columns
 
@@ -367,6 +368,43 @@ statement, so the old key stays in place until the new one is built. If the
 build fails (duplicates, NULLs), the old key is kept. Dropping a column that
 belongs to the key removes the key along with it in Postgres; the replacement
 puts the declared key back in the same run.
+
+## Storage parameters
+
+Per-table storage parameters, the `WITH (...)` settings Postgres keeps in
+`pg_class.reloptions`: autovacuum thresholds, `fillfactor`, and their
+`toast.` variants for the table's TOAST storage.
+
+```yaml
+table: activities
+storage:
+  autovacuum_vacuum_scale_factor: 0
+  autovacuum_vacuum_threshold: 5000
+  autovacuum_vacuum_insert_scale_factor: 0
+  autovacuum_vacuum_insert_threshold: 5000
+  fillfactor: 90
+  toast.autovacuum_enabled: true
+```
+
+A new table is created `WITH` them. On an existing table, `plan` shows an
+`ALTER TABLE … SET (…)` for each value that differs, and `drift` reports a
+value someone changed by hand. Neither statement takes a lock heavier than
+`SHARE UPDATE EXCLUSIVE` for these parameters, so it's safe on a live table.
+
+**The `storage:` key is what opts a table in.** With it, schema-flow owns all
+of the table's storage parameters:
+
+| YAML                             | Effect                                                  |
+| -------------------------------- | ------------------------------------------------------- |
+| No `storage:` key                | Parameters are left alone, however they were set        |
+| `storage:` with parameters       | Declared values are set; any other parameter is `RESET` |
+| A parameter removed from the map | `RESET` to the Postgres default                         |
+| `storage: {}`                    | Every parameter is `RESET`                              |
+
+On an opted-in table, a parameter set by hand that the YAML doesn't declare
+appears in `drift` and as a `RESET` in `plan` before it's removed. Add it to
+the YAML to keep it. Removing the whole `storage:` key stops management and
+leaves the current values in place; write `storage: {}` to reset them.
 
 ## Indexes
 

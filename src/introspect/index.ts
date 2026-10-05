@@ -482,6 +482,7 @@ export async function introspectTable(client: Client, tableName: string, schema:
   const triggers = await getTriggers(client, tableName, schema);
   const policies = await getPolicies(client, tableName, schema);
   const tableComment = await getTableComment(client, tableName, schema);
+  const storage = await getStorageParameters(client, tableName, schema);
   const fkInfo = await getForeignKeys(client, tableName, schema);
   const columnGrants = await getColumnGrants(client, tableName, schema);
   const compositePk = await getCompositePrimaryKey(client, tableName, schema);
@@ -578,6 +579,7 @@ export async function introspectTable(client: Client, tableName: string, schema:
   if (partitions) result.partitions = partitions;
   if (compositePk.columns.length > 1) result.primary_key = compositePk.columns;
   if (compositePk.constraintName) result.primary_key_name = compositePk.constraintName;
+  if (Object.keys(storage).length > 0) result.storage = storage;
   if (indexesAfterColumnMerge.length > 0) result.indexes = indexesAfterColumnMerge;
   if (checks.length > 0) result.checks = checks;
   if (compositeForeignKeys.length > 0) result.foreign_keys = compositeForeignKeys;
@@ -1349,6 +1351,30 @@ async function getRlsStatus(
     rls: result.rows[0].rls === true,
     force_rls: result.rows[0].force_rls === true,
   };
+}
+
+/** `pg_class.reloptions` for the table and its TOAST table, the latter `toast.`-prefixed. */
+async function getStorageParameters(client: Client, table: string, schema: string): Promise<Record<string, string>> {
+  const result = await client.query(
+    `SELECT coalesce(c.reloptions, '{}') AS main, coalesce(t.reloptions, '{}') AS toast
+     FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     LEFT JOIN pg_catalog.pg_class t ON t.oid = c.reltoastrelid
+     WHERE c.relname = $1
+       AND n.nspname = $2
+       AND c.relkind IN ('r', 'p')`,
+    [table, schema],
+  );
+  const storage: Record<string, string> = {};
+  const row = result.rows[0] as { main: string[]; toast: string[] } | undefined;
+  if (!row) return storage;
+  const add = (option: string, prefix: string) => {
+    const eq = option.indexOf('=');
+    storage[prefix + option.slice(0, eq)] = option.slice(eq + 1);
+  };
+  for (const option of row.main) add(option, '');
+  for (const option of row.toast) add(option, 'toast.');
+  return storage;
 }
 
 async function getTableComment(client: Client, table: string, schema: string): Promise<string | undefined> {

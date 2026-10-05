@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Declare a table's storage parameters in its YAML.** Autovacuum settings,
+  `fillfactor` and their `toast.` variants go under a `storage:` key. `plan`
+  shows the change, `run` applies it with `ALTER TABLE … SET (…)` (safe on a
+  live table), and `drift` reports values changed by hand. Having the key
+  means schema-flow manages all of that table's storage parameters: one you
+  remove from the YAML is reset, and `storage: {}` resets them all. Tables
+  without the key are never touched. `generate` now writes a table's existing
+  storage parameters into its YAML.
 - **`plan` and `status` now show which pre- and post-scripts will run, and
   why.** These scripts change data, not schema, so a plan that only listed
   schema changes could look harmless while a large backfill waited behind it.

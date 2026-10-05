@@ -31,6 +31,8 @@ const DESCRIPTIONS: Record<OperationType, string> = {
   replace_primary_key: 'Replaced primary key',
   rename_primary_key: 'Renamed primary key',
   drop_primary_key: 'Dropped primary key',
+  set_storage_parameters: 'Set storage parameters',
+  reset_storage_parameters: 'Reset storage parameters',
   // Enums
   create_enum: 'Created enum',
   add_enum_value: 'Added enum value',
@@ -112,6 +114,8 @@ const PRESENT_DESCRIPTIONS: Record<OperationType, string> = {
   replace_primary_key: 'Replace primary key',
   rename_primary_key: 'Rename primary key',
   drop_primary_key: 'Drop primary key',
+  set_storage_parameters: 'Set storage parameters',
+  reset_storage_parameters: 'Reset storage parameters',
   create_enum: 'Create enum',
   add_enum_value: 'Add enum value',
   remove_enum_value: 'Remove enum value',

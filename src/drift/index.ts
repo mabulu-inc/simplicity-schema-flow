@@ -10,6 +10,7 @@ import type { DesiredState, ActualState } from '../planner/index.js';
 import {
   defaultIndexName,
   primaryKeyColumns,
+  storageValuesEqual,
   functionSetsEqual,
   indexKeysIdentity,
   normalizeCheckExpression,
@@ -398,6 +399,7 @@ function driftTables(desired: TableSchema[], actual: Map<string, TableSchema>): 
       items.push({ type: 'table', object: dt.table, status: 'missing_in_db' });
     } else {
       items.push(...driftPrimaryKey(dt.table, dt, at));
+      items.push(...driftStorageParameters(dt, at));
       items.push(...driftColumns(dt.table, dt.columns, at.columns));
       items.push(...driftForeignKeys(dt.table, dt.columns, at.columns));
       items.push(...driftCompositeForeignKeys(dt.table, dt.foreign_keys || [], at.foreign_keys || []));
@@ -450,6 +452,39 @@ function driftRls(desired: TableSchema, actual: TableSchema): DriftItem[] {
       actual: haveForce ? 'force_rls enabled' : 'force_rls disabled',
       detail: `force_rls: expected ${wantForce ? 'enabled' : 'disabled'}, actual ${haveForce ? 'enabled' : 'disabled'}`,
     });
+  }
+  return items;
+}
+
+/** Only for a table whose YAML has `storage:`; one without it is not managed (#79). */
+function driftStorageParameters(desired: TableSchema, actual: TableSchema): DriftItem[] {
+  if (!desired.storage) return [];
+  const live = actual.storage ?? {};
+  const items: DriftItem[] = [];
+  for (const [name, value] of Object.entries(desired.storage)) {
+    const object = `${desired.table}.storage.${name}`;
+    if (!(name in live)) {
+      items.push({ type: 'table', object, status: 'missing_in_db', expected: String(value) });
+    } else if (!storageValuesEqual(value, live[name])) {
+      items.push({
+        type: 'table',
+        object,
+        status: 'different',
+        expected: String(value),
+        actual: String(live[name]),
+        detail: `${name}: expected ${value}, actual ${live[name]}`,
+      });
+    }
+  }
+  for (const [name, value] of Object.entries(live)) {
+    if (!(name in desired.storage)) {
+      items.push({
+        type: 'table',
+        object: `${desired.table}.storage.${name}`,
+        status: 'missing_in_yaml',
+        actual: String(value),
+      });
+    }
   }
   return items;
 }

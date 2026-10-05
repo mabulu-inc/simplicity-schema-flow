@@ -7,6 +7,7 @@
 
 import type {
   TableSchema,
+  StorageParameterValue,
   ColumnDef,
   ForeignKeyRef,
   ForeignKeyDef,
@@ -61,6 +62,9 @@ export type OperationType =
   | 'replace_primary_key'
   | 'rename_primary_key'
   | 'drop_primary_key'
+  // Storage parameters
+  | 'set_storage_parameters'
+  | 'reset_storage_parameters'
   // Enums
   | 'create_enum'
   | 'add_enum_value'
@@ -1174,6 +1178,9 @@ function createTableOps(
     const keyCols = table.partition_by.key.map((c) => `"${c}"`).join(', ');
     createTableSql += ` PARTITION BY ${table.partition_by.strategy.toUpperCase()} (${keyCols})`;
   }
+  if (table.storage && Object.keys(table.storage).length > 0) {
+    createTableSql += ` WITH (${storageAssignments(table.storage)})`;
+  }
 
   ops.push({
     type: 'create_table',
@@ -1520,6 +1527,7 @@ function alterTableOps(
   }
 
   ops.push(...diffPrimaryKey(desired, existing, pgSchema));
+  ops.push(...diffStorageParameters(desired, existing, pgSchema));
 
   // Diff exclusion constraints
   ops.push(
@@ -1673,6 +1681,71 @@ function diffPrimaryKey(desired: TableSchema, existing: TableSchema, pgSchema: s
       destructive: true,
     },
   ];
+}
+
+/**
+ * Whether two storage-parameter values mean the same setting. The live side
+ * is the text Postgres kept (`0.05`, `false`, `off`); the declared side is
+ * whatever YAML parsed. Numbers compare numerically, booleans by meaning.
+ */
+export function storageValuesEqual(a: StorageParameterValue, b: StorageParameterValue): boolean {
+  const canonical = (v: StorageParameterValue): string => {
+    const text = String(v).trim().toLowerCase();
+    if (text !== '' && Number.isFinite(Number(text))) return String(Number(text));
+    if (['true', 'on', 'yes'].includes(text)) return 'true';
+    if (['false', 'off', 'no'].includes(text)) return 'false';
+    return text;
+  };
+  return canonical(a) === canonical(b);
+}
+
+function storageAssignments(params: Record<string, StorageParameterValue>): string {
+  return Object.entries(params)
+    .map(([name, value]) => `${name} = ${typeof value === 'string' ? `'${escapeQuote(value)}'` : String(value)}`)
+    .join(', ');
+}
+
+/**
+ * Converge a table's storage parameters (issue #79). A table without a
+ * `storage:` key is left alone; one with it — even empty — owns all of its
+ * parameters, so undeclared live ones are reset. `ALTER TABLE … SET/RESET`
+ * takes SHARE UPDATE EXCLUSIVE for the autovacuum, fillfactor and toast
+ * parameters, so this is safe on a live table.
+ */
+function diffStorageParameters(desired: TableSchema, existing: TableSchema, pgSchema: string): Operation[] {
+  if (!desired.storage) return [];
+  const live = existing.storage ?? {};
+  const qualified = `"${pgSchema}"."${desired.table}"`;
+  const ops: Operation[] = [];
+
+  const toSet = Object.fromEntries(
+    Object.entries(desired.storage).filter(
+      ([name, value]) => !(name in live) || !storageValuesEqual(value, live[name]),
+    ),
+  );
+  if (Object.keys(toSet).length > 0) {
+    ops.push({
+      type: 'set_storage_parameters',
+      phase: 6,
+      objectName: `${desired.table} (${Object.entries(toSet)
+        .map(([n, v]) => `${n}=${v}`)
+        .join(', ')})`,
+      sql: `ALTER TABLE ${qualified} SET (${storageAssignments(toSet)})`,
+      destructive: false,
+    });
+  }
+
+  const toReset = Object.keys(live).filter((name) => !(name in desired.storage!));
+  if (toReset.length > 0) {
+    ops.push({
+      type: 'reset_storage_parameters',
+      phase: 6,
+      objectName: `${desired.table} (${toReset.join(', ')})`,
+      sql: `ALTER TABLE ${qualified} RESET (${toReset.join(', ')})`,
+      destructive: false,
+    });
+  }
+  return ops;
 }
 
 /**

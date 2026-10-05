@@ -1,6 +1,7 @@
 import { parse as parseYaml } from 'yaml';
 import type {
   TableSchema,
+  StorageParameterValue,
   ColumnDef,
   IndexDef,
   IndexKey,
@@ -563,6 +564,27 @@ function parsePartitions(raw: Record<string, unknown>, context: string): Partiti
   return def;
 }
 
+// Names are spliced into `WITH (...)` / `SET (...)` unquoted, so they must be
+// plain (optionally `toast.`-prefixed) identifiers.
+const STORAGE_PARAMETER_NAME = /^(toast\.)?[a-z_][a-z0-9_]*$/;
+
+function parseStorage(raw: unknown, ctx: string): Record<string, StorageParameterValue> {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${ctx}: must be a map of parameter names to values`);
+  }
+  const storage: Record<string, StorageParameterValue> = {};
+  for (const [name, value] of Object.entries(raw)) {
+    if (!STORAGE_PARAMETER_NAME.test(name)) {
+      throw new Error(`${ctx}: "${name}" is not a storage parameter name`);
+    }
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
+      throw new Error(`${ctx}.${name}: must be a string, number or boolean`);
+    }
+    storage[name] = value;
+  }
+  return storage;
+}
+
 // Exported as the single source of truth for the set of accepted table-level
 // keys — the docs "Table-level keys" reference is kept in sync with it by test.
 export const TABLE_KEYS = [
@@ -572,6 +594,7 @@ export const TABLE_KEYS = [
   'partitions',
   'primary_key',
   'primary_key_name',
+  'storage',
   'indexes',
   'checks',
   'foreign_keys',
@@ -615,6 +638,7 @@ export function parseTable(yamlStr: string): TableSchema {
   }
   if (raw.primary_key !== undefined) table.primary_key = raw.primary_key as string[];
   if (raw.primary_key_name !== undefined) table.primary_key_name = String(raw.primary_key_name);
+  if (raw.storage !== undefined) table.storage = parseStorage(raw.storage, `${ctx}.storage`);
   if (raw.indexes !== undefined)
     table.indexes = (raw.indexes as Record<string, unknown>[]).map((idx, i) =>
       parseIndexDef(idx, `${ctx}.indexes[${i}]`),

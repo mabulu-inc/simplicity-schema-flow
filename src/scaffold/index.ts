@@ -148,6 +148,17 @@ function buildTableYaml(table: TableSchema): Record<string, unknown> {
     result.partitions = p;
   }
   if (table.primary_key) result.primary_key = table.primary_key;
+  if (table.storage) {
+    // reloptions are text; write numbers and booleans as YAML scalars.
+    result.storage = Object.fromEntries(
+      Object.entries(table.storage).map(([name, value]) => {
+        const text = String(value);
+        if (text === 'true' || text === 'false') return [name, text === 'true'];
+        if (text !== '' && Number.isFinite(Number(text))) return [name, Number(text)];
+        return [name, value];
+      }),
+    );
+  }
   if (table.indexes && table.indexes.length > 0) result.indexes = table.indexes;
   if (table.checks && table.checks.length > 0) result.checks = table.checks;
   if (table.foreign_keys && table.foreign_keys.length > 0) {
