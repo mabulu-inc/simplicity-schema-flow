@@ -6,7 +6,7 @@
 
 import { parseArgs } from './args.js';
 import { getHelpText, getVersionText, getCommandHelpText } from './help.js';
-import { reportMigrationResult, type VerbosityMode } from './report.js';
+import { changeSuffix, reportMigrationResult, type VerbosityMode } from './report.js';
 import { runPipeline, initProject, getStatus, runBaseline, buildDesiredAndActual, getPlan } from './pipeline.js';
 import { resolveConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
@@ -109,8 +109,12 @@ async function main(): Promise<void> {
         if (config.json) {
           console.log(JSON.stringify(status, null, 2));
         } else {
-          logger.info(`Applied files: ${status.appliedFiles}`);
+          const { pre, schema, post } = status.appliedByPhase;
+          logger.info(`Applied files: ${status.appliedFiles} (pre: ${pre}, schema: ${schema}, post: ${post})`);
           logger.info(`Pending changes: ${status.pendingChanges}`);
+          for (const p of status.pending) {
+            logger.info(`  ${p.filePath}${changeSuffix(p.change)}`);
+          }
           if (status.history.length > 0 && config.verbose) {
             for (const entry of status.history) {
               logger.debug(`  ${entry.filePath} (${entry.phase}) — ${entry.appliedAt.toISOString()}`);

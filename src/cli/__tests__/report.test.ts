@@ -7,6 +7,8 @@ function emptyResult(overrides: Partial<ExecuteResult> = {}): ExecuteResult {
   return {
     executed: 0,
     skippedScripts: 0,
+    skippedPreScripts: 0,
+    skippedPostScripts: 0,
     preScriptsRun: 0,
     postScriptsRun: 0,
     dryRun: false,
@@ -14,6 +16,7 @@ function emptyResult(overrides: Partial<ExecuteResult> = {}): ExecuteResult {
     executedOperations: [],
     executedPreScripts: [],
     executedPostScripts: [],
+    scriptChanges: {},
     ...overrides,
   };
 }
@@ -268,6 +271,8 @@ describe('reportMigrationResult', () => {
           preScriptsRun: 2,
           postScriptsRun: 1,
           skippedScripts: 3,
+          skippedPreScripts: 1,
+          skippedPostScripts: 2,
         }),
         operations: [],
         mode: 'default',
@@ -275,9 +280,8 @@ describe('reportMigrationResult', () => {
         dryRun: true,
       });
       expect(lines).toContain('Plan: 0 operations would execute');
-      expect(lines).toContain('  Pre-scripts: 2 (would run)');
-      expect(lines).toContain('  Post-scripts: 1 (would run)');
-      expect(lines).toContain('  Skipped (unchanged): 3');
+      expect(lines).toContain('  Pre-scripts: 2 would run, 1 already applied');
+      expect(lines).toContain('  Post-scripts: 1 would run, 2 already applied');
     });
 
     it('quiet mode suppresses output when nothing would happen', () => {

@@ -160,6 +160,8 @@ describe('reportMigrationResult', () => {
   const baseResult: ExecuteResult = {
     executed: 3,
     skippedScripts: 0,
+    skippedPreScripts: 0,
+    skippedPostScripts: 0,
     preScriptsRun: 0,
     postScriptsRun: 0,
     dryRun: false,
@@ -167,6 +169,7 @@ describe('reportMigrationResult', () => {
     executedOperations: [],
     executedPreScripts: [],
     executedPostScripts: [],
+    scriptChanges: {},
   };
 
   const sampleOps: Operation[] = [
@@ -256,20 +259,20 @@ describe('reportMigrationResult', () => {
       write: (msg) => lines.push(msg),
     });
 
-    expect(lines).toContainEqual(expect.stringContaining('Pre-scripts: 2'));
-    expect(lines).toContainEqual(expect.stringContaining('Post-scripts: 1'));
+    expect(lines).toContain('  Pre-scripts: 2 ran, 0 already applied');
+    expect(lines).toContain('  Post-scripts: 1 ran, 0 already applied');
   });
 
-  it('includes skipped count in summary when present', () => {
+  it('includes already-applied counts per phase, even when nothing ran', () => {
     const lines: string[] = [];
     reportMigrationResult({
-      result: { ...baseResult, skippedScripts: 5 },
+      result: { ...baseResult, skippedScripts: 5, skippedPreScripts: 2, skippedPostScripts: 3 },
       operations: sampleOps,
       mode: 'default',
       write: (msg) => lines.push(msg),
     });
 
-    expect(lines).toContainEqual(expect.stringContaining('Skipped'));
-    expect(lines).toContainEqual(expect.stringContaining('5'));
+    expect(lines).toContain('  Pre-scripts: 0 ran, 2 already applied');
+    expect(lines).toContain('  Post-scripts: 0 ran, 3 already applied');
   });
 });

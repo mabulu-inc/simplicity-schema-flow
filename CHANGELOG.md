@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`plan` and `status` now show which pre- and post-scripts will run, and
+  why.** These scripts change data, not schema, so a plan that only listed
+  schema changes could look harmless while a large backfill waited behind it.
+  - `plan` marks each script it would run as "never applied" or "changed since
+    applied". It also prints a count for each phase that has scripts, such as
+    `Post-scripts: 2 would run, 19 already applied`. This replaces the single
+    "Skipped (unchanged)" total. A changed script runs again, so this is the
+    place to catch one that isn't safe to repeat.
+  - `status` breaks applied files down by phase and lists each file a run
+    would apply, with the reason.
+  - `--json` output for both includes the same detail.
+
 ### Fixed
 
 - **A column type change that could quietly alter data now needs

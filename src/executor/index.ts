@@ -11,7 +11,7 @@ import { runsAfterPostScripts, type Operation } from '../planner/index.js';
 import type { SchemaFile } from '../core/files.js';
 import type { Logger } from '../core/logger.js';
 import { acquireClient } from '../core/db.js';
-import { ensureHistoryTable, fileNeedsApply, recordFile } from '../core/tracker.js';
+import { ensureHistoryTable, fileChange, recordFile, type FileChange } from '../core/tracker.js';
 import { ensureSnapshotsTable, saveSnapshot } from '../rollback/index.js';
 import { recordExpandState } from '../expand/index.js';
 
@@ -81,7 +81,12 @@ export interface ExecuteOptions {
 
 export interface ExecuteResult {
   executed: number;
+  /** Pre- and post-scripts skipped because they were applied with the same content. */
   skippedScripts: number;
+  /** The pre-script part of `skippedScripts`. */
+  skippedPreScripts: number;
+  /** The post-script part of `skippedScripts`. */
+  skippedPostScripts: number;
   preScriptsRun: number;
   postScriptsRun: number;
   dryRun: boolean;
@@ -92,6 +97,8 @@ export interface ExecuteResult {
   executedPreScripts: string[];
   /** Relative paths of post-scripts that ran, in execution order. */
   executedPostScripts: string[];
+  /** Why each script in `executedPreScripts` / `executedPostScripts` ran, keyed by relative path. */
+  scriptChanges: Record<string, FileChange>;
 }
 
 /**
@@ -446,6 +453,8 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
   const result: ExecuteResult = {
     executed: 0,
     skippedScripts: 0,
+    skippedPreScripts: 0,
+    skippedPostScripts: 0,
     preScriptsRun: 0,
     postScriptsRun: 0,
     dryRun,
@@ -453,6 +462,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     executedOperations: [],
     executedPreScripts: [],
     executedPostScripts: [],
+    scriptChanges: {},
   };
 
   // Dry-run: populate the result with what would happen and let the caller
@@ -480,13 +490,16 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
 
     try {
       for (const script of preScripts) {
-        const wouldRun =
-          !historyExists || (await fileNeedsApply(historyClient!, script.relativePath, script.hash, pgSchema));
-        if (wouldRun) {
+        const change = historyExists
+          ? await fileChange(historyClient!, script.relativePath, script.hash, pgSchema)
+          : 'new';
+        if (change) {
           result.preScriptsRun++;
           result.executedPreScripts.push(script.relativePath);
+          result.scriptChanges[script.relativePath] = change;
         } else {
           result.skippedScripts++;
+          result.skippedPreScripts++;
         }
       }
 
@@ -504,13 +517,16 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
       }
 
       for (const script of postScripts) {
-        const wouldRun =
-          !historyExists || (await fileNeedsApply(historyClient!, script.relativePath, script.hash, pgSchema));
-        if (wouldRun) {
+        const change = historyExists
+          ? await fileChange(historyClient!, script.relativePath, script.hash, pgSchema)
+          : 'new';
+        if (change) {
           result.postScriptsRun++;
           result.executedPostScripts.push(script.relativePath);
+          result.scriptChanges[script.relativePath] = change;
         } else {
           result.skippedScripts++;
+          result.skippedPostScripts++;
         }
       }
 
@@ -541,9 +557,10 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
       // skips them, as it skips post-scripts: each commits on its own, and
       // validate must leave the database as it found it.
       for (const script of validateOnly ? [] : preScripts) {
-        const changed = await fileNeedsApply(lockClient, script.relativePath, script.hash, pgSchema);
-        if (!changed) {
+        const change = await fileChange(lockClient, script.relativePath, script.hash, pgSchema);
+        if (!change) {
           result.skippedScripts++;
+          result.skippedPreScripts++;
           logger?.debug(`Skipping unchanged pre-script: ${script.relativePath}`);
           continue;
         }
@@ -565,6 +582,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
         await recordFile(lockClient, script.relativePath, script.hash, 'pre', pgSchema);
         result.preScriptsRun++;
         result.executedPreScripts.push(script.relativePath);
+        result.scriptChanges[script.relativePath] = change;
         // Rendering is deferred to reportMigrationResult so pre-scripts, the
         // declarative apply, and post-scripts print in one stream in true
         // execution order — a live log here would jump ahead of the apply
@@ -782,9 +800,10 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
       // Run post-scripts (each in its own transaction, tracked by hash)
       if (!validateOnly) {
         for (const script of postScripts) {
-          const changed = await fileNeedsApply(lockClient, script.relativePath, script.hash, pgSchema);
-          if (!changed) {
+          const change = await fileChange(lockClient, script.relativePath, script.hash, pgSchema);
+          if (!change) {
             result.skippedScripts++;
+            result.skippedPostScripts++;
             logger?.debug(`Skipping unchanged post-script: ${script.relativePath}`);
             continue;
           }
@@ -806,6 +825,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           await recordFile(lockClient, script.relativePath, script.hash, 'post', pgSchema);
           result.postScriptsRun++;
           result.executedPostScripts.push(script.relativePath);
+          result.scriptChanges[script.relativePath] = change;
           // Deferred to reportMigrationResult (see pre-script note) so this
           // prints after the apply lines, matching true execution order.
           logger?.debug(`Executed post-script: ${script.relativePath}`);

@@ -224,6 +224,24 @@ export async function recordFile(
   );
 }
 
+/** Why a file needs applying: never recorded, or recorded with another hash. */
+export type FileChange = 'new' | 'changed';
+
+/**
+ * How a file differs from its history entry for this pgSchema, or null when it
+ * was applied with the same content.
+ */
+export async function fileChange(
+  client: pg.PoolClient,
+  filePath: string,
+  currentHash: string,
+  pgSchema: string,
+): Promise<FileChange | null> {
+  const storedHash = await getFileHash(client, filePath, pgSchema);
+  if (storedHash === null) return 'new';
+  return storedHash === currentHash ? null : 'changed';
+}
+
 /**
  * Check if a file needs to be re-run (new file or hash changed for this pgSchema).
  */
@@ -233,8 +251,7 @@ export async function fileNeedsApply(
   currentHash: string,
   pgSchema: string,
 ): Promise<boolean> {
-  const storedHash = await getFileHash(client, filePath, pgSchema);
-  return storedHash !== currentHash;
+  return (await fileChange(client, filePath, currentHash, pgSchema)) !== null;
 }
 
 /**

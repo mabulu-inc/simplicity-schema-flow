@@ -36,9 +36,21 @@ const result = await runPipeline(config, logger, {
 
 ```typescript
 interface ExecuteResult {
-  success: boolean;
-  operationsExecuted: number;
-  errors: string[];
+  executed: number;
+  executedOperations: Operation[];
+  dryRun: boolean;
+  validated: boolean;
+  preScriptsRun: number;
+  postScriptsRun: number;
+  /** Relative paths, in run order. */
+  executedPreScripts: string[];
+  executedPostScripts: string[];
+  /** Why each of those scripts ran (or would run), keyed by relative path. */
+  scriptChanges: Record<string, 'new' | 'changed'>;
+  /** Scripts skipped because they were applied with the same content. */
+  skippedScripts: number;
+  skippedPreScripts: number;
+  skippedPostScripts: number;
 }
 ```
 
@@ -128,5 +140,7 @@ import { getStatus } from '@smplcty/schema-flow';
 const status = await getStatus(config, logger);
 console.log(`Applied: ${status.appliedFiles}, Pending: ${status.pendingChanges}`);
 
+// status.appliedByPhase: { pre, schema, post }
+// status.pending: { filePath, phase, change: 'new' | 'changed' }[], in run order
 // status.history: { filePath, phase, appliedAt }[]
 ```

@@ -35,7 +35,8 @@ import { execute } from '../executor/index.js';
 import type { ExecuteResult } from '../executor/index.js';
 import { acquireClient } from '../core/db.js';
 import { hydrateActualSeeds } from '../drift/index.js';
-import { ensureHistoryTable, getHistory, recordFile } from '../core/tracker.js';
+import { ensureHistoryTable, getHistory, recordFile, type FileChange } from '../core/tracker.js';
+import type { Phase } from '../core/files.js';
 import type {
   TableSchema,
   EnumSchema,
@@ -427,7 +428,11 @@ export async function runBaseline(config: SimplicitySchemaConfig, logger: Logger
  */
 export interface StatusResult {
   appliedFiles: number;
+  /** `appliedFiles` by phase. */
+  appliedByPhase: Record<Phase, number>;
   pendingChanges: number;
+  /** Files on disk that a run would apply, in run order: pre, schema, post. */
+  pending: { filePath: string; phase: Phase; change: FileChange }[];
   history: { filePath: string; phase: string; appliedAt: Date }[];
 }
 
@@ -478,20 +483,23 @@ export async function getStatus(config: SimplicitySchemaConfig, logger: Logger):
     const discovered = await discoverAllSources(config);
     const allFiles = [...discovered.pre, ...discovered.schema, ...discovered.post];
 
-    // Count files that differ from recorded hashes
+    // Files that differ from recorded hashes
     const historyMap = new Map(history.map((h) => [h.filePath, h.fileHash]));
-    let pendingChanges = 0;
-
+    const pending: StatusResult['pending'] = [];
     for (const file of allFiles) {
       const recordedHash = historyMap.get(file.relativePath);
-      if (!recordedHash || recordedHash !== file.hash) {
-        pendingChanges++;
-      }
+      if (recordedHash === file.hash) continue;
+      pending.push({ filePath: file.relativePath, phase: file.phase, change: recordedHash ? 'changed' : 'new' });
     }
+
+    const appliedByPhase: Record<Phase, number> = { pre: 0, schema: 0, post: 0 };
+    for (const h of history) appliedByPhase[h.phase]++;
 
     return {
       appliedFiles: history.length,
-      pendingChanges,
+      appliedByPhase,
+      pendingChanges: pending.length,
+      pending,
       history: history.map((h) => ({
         filePath: h.filePath,
         phase: h.phase,

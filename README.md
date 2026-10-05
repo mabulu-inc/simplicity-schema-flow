@@ -160,12 +160,12 @@ Per-object privileges are declared with `grants:` on the table (or function/view
 
 ### Analysis
 
-| Command                                  | Description                       |
-| ---------------------------------------- | --------------------------------- |
-| `npx @smplcty/schema-flow drift`         | Compare YAML to live DB           |
-| `npx @smplcty/schema-flow drift --apply` | Fix detected drift                |
-| `npx @smplcty/schema-flow lint`          | Static analysis of migration plan |
-| `npx @smplcty/schema-flow status`        | Applied files and pending changes |
+| Command                                  | Description                                        |
+| ---------------------------------------- | -------------------------------------------------- |
+| `npx @smplcty/schema-flow drift`         | Compare YAML to live DB                            |
+| `npx @smplcty/schema-flow drift --apply` | Fix detected drift                                 |
+| `npx @smplcty/schema-flow lint`          | Static analysis of migration plan                  |
+| `npx @smplcty/schema-flow status`        | Applied files by phase, and what a run would apply |
 
 ### Generation
 

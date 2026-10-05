@@ -4,6 +4,7 @@
 
 import { runsAfterPostScripts, type Operation } from '../planner/index.js';
 import type { ExecuteResult } from '../executor/index.js';
+import type { FileChange } from '../core/tracker.js';
 import { formatOperationMessage } from '../executor/format-operation.js';
 
 export type VerbosityMode = 'quiet' | 'default' | 'verbose';
@@ -42,11 +43,11 @@ export function reportMigrationResult(options: ReportOptions): void {
     const tightenOps = operations.filter(runsAfterPostScripts);
 
     for (const path of result.executedPreScripts) {
-      write(`  ${verb} pre-script: ${path}`);
+      write(`  ${verb} pre-script: ${path}${changeSuffix(result.scriptChanges[path])}`);
     }
     renderOps(applyOps, mode, dryRun, write);
     for (const path of result.executedPostScripts) {
-      write(`  ${verb} post-script: ${path}`);
+      write(`  ${verb} post-script: ${path}${changeSuffix(result.scriptChanges[path])}`);
     }
     renderOps(tightenOps, mode, dryRun, write);
   }
@@ -59,16 +60,22 @@ export function reportMigrationResult(options: ReportOptions): void {
     write(`Migration complete: ${result.executed} operations executed`);
   }
 
-  // Script counts
-  if (result.preScriptsRun > 0) {
-    write(`  Pre-scripts: ${result.preScriptsRun}${dryRun ? ' (would run)' : ''}`);
+  // Script counts, per phase, whenever the phase has scripts — including when
+  // none run, so "nothing to run" reads differently from "no scripts".
+  const ran = dryRun ? 'would run' : 'ran';
+  if (result.preScriptsRun + result.skippedPreScripts > 0) {
+    write(`  Pre-scripts: ${result.preScriptsRun} ${ran}, ${result.skippedPreScripts} already applied`);
   }
-  if (result.postScriptsRun > 0) {
-    write(`  Post-scripts: ${result.postScriptsRun}${dryRun ? ' (would run)' : ''}`);
+  if (result.postScriptsRun + result.skippedPostScripts > 0) {
+    write(`  Post-scripts: ${result.postScriptsRun} ${ran}, ${result.skippedPostScripts} already applied`);
   }
-  if (result.skippedScripts > 0) {
-    write(`  Skipped (unchanged): ${result.skippedScripts}`);
-  }
+}
+
+/** Why a script runs, for its output line. Absent for results built without one. */
+export function changeSuffix(change: FileChange | undefined): string {
+  if (change === 'new') return ' (never applied)';
+  if (change === 'changed') return ' (changed since applied)';
+  return '';
 }
 
 /**

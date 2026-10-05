@@ -33,7 +33,20 @@ Run only post-scripts (SQL files in `schema/post/`).
 
 Dry-run. Shows planned operations without executing. Equivalent to `run --dry-run`.
 
-Default output shows one line per planned operation plus a `Plan: N operations would execute` summary. Use `--verbose` to inline the SQL under each operation, or `--json` for machine-readable output. Unchanged pre/post scripts (whose recorded hash matches) are reported as skipped, mirroring what `run` would actually do.
+Default output shows one line per planned operation, plus a `Plan: N operations would execute` summary. Use `--verbose` to inline the SQL under each operation, or `--json` for machine-readable output.
+
+The plan also covers pre- and post-scripts, which change data rather than schema. Each script that would run is listed in run order with the reason. A script whose recorded hash matches is not run, the same as in `run`. Each phase that has scripts gets a count line, even when none of them would run:
+
+```
+  Would run pre-script: pre/202608-rename-stage.sql (never applied)
+  Set comment: opportunities.pipeline_id
+  Would run post-script: post/202607-backfill-completion.sql (changed since applied)
+Plan: 1 operation would execute
+  Pre-scripts: 1 would run, 4 already applied
+  Post-scripts: 1 would run, 20 already applied
+```
+
+"Changed since applied" means the file was edited after it ran. It will run again, so a script that isn't safe to repeat needs a look before `run`.
 
 ```bash
 npx @smplcty/schema-flow plan --db postgresql://user:pass@localhost:5432/mydb
@@ -73,7 +86,14 @@ Static analysis of the migration plan. Warns about dangerous patterns like direc
 
 ### `schema-flow status`
 
-Show migration status: number of applied files, pending changes, and history.
+Show migration status: applied files by phase, and each file a run would apply, with the reason. Add `--verbose` for the full history, or `--json` for machine-readable output.
+
+```
+Applied files: 137 (pre: 5, schema: 111, post: 21)
+Pending changes: 2
+  tables/opportunities.yaml (changed since applied)
+  post/202608-tag-stage-fields.sql (never applied)
+```
 
 ## Generation
 
