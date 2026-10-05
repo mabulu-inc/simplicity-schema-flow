@@ -308,6 +308,40 @@ primary_key: [tenant_id, id]
 primary_key_name: pk_my_table # optional
 ```
 
+### Changing a primary key
+
+The live primary key always ends up matching the YAML, including on tables
+that already exist:
+
+| Change                              | Operation             | Blocked without `--allow-destructive`? |
+| ----------------------------------- | --------------------- | -------------------------------------- |
+| Table has no key, YAML declares one | `add_primary_key`     | No                                     |
+| Key columns changed                 | `replace_primary_key` | Yes                                    |
+| Only `primary_key_name` changed     | `rename_primary_key`  | No                                     |
+| YAML no longer declares a key       | `drop_primary_key`    | Yes                                    |
+
+Adding or replacing a key runs **after post-scripts**, like `NOT NULL`
+tightening, so a post-script can backfill a new key column first:
+
+```yaml
+# t had primary_key: [a, k]; k is replaced by d
+columns:
+  - { name: a, type: bigint, nullable: false }
+  - { name: d, type: date, nullable: false }
+primary_key: [a, d]
+```
+
+```sql
+-- post/backfill-d.sql
+UPDATE t SET d = CURRENT_DATE WHERE d IS NULL;
+```
+
+A replacement is a single `DROP CONSTRAINT IF EXISTS … , ADD CONSTRAINT …`
+statement, so the old key stays in place until the new one is built. If the
+build fails (duplicates, NULLs), the old key is kept. Dropping a column that
+belongs to the key removes the key along with it in Postgres; the replacement
+puts the declared key back in the same run.
+
 ## Indexes
 
 ```yaml

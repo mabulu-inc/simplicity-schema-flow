@@ -13,6 +13,8 @@ These operations are **blocked by default** and require `--allow-destructive`:
 - `drop_foreign_key` -- dropping foreign key constraints
 - `drop_check` -- dropping check constraints
 - `drop_unique_constraint` -- dropping unique constraints
+- `drop_exclusion_constraint` -- dropping exclusion constraints
+- `replace_primary_key` / `drop_primary_key` -- changing a primary key's columns, or removing it
 - `drop_function` -- dropping a function to recreate it with a changed return type
 - `drop_view` -- dropping views
 - `drop_materialized_view` -- dropping materialized views
@@ -30,6 +32,10 @@ When a blocked operation is encountered:
 1. It is reported as "blocked" in the plan output
 2. The rest of the migration proceeds normally
 3. No data is lost
+
+Changing an existing index, unique constraint or exclusion constraint drops and
+re-creates it. When the drop is blocked, the re-create is blocked with it: both
+appear as blocked, and neither is reported as applied.
 
 ```bash
 # See what would be blocked
