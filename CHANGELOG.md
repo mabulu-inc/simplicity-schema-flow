@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-06
+
 ### Changed
 
 - **Objects schema-flow should never drop are now declared in the table's
@@ -582,7 +584,8 @@ existing function`. The drop is gated behind `--allow-destructive` (the
   coupling to any app's identity model, while keeping the common case
   param-free. Unknown or unset params fail with a clear error.
 
-[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.5...v0.19.0
 [0.18.5]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.4...v0.18.5
 [0.18.4]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.3...v0.18.4
