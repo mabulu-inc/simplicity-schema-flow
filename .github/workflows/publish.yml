@@ -6,12 +6,20 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
+  # The full check suite, on the tagged commit, before anything is published.
+  check:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: check
     runs-on: ubuntu-latest
     environment: npm
+    permissions:
+      contents: read
+      # npm provenance (trusted publishing). Scoped to this job only.
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:

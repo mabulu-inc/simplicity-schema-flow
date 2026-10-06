@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # publish.yml calls this so nothing reaches npm without passing it.
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # A newer push supersedes an older run; never cancel a release's gate.
+  cancel-in-progress: ${{ github.event_name != 'release' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # lint → format → typecheck → build → tests with coverage. Tests start
+      # PostgreSQL through Testcontainers, using the runner's Docker daemon.
+      - run: pnpm check
