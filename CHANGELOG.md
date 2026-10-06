@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Node.js 22 or newer is now required.** Node.js 20 stopped receiving
+  security updates in April 2026. schema-flow is tested on Node.js 22 and 24.
+
 ## [0.20.0] - 2026-10-06
 
 ### Changed

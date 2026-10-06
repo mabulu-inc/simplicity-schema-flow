@@ -32,7 +32,7 @@ See [zero-downtime patterns](/simplicity-schema-flow/safety/zero-downtime/).
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 22+
 - PostgreSQL 14+
 
 ## Setup

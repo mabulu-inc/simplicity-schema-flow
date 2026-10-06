@@ -406,7 +406,7 @@ Full documentation at **[mabulu-inc.github.io/simplicity-schema-flow](https://ma
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 22+
 - PostgreSQL 14+
 
 ## License

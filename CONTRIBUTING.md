@@ -24,7 +24,7 @@ Add a new file in `docs/tasks/` following the format of the existing task files.
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - A running Docker daemon (tests start PostgreSQL via Testcontainers, never locally)
 - pnpm
 
