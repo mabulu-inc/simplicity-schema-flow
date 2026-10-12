@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-10-12
+
 ### Fixed
 
 - **Changing an index's definition no longer leaves the table without it.**
@@ -607,7 +609,8 @@ existing function`. The drop is gated behind `--allow-destructive` (the
   coupling to any app's identity model, while keeping the common case
   param-free. Unknown or unset params fail with a clear error.
 
-[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.21.1...HEAD
+[0.21.1]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.18.5...v0.19.0
