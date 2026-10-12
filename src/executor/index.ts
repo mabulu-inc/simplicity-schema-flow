@@ -113,7 +113,10 @@ async function withOpContext<T>(op: Operation, fn: () => Promise<T>): Promise<T>
     return await fn();
   } catch (err) {
     if (err instanceof Error) {
-      err.message = `${op.type} ${op.objectName}: ${err.message}\n  SQL: ${op.sql}`;
+      // Postgres puts the specifics (e.g. which key is duplicated) in DETAIL,
+      // which the message alone drops.
+      const detail = (err as { detail?: string }).detail;
+      err.message = `${op.type} ${op.objectName}: ${err.message}${detail ? `\n  DETAIL: ${detail}` : ''}\n  SQL: ${op.sql}`;
     }
     throw err;
   }
@@ -778,7 +781,18 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           const concClient = await acquireClient(connectionString, { pgSchema });
           try {
             logger?.debug(`Executing (concurrent): ${op.type} ${op.objectName}`);
-            await withOpContext(op, () => concClient.query(op.sql));
+            await withOpContext(op, async () => {
+              try {
+                for (const sql of op.statements ?? [op.sql]) await concClient.query(sql);
+              } catch (err) {
+                if (op.cleanupSql) {
+                  // A statement that opened its own transaction leaves it aborted.
+                  await concClient.query('ROLLBACK').catch(() => {});
+                  await concClient.query(op.cleanupSql).catch(() => {});
+                }
+                throw err;
+              }
+            });
             result.executed++;
             result.executedOperations.push(op);
           } finally {

@@ -185,7 +185,7 @@ describe('unmanaged objects on a managed table (#77)', () => {
       });
       const p = await plan(project);
       expect(p.unmanaged).toEqual([]);
-      expect(p.operations.map((o) => o.type)).toEqual(['drop_index', 'add_index']);
+      expect(p.operations.map((o) => o.type)).toEqual(['replace_index']);
     } finally {
       await project.cleanup();
     }

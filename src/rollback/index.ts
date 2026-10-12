@@ -118,6 +118,7 @@ const IRREVERSIBLE_TYPES: Set<OperationType> = new Set([
   'drop_column',
   'drop_table',
   'drop_index',
+  'replace_index',
   'drop_trigger',
   'drop_policy',
   'drop_view',

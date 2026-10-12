@@ -159,7 +159,9 @@ function buildTableYaml(table: TableSchema): Record<string, unknown> {
       }),
     );
   }
-  if (table.indexes && table.indexes.length > 0) result.indexes = table.indexes;
+  if (table.indexes && table.indexes.length > 0) {
+    result.indexes = table.indexes.map(({ invalid: _invalid, ...idx }) => idx);
+  }
   if (table.checks && table.checks.length > 0) result.checks = table.checks;
   if (table.foreign_keys && table.foreign_keys.length > 0) {
     result.foreign_keys = table.foreign_keys.map((fk) => {

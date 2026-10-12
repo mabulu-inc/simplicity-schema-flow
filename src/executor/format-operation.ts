@@ -14,6 +14,7 @@ const DESCRIPTIONS: Record<OperationType, string> = {
   drop_column: 'Dropped column',
   // Indexes
   add_index: 'Added index',
+  replace_index: 'Replaced index',
   drop_index: 'Dropped index',
   // Constraints
   add_check: 'Added check',
@@ -98,6 +99,7 @@ const PRESENT_DESCRIPTIONS: Record<OperationType, string> = {
   alter_sequence: 'Alter sequence type',
   drop_column: 'Drop column',
   add_index: 'Add index',
+  replace_index: 'Replace index',
   drop_index: 'Drop index',
   add_check: 'Add check',
   add_check_not_valid: 'Add check (NOT VALID)',

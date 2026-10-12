@@ -177,7 +177,7 @@ export function lintPlan(plan: PlanResult): LintResult {
         const fkTable = op.objectName.split('.')[0];
         const hasIndex = allOps.some(
           (o) =>
-            o.type === 'add_index' &&
+            (o.type === 'add_index' || o.type === 'replace_index') &&
             (o.objectName === op.objectName ||
               o.objectName.startsWith(`${fkTable}.`) ||
               o.sql.includes(`"${fkTable}"`)) &&

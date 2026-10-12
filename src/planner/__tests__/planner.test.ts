@@ -1954,10 +1954,9 @@ describe('Planner', () => {
         indexes: [{ name: 'idx', columns: [{ expression: 'lower(email)' }] }],
       });
       const result = buildPlan(desired, actual, { allowDestructive: true });
-      expect(findOps(result.operations, 'drop_index')).toHaveLength(1);
-      const adds = findOps(result.operations, 'add_index');
-      expect(adds).toHaveLength(1);
-      expect(adds[0].sql).toContain('(upper(email))');
+      const replaces = findOps(result.operations, 'replace_index');
+      expect(replaces).toHaveLength(1);
+      expect(replaces[0].sql).toContain('(upper(email))');
     });
 
     it('supports partial expression indexes via the existing where clause', () => {

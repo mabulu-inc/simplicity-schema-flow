@@ -5,6 +5,7 @@
  * produces an ordered list of operations to converge the database.
  */
 
+import { createHash } from 'node:crypto';
 import type {
   TableSchema,
   StorageParameterValue,
@@ -46,6 +47,7 @@ export type OperationType =
   | 'drop_column'
   // Indexes
   | 'add_index'
+  | 'replace_index'
   | 'drop_index'
   // Constraints
   | 'add_check'
@@ -132,6 +134,14 @@ export interface Operation {
   destructive: boolean;
   /** Whether this operation must run outside a transaction (e.g. CONCURRENTLY) */
   concurrent?: boolean;
+  /**
+   * For a concurrent op that needs several statements (each `CONCURRENTLY`
+   * statement must be sent on its own): executed in order instead of `sql`,
+   * which then holds the same statements joined for display.
+   */
+  statements?: string[];
+  /** Run if executing the op fails, before the error is rethrown. */
+  cleanupSql?: string;
   /**
    * Whether this operation belongs to the bootstrap phase — applied in a
    * dedicated transaction that commits before the main apply transaction.
@@ -2364,27 +2374,27 @@ function diffIndexes(
       } else {
         ops.push(...createIndexOps(table, { ...idx, name }, pgSchema, partitioned));
       }
-    } else if (indexNeedsRecreate(idx, existingIdx)) {
+    } else if (existingIdx.invalid || indexNeedsRecreate(idx, existingIdx)) {
       // Keys, where-clause, include-list, uniqueness, nulls-not-distinct,
-      // constraint-wrapper, or deferrable changed. PG has no ALTER INDEX
-      // for these; drop and recreate. Drop SQL must use DROP CONSTRAINT for
-      // constraint-backed entries (DROP INDEX errors out — the index is
-      // owned by the constraint).
+      // constraint-wrapper, or deferrable changed — or the existing index is
+      // invalid and enforces nothing. PG has no ALTER INDEX for these.
+      if (!idx.as_constraint && !existingIdx.as_constraint) {
+        // Build-then-swap: the declared name never goes without a valid index,
+        // and a failed build leaves the old one in place (#81).
+        ops.push(replaceIndexOp(table, { ...idx, name }, pgSchema, partitioned));
+        // The replacement is a new index object, so it carries no comment.
+        if (idx.comment) ops.push(indexCommentOp(table, idx, name, pgSchema));
+        continue;
+      }
+      // Constraint-backed: drop and recreate. Drop SQL must use DROP
+      // CONSTRAINT (DROP INDEX errors out — the index is owned by the
+      // constraint). Swapping these needs a table lock and fails when an FK
+      // depends on the constraint, so they stay destructive (#81).
       ops.push(buildDropIndexOp(table, existingIdx, name, pgSchema));
       ops.push(...recreateOps(createIndexOps(table, { ...idx, name }, pgSchema, partitioned)));
     }
     if (idx.comment && idx.comment !== existingIdx?.comment) {
-      const isConstraint = idx.unique && idx.as_constraint;
-      ops.push({
-        type: 'set_comment',
-        phase: isConstraint ? 14 : 7,
-        objectName: isConstraint ? `${table}.${name}` : name,
-        sql: isConstraint
-          ? `COMMENT ON CONSTRAINT "${name}" ON "${pgSchema}"."${table}" IS '${escapeQuote(idx.comment)}'`
-          : `COMMENT ON INDEX "${pgSchema}"."${name}" IS '${escapeQuote(idx.comment)}'`,
-        destructive: false,
-        concurrent: !isConstraint,
-      });
+      ops.push(indexCommentOp(table, idx, name, pgSchema));
     }
   }
 
@@ -2456,6 +2466,99 @@ export function normalizeIndexClause(clause: string | undefined): string {
   return clause.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+function indexCommentOp(table: string, idx: IndexDef, name: string, pgSchema: string): Operation {
+  const isConstraint = idx.unique && idx.as_constraint;
+  const comment = escapeQuote(idx.comment ?? '');
+  return {
+    type: 'set_comment',
+    phase: isConstraint ? 14 : 7,
+    objectName: isConstraint ? `${table}.${name}` : name,
+    sql: isConstraint
+      ? `COMMENT ON CONSTRAINT "${name}" ON "${pgSchema}"."${table}" IS '${comment}'`
+      : `COMMENT ON INDEX "${pgSchema}"."${name}" IS '${comment}'`,
+    destructive: false,
+    concurrent: !isConstraint,
+  };
+}
+
+/**
+ * Deterministic side name for an index swap, within PG's 63-byte identifier
+ * limit. Deterministic so a run that died mid-swap leaves names the next run
+ * recognizes; hashed so two long index names sharing a prefix can't collide.
+ */
+function swapIndexName(name: string, suffix: 'new' | 'old'): string {
+  const hash = createHash('sha256').update(name).digest('hex').slice(0, 8);
+  return `${name.slice(0, 40)}_${hash}_sf${suffix}`;
+}
+
+/**
+ * Redefine a plain (non-constraint) index without ever leaving its name
+ * without a valid index (#81): build the new definition under a side name,
+ * swap names in one transaction, then drop the old index. A failed build
+ * drops the half-built side index and leaves the old index untouched, so this
+ * loses nothing either way and is not destructive. The swap's two renames take
+ * SHARE UPDATE EXCLUSIVE on the two indexes only — no table lock, DML proceeds.
+ *
+ * Partitioned parents reject CONCURRENTLY, so there the same steps run as one
+ * ordinary transaction, which rolls back as a whole on failure.
+ */
+function replaceIndexOp(
+  table: string,
+  idx: IndexDef & { name: string },
+  pgSchema: string,
+  partitioned: boolean,
+): Operation {
+  const q = (n: string) => `"${pgSchema}"."${n}"`;
+  const fresh = swapIndexName(idx.name, 'new');
+  const old = swapIndexName(idx.name, 'old');
+  const swap = `ALTER INDEX ${q(idx.name)} RENAME TO "${old}"; ALTER INDEX ${q(fresh)} RENAME TO "${idx.name}"`;
+  const base = { type: 'replace_index' as const, phase: 7, objectName: idx.name, destructive: false };
+
+  if (partitioned) {
+    return {
+      ...base,
+      sql: [createIndexSql(table, { ...idx, name: fresh }, pgSchema, false), swap, `DROP INDEX ${q(old)}`].join(';\n'),
+    };
+  }
+  const statements = [
+    // A previous run killed mid-build leaves the side index behind.
+    `DROP INDEX CONCURRENTLY IF EXISTS ${q(fresh)}`,
+    createIndexSql(table, { ...idx, name: fresh }, pgSchema, true),
+    `BEGIN; ${swap}; COMMIT`,
+    `DROP INDEX CONCURRENTLY ${q(old)}`,
+  ];
+  return {
+    ...base,
+    sql: statements.join(';\n'),
+    statements,
+    cleanupSql: `DROP INDEX CONCURRENTLY IF EXISTS ${q(fresh)}`,
+    concurrent: true,
+  };
+}
+
+function createIndexSql(
+  table: string,
+  idx: IndexDef & { name: string },
+  pgSchema: string,
+  concurrent: boolean,
+): string {
+  const method = idx.method || 'btree';
+  const unique = idx.unique ? 'UNIQUE ' : '';
+  const cols = idx.columns.map((c) => indexKeySql(c, idx.opclass)).join(', ');
+  const concurrently = concurrent ? 'CONCURRENTLY ' : '';
+  let sql = `CREATE ${unique}INDEX ${concurrently}IF NOT EXISTS "${idx.name}" ON "${pgSchema}"."${table}" USING ${method} (${cols})`;
+  if (idx.include && idx.include.length > 0) {
+    sql += ` INCLUDE (${idx.include.map((c) => `"${c}"`).join(', ')})`;
+  }
+  if (idx.unique && idx.nulls_not_distinct) {
+    sql += ' NULLS NOT DISTINCT';
+  }
+  if (idx.where) {
+    sql += ` WHERE ${idx.where}`;
+  }
+  return sql;
+}
+
 /**
  * Generate the ops needed to create an index. Plain indexes (no
  * `as_constraint`) produce a single CREATE INDEX CONCURRENTLY op. Indexes
@@ -2466,22 +2569,9 @@ export function normalizeIndexClause(clause: string | undefined): string {
  */
 function createIndexOps(table: string, idx: IndexDef, pgSchema: string, partitioned = false): Operation[] {
   const name = idx.name || defaultIndexName(table, idx);
-  const method = idx.method || 'btree';
-  const unique = idx.unique ? 'UNIQUE ' : '';
-  const cols = idx.columns.map((c) => indexKeySql(c, idx.opclass)).join(', ');
   // Postgres rejects CREATE INDEX CONCURRENTLY on a partitioned parent. A plain
   // CREATE INDEX on the parent is allowed and propagates to every partition.
-  const concurrently = partitioned ? '' : 'CONCURRENTLY ';
-  let sql = `CREATE ${unique}INDEX ${concurrently}IF NOT EXISTS "${name}" ON "${pgSchema}"."${table}" USING ${method} (${cols})`;
-  if (idx.include && idx.include.length > 0) {
-    sql += ` INCLUDE (${idx.include.map((c) => `"${c}"`).join(', ')})`;
-  }
-  if (idx.unique && idx.nulls_not_distinct) {
-    sql += ' NULLS NOT DISTINCT';
-  }
-  if (idx.where) {
-    sql += ` WHERE ${idx.where}`;
-  }
+  const sql = createIndexSql(table, { ...idx, name }, pgSchema, !partitioned);
   const indexOp: Operation = {
     type: 'add_index',
     phase: 7,

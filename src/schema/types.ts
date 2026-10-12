@@ -149,6 +149,13 @@ export interface IndexDef {
    */
   deferrable?: DeferrableMode;
   comment?: string;
+  /**
+   * Introspection only — never declared in YAML. Set when `pg_index.indisvalid`
+   * is false (e.g. a failed `CREATE INDEX CONCURRENTLY`): the index exists but
+   * enforces nothing, so the planner rebuilds it rather than counting it as
+   * the declared index (issue #81).
+   */
+  invalid?: boolean;
 }
 
 // ─── Check Constraint ───────────────────────────────────────────

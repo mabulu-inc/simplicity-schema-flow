@@ -104,29 +104,34 @@ indexes:
     );
   });
 
-  it('plain index whose definition changed', async () => {
-    await expectBlockedRecreate(
-      `
+  // A plain index is rebuilt by build-then-swap, which loses nothing, so it
+  // is not gated at all (#81) — it applies without --allow-destructive.
+  it('plain index whose definition changed is not blocked', async () => {
+    const project = await useTestProject(DATABASE_URL);
+    const table = (extra: string) => `
 table: t
 columns:
   - { name: id, type: bigserial, primary_key: true }
   - { name: a, type: bigint }
   - { name: b, type: bigint }
 indexes:
-  - { name: t_ab, columns: [a, b] }
-`,
-      `
-table: t
-columns:
-  - { name: id, type: bigserial, primary_key: true }
-  - { name: a, type: bigint }
-  - { name: b, type: bigint }
-indexes:
-  - { name: t_ab, columns: [a, b], where: 'a IS NOT NULL' }
-`,
-      (p) => indexDef(p, 't_ab'),
-      'add_index',
-    );
+  - { name: t_ab, columns: [a, b]${extra} }
+`;
+    try {
+      writeSchema(project.dir, { 'tables/t.yaml': table('') });
+      await project.migrate();
+      writeSchema(project.dir, { 'tables/t.yaml': table(", where: 'a IS NOT NULL'") });
+
+      const gated = await plan(project, false);
+      expect(gated.blocked).toEqual([]);
+      expect(gated.operations.map((o) => o.type)).toEqual(['replace_index']);
+
+      await project.migrate();
+      expect(await indexDef(project, 't_ab')).toContain('WHERE (a IS NOT NULL)');
+      expect((await plan(project, false)).operations).toEqual([]);
+    } finally {
+      await project.cleanup();
+    }
   });
 
   it('exclusion constraint whose definition changed', async () => {

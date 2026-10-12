@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Changing an index's definition no longer leaves the table without it.**
+  schema-flow now builds the new index first, swaps it in under the same name,
+  and only then drops the old one. Before, it dropped the old index first, so
+  if the new one could not be built (for example, a unique index over data
+  that already has duplicates), the table was left with no working index at
+  all. Now a failed change leaves the old index in place, the run fails, and
+  the error names the duplicated key. Because nothing can be lost, changing a
+  plain index no longer needs `--allow-destructive`. Indexes declared with
+  `as_constraint: true` still do.
+- **A broken (invalid) index under a declared name is now rebuilt.** An
+  interrupted or failed concurrent index build leaves an index that exists but
+  enforces nothing. `plan` and `run` used to count it as present and report
+  `0 operations`. Now they rebuild it, and `drift` reports it.
+
 ## [0.21.0] - 2026-10-06
 
 ### Changed

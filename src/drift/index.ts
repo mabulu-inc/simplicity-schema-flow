@@ -702,6 +702,7 @@ function driftIndexes(table: string, desired: IndexDef[], actual: IndexDef[], co
       if (Boolean(idx.nulls_not_distinct) !== Boolean(ai.nulls_not_distinct)) diffs.push('nulls_not_distinct');
       if (Boolean(idx.as_constraint) !== Boolean(ai.as_constraint)) diffs.push('as_constraint');
       if ((idx.deferrable || null) !== (ai.deferrable || null)) diffs.push('deferrable');
+      if (ai.invalid) diffs.push('invalid (enforces nothing)');
       if (diffs.length > 0) {
         items.push({
           type: itemType(idx),

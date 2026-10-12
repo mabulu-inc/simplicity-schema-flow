@@ -738,6 +738,7 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
     `SELECT
        i.relname AS name,
        ix.indisunique AS is_unique,
+       ix.indisvalid AS is_valid,
        am.amname AS method,
        pg_get_expr(ix.indpred, ix.indrelid) AS where_clause,
        array(
@@ -800,6 +801,7 @@ async function getIndexes(client: Client, table: string, schema: string): Promis
         idx.deferrable = r.is_deferred ? 'initially_deferred' : 'initially_immediate';
       }
     }
+    if (!r.is_valid) idx.invalid = true;
     return idx;
   });
 }

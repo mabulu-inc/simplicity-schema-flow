@@ -646,7 +646,7 @@ indexes:
 });
 
 describe('diff: indexes: nulls_not_distinct changes', () => {
-  it('plans drop+recreate when an existing unique index flips false → true', () => {
+  it('plans a replace when an existing unique index flips false → true', () => {
     const desired = parseTable(`
 table: idx_nnd_diff
 columns:
@@ -685,11 +685,9 @@ indexes:
     };
 
     const plan = buildPlan(desiredState, actualState, { pgSchema: TEST_SCHEMA, allowDestructive: true });
-    const dropIdx = plan.operations.find((op) => op.type === 'drop_index' && op.objectName === 'uq_idx_nnd_diff_a');
-    const addIdx = plan.operations.find((op) => op.type === 'add_index' && op.objectName === 'uq_idx_nnd_diff_a');
-    expect(dropIdx).toBeDefined();
-    expect(addIdx).toBeDefined();
-    expect(addIdx!.sql).toContain('NULLS NOT DISTINCT');
+    const replace = plan.operations.find((op) => op.type === 'replace_index' && op.objectName === 'uq_idx_nnd_diff_a');
+    expect(replace).toBeDefined();
+    expect(replace!.sql).toContain('NULLS NOT DISTINCT');
   });
 
   it('produces 0 index ops when nulls_not_distinct matches', () => {
