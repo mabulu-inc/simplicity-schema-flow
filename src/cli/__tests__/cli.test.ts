@@ -182,6 +182,13 @@ describe('CLI argument parsing', () => {
     expect(result.apply).toBe(true);
   });
 
+  it('should parse "sql" with --transaction flag', () => {
+    const result = parseArgs(['node', 'schema-flow', 'sql', '--transaction', '--output', 'm.sql']);
+    expect(result.command).toBe('sql');
+    expect(result.transaction).toBe(true);
+    expect(result.output).toBe('m.sql');
+  });
+
   it('should parse "lint" command', () => {
     const result = parseArgs(['node', 'schema-flow', 'lint']);
     expect(result.command).toBe('lint');

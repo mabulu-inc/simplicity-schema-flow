@@ -112,9 +112,18 @@ Generate a standalone `.sql` migration file from the current plan.
 
 ```bash
 npx @smplcty/schema-flow sql --output migration.sql --db postgresql://user:pass@localhost:5432/mydb
+npx @smplcty/schema-flow sql --output migration.sql --transaction  # wrap in BEGIN/COMMIT
 ```
 
-Output includes transaction grouping, `CONCURRENTLY` operations outside transactions, phase comments, and blocked operations as comments.
+Output groups statements under phase comments, with `CONCURRENTLY` operations
+after the rest (outside the transaction when `--transaction` is set).
+Destructive operations held back for want of `--allow-destructive` are appended
+at the end as commented-out SQL:
+
+```sql
+-- BLOCKED (destructive) — uncomment to apply:
+-- ALTER TABLE "public"."users" DROP COLUMN "legacy";
+```
 
 ### `schema-flow erd`
 

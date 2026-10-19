@@ -34,10 +34,14 @@ const formatted = formatMigrationSql(operations);
 
 Output includes:
 
-- Transaction grouping (`BEGIN`/`COMMIT`)
-- `CONCURRENTLY` operations outside transactions
-- Phase and operation type comments
-- Blocked operations as comments
+- Phase comments
+- `CONCURRENTLY` operations after the rest, outside any transaction
+- Blocked (destructive) operations as commented-out SQL at the end
+
+Options (`GenerateSqlOptions`):
+
+- `wrapInTransaction` (default `false`): wrap the statements in `BEGIN`/`COMMIT`
+- `includeBlocked` (default `true`): append blocked operations; `false` leaves them out
 
 ## Generate ERD
 

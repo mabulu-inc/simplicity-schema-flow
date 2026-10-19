@@ -331,7 +331,7 @@ async function main(): Promise<void> {
         }
 
         const sqlPlan = await getPlan(config, logger);
-        const sql = generateSql(sqlPlan);
+        const sql = generateSql(sqlPlan, { wrapInTransaction: parsed.transaction });
 
         if (parsed.output) {
           fs.writeFileSync(parsed.output, sql, 'utf-8');

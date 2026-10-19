@@ -89,12 +89,22 @@ describe('generateSql', () => {
     expect(result).toContain('-- DROP TABLE "public"."old_table" CASCADE;');
   });
 
-  it('excludes blocked operations by default', () => {
+  it('includes blocked operations as comments by default', () => {
+    const plan: PlanResult = {
+      operations: [],
+      blocked: [makeOp({ type: 'drop_table', sql: 'DROP TABLE "public"."old_table" CASCADE', destructive: true })],
+    };
+    const result = generateSql(plan);
+    expect(result).toContain('-- DROP TABLE "public"."old_table" CASCADE;');
+    expect(result).not.toMatch(/^DROP TABLE/m);
+  });
+
+  it('excludes blocked operations when includeBlocked is false', () => {
     const plan: PlanResult = {
       operations: [makeOp({})],
       blocked: [makeOp({ type: 'drop_table', sql: 'DROP TABLE "public"."old_table" CASCADE', destructive: true })],
     };
-    const result = generateSql(plan);
+    const result = generateSql(plan, { includeBlocked: false });
     expect(result).not.toContain('old_table');
   });
 

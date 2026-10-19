@@ -43,6 +43,8 @@ export interface ParsedArgs {
   name?: string;
   /** --apply flag for drift */
   apply?: boolean;
+  /** --transaction flag for sql: wrap statements in BEGIN/COMMIT */
+  transaction?: boolean;
   /** --help was passed after a command (per-command help) */
   helpRequested?: boolean;
   /** --table <name> filter for backfill */
@@ -68,6 +70,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let seeds: boolean | undefined;
   let name: string | undefined;
   let apply: boolean | undefined;
+  let transaction: boolean | undefined;
   let newSubcommand: NewSubcommand | undefined;
   let helpRequested: boolean | undefined;
   let table: string | undefined;
@@ -184,6 +187,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case '--apply':
         apply = true;
         break;
+      case '--transaction':
+        transaction = true;
+        break;
       case '--table':
         table = args[++i];
         break;
@@ -221,6 +227,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (seeds) result.seeds = seeds;
   if (name) result.name = name;
   if (apply) result.apply = apply;
+  if (transaction) result.transaction = transaction;
   if (helpRequested) result.helpRequested = helpRequested;
   if (table) result.table = table;
   if (column) result.column = column;

@@ -10,7 +10,7 @@ import type { Operation, PlanResult } from '../planner/index.js';
 export interface GenerateSqlOptions {
   /** Wrap all statements in BEGIN/COMMIT */
   wrapInTransaction?: boolean;
-  /** Include blocked (destructive) operations as comments */
+  /** Append blocked (destructive) operations as commented-out SQL. Defaults to true. */
   includeBlocked?: boolean;
 }
 
@@ -35,7 +35,7 @@ const PHASE_LABELS: Record<number, string> = {
  * Render a migration plan as a SQL string.
  */
 export function generateSql(plan: PlanResult, options: GenerateSqlOptions = {}): string {
-  const { wrapInTransaction = false, includeBlocked = false } = options;
+  const { wrapInTransaction = false, includeBlocked = true } = options;
 
   if (plan.operations.length === 0 && (!includeBlocked || plan.blocked.length === 0)) {
     return '';

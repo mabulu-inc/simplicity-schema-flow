@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`schema-flow sql --transaction`** wraps the generated statements in
+  `BEGIN;` / `COMMIT;`. `CONCURRENTLY` operations stay outside the transaction.
+
+### Changed
+
+- **`schema-flow sql` now shows blocked operations.** Destructive operations
+  held back for want of `--allow-destructive` are appended at the end of the
+  file as commented-out SQL, under `-- BLOCKED (destructive)`, so the file
+  shows what is being held back. Before, they were left out without a trace.
+  Library callers of `generateSql` get the same default and can pass
+  `includeBlocked: false` to leave them out.
+
 ## [0.22.1] - 2026-10-19
 
 ### Fixed

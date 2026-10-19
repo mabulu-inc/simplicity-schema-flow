@@ -202,16 +202,19 @@ Examples:
   sql: `schema-flow sql — Generate migration SQL
 
 Produces the SQL that would be executed by a migration run, without executing it.
+Destructive operations held back for want of --allow-destructive are appended at
+the end as commented-out SQL, so the file shows what is being held back.
 
 Usage: schema-flow sql [options]
 
 Options:
   --output, --output-dir  Write SQL to a file instead of stdout
+  --transaction           Wrap the statements in BEGIN/COMMIT (CONCURRENTLY operations stay outside)
 ${COMMON_DB_FLAGS}
 
 Examples:
   schema-flow sql --db postgres://localhost/mydb
-  schema-flow sql --output migration.sql`,
+  schema-flow sql --output migration.sql --transaction`,
 
   erd: `schema-flow erd — Generate entity-relationship diagram
 
