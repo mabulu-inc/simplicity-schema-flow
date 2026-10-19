@@ -228,6 +228,7 @@ async function main(): Promise<void> {
               statementTimeout: config.statementTimeout,
               logger,
             });
+            result.blockedOperations = plan.blocked;
             if (config.json) {
               console.log(JSON.stringify(result, null, 2));
             } else {

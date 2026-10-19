@@ -101,9 +101,15 @@ export async function runPipeline(
   //    lock, after pre-scripts — so it reflects what pre-scripts changed
   //    (issue #28) and nothing can change the DB between planning and applying.
   const desiredState = desired;
+  let blocked: Operation[] = [];
   const result = await execute({
     connectionString: config.connectionString,
-    operations: async () => (desiredState ? planAgainstDatabase(config, logger, desiredState) : []),
+    operations: async () => {
+      if (!desiredState) return [];
+      const plan = await planAgainstDatabase(config, logger, desiredState);
+      blocked = plan.blocked;
+      return plan.operations;
+    },
     preScripts: phaseFilter !== 'migrate' ? preScripts : undefined,
     postScripts: phaseFilter !== 'migrate' ? postScripts : undefined,
     // Recorded inside execute() (after the apply, before post-scripts) so their
@@ -120,6 +126,7 @@ export async function runPipeline(
     perTxSqlPath: config.perTxSqlPath,
     bootstrapSession: config.bootstrapSession,
   });
+  result.blockedOperations = blocked;
 
   // 6b. Post-apply convergence. A CASCADE drop (e.g. a function return-type
   //     change) can drop declared policies/views the original plan — built
@@ -145,7 +152,7 @@ async function planAgainstDatabase(
   config: SimplicitySchemaConfig,
   logger: Logger,
   desired: DesiredState,
-): Promise<Operation[]> {
+): Promise<{ operations: Operation[]; blocked: Operation[] }> {
   // Seeds are compared against live rows, which pre-scripts may have changed.
   const seedClient = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
   try {
@@ -184,7 +191,7 @@ async function planAgainstDatabase(
     await warnCascadeFunctionDrops(config, logger, operations, desired);
   }
 
-  return operations;
+  return { operations, blocked };
 }
 
 /**

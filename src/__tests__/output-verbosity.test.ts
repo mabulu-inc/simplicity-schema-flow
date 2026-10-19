@@ -171,6 +171,7 @@ describe('reportMigrationResult', () => {
     executedPostScripts: [],
     scriptChanges: {},
     blockedScripts: [],
+    blockedOperations: [],
   };
 
   const sampleOps: Operation[] = [

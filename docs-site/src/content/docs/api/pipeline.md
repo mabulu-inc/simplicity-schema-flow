@@ -51,6 +51,10 @@ interface ExecuteResult {
   skippedScripts: number;
   skippedPreScripts: number;
   skippedPostScripts: number;
+  /** Pending scripts under pre/destructive/ or post/destructive/ held back for want of --allow-destructive. */
+  blockedScripts: string[];
+  /** Destructive operations held back for want of --allow-destructive. */
+  blockedOperations: Operation[];
 }
 ```
 

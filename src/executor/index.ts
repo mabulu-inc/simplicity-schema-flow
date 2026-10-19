@@ -106,6 +106,11 @@ export interface ExecuteResult {
    * `--allow-destructive`, in run order. They are not recorded, so they stay pending.
    */
   blockedScripts: string[];
+  /**
+   * Destructive operations the plan held back for want of `--allow-destructive`.
+   * Filled by the caller that built the plan; the executor only runs what it is given.
+   */
+  blockedOperations: Operation[];
 }
 
 /**
@@ -475,6 +480,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     executedPostScripts: [],
     scriptChanges: {},
     blockedScripts: [],
+    blockedOperations: [],
   };
 
   // A pending destructive script waits for --allow-destructive, reported the

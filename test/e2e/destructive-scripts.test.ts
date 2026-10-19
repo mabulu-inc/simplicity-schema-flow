@@ -108,6 +108,24 @@ describe('E2E: destructive pre/post scripts (#82)', () => {
     expect(result.blockedScripts).toEqual(['pre/destructive/x.sql']);
   });
 
+  it('lists blocked operations in the plan and run results, next to blocked scripts', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+    writeSchema(ctx.dir, {
+      'tables/t.yaml': `${TABLE}  - { name: legacy, type: text }\n`,
+    });
+    await ctx.migrate();
+
+    writeSchema(ctx.dir, { 'tables/t.yaml': TABLE });
+    const plan = await runPipeline({ ...ctx.config, dryRun: true }, logger);
+    expect(plan.blockedOperations.map((op) => `${op.type} ${op.objectName}`)).toEqual(['drop_column t.legacy']);
+
+    const run = await ctx.migrate();
+    expect(run.blockedOperations.map((op) => op.type)).toEqual(['drop_column']);
+
+    const allowed = await ctx.migrate({ allowDestructive: true });
+    expect(allowed.blockedOperations).toEqual([]);
+  });
+
   it("holds back an imported package's destructive scripts the same way", async () => {
     ctx = await useTestProject(DATABASE_URL);
     writePackage(ctx.dir, '@fixture/cleanup', {

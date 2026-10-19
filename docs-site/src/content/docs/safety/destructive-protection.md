@@ -34,7 +34,8 @@ These operations are **blocked by default** and require `--allow-destructive`:
 
 When a blocked operation is encountered:
 
-1. It is reported as "blocked" in the plan output
+1. It is reported as "blocked" in the plan output, and listed in
+   `blockedOperations` in `plan --json` and `run --json`
 2. The rest of the migration proceeds normally
 3. No data is lost
 

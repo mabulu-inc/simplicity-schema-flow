@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`plan --json` and `run --json` now list blocked operations.** Destructive
+  operations held back for want of `--allow-destructive` appear in a new
+  `blockedOperations` field, next to `blockedScripts`. Before, they were only
+  printed as warnings, so a script reading the JSON could not tell what was
+  being held back. `drift --apply --json` includes them too.
+
 ## [0.22.0] - 2026-10-19
 
 ### Added
