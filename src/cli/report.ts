@@ -69,6 +69,10 @@ export function reportMigrationResult(options: ReportOptions): void {
   if (result.postScriptsRun + result.skippedPostScripts > 0) {
     write(`  Post-scripts: ${result.postScriptsRun} ${ran}, ${result.skippedPostScripts} already applied`);
   }
+  const blocked = result.blockedScripts.length;
+  if (blocked > 0) {
+    write(`  Destructive scripts held back: ${blocked} (use --allow-destructive to run)`);
+  }
 }
 
 /** Why a script runs, for its output line. Absent for results built without one. */

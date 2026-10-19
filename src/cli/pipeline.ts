@@ -112,6 +112,7 @@ export async function runPipeline(
     pgSchema: config.pgSchema,
     dryRun: config.dryRun,
     validateOnly,
+    allowDestructive: config.allowDestructive,
     lockTimeout: config.lockTimeout,
     statementTimeout: config.statementTimeout,
     maxRetries: config.maxRetries,

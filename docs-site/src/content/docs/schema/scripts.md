@@ -65,6 +65,40 @@ Run **after** schema migration, in alphabetical order. Use for view refreshes, d
 REFRESH MATERIALIZED VIEW CONCURRENTLY user_stats;
 ```
 
+## Destructive scripts
+
+File location: `schema/pre/destructive/<name>.sql` or `schema/post/destructive/<name>.sql`
+
+A script that deletes or rewrites data you can't get back belongs in the
+contract phase, like a dropped column. Put it in the phase's `destructive/`
+folder. Where the file lives is the declaration: schema-flow does not read the
+SQL to guess.
+
+Without `--allow-destructive`, a pending destructive script does not run. It is
+reported the way a blocked operation is, and the rest of the migration proceeds
+normally:
+
+```text
+Blocked (destructive): post-script post/destructive/20261019_prune_devices.sql — use --allow-destructive to allow
+...
+  Destructive scripts held back: 1 (use --allow-destructive to run)
+```
+
+It is not recorded as applied, so it stays pending (and shows in `status`), and
+every later run without the flag holds it back again. `plan --json` lists held-back
+scripts in `blockedScripts`. A run with `--allow-destructive` runs it.
+
+- **Order.** Scripts run sorted by full relative path, so `post/destructive/…`
+  sorts with the `d`s. With timestamp-named scripts, destructive scripts run
+  after the phase's other scripts.
+- **Moving a file is a new script.** History tracks a script by its path, so
+  moving an applied script into or out of `destructive/` runs it again, like any
+  rename.
+- **Dependent steps.** If a later step needs a held-back script's effect, that
+  step fails at apply like any other failure. Run that release with
+  `--allow-destructive`, or split it across two releases.
+- **Imported packages** follow the same rule for their own `destructive/` folders.
+
 ## Creating templates
 
 ```bash

@@ -41,6 +41,8 @@ export interface ExecuteOptions {
   pgSchema?: string;
   dryRun?: boolean;
   validateOnly?: boolean;
+  /** Run pending scripts under `pre/destructive/` and `post/destructive/`. Without it they are held back. */
+  allowDestructive?: boolean;
   lockTimeout?: number;
   statementTimeout?: number;
   /**
@@ -99,6 +101,11 @@ export interface ExecuteResult {
   executedPostScripts: string[];
   /** Why each script in `executedPreScripts` / `executedPostScripts` ran, keyed by relative path. */
   scriptChanges: Record<string, FileChange>;
+  /**
+   * Relative paths of pending destructive scripts held back for want of
+   * `--allow-destructive`, in run order. They are not recorded, so they stay pending.
+   */
+  blockedScripts: string[];
 }
 
 /**
@@ -441,6 +448,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     pgSchema = 'public',
     dryRun = false,
     validateOnly = false,
+    allowDestructive = false,
     lockTimeout,
     statementTimeout,
     maxRetries = 3,
@@ -466,6 +474,18 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     executedPreScripts: [],
     executedPostScripts: [],
     scriptChanges: {},
+    blockedScripts: [],
+  };
+
+  // A pending destructive script waits for --allow-destructive, reported the
+  // way a blocked destructive operation is.
+  const holdBack = (script: SchemaFile): boolean => {
+    if (!script.destructive || allowDestructive) return false;
+    result.blockedScripts.push(script.relativePath);
+    logger?.warn(
+      `Blocked (destructive): ${script.phase}-script ${script.relativePath} — use --allow-destructive to allow`,
+    );
+    return true;
   };
 
   // Dry-run: populate the result with what would happen and let the caller
@@ -496,14 +516,15 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
         const change = historyExists
           ? await fileChange(historyClient!, script.relativePath, script.hash, pgSchema)
           : 'new';
-        if (change) {
-          result.preScriptsRun++;
-          result.executedPreScripts.push(script.relativePath);
-          result.scriptChanges[script.relativePath] = change;
-        } else {
+        if (!change) {
           result.skippedScripts++;
           result.skippedPreScripts++;
+          continue;
         }
+        if (holdBack(script)) continue;
+        result.preScriptsRun++;
+        result.executedPreScripts.push(script.relativePath);
+        result.scriptChanges[script.relativePath] = change;
       }
 
       // Tighten ops run after post-scripts in the live path; preserve that
@@ -523,14 +544,15 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
         const change = historyExists
           ? await fileChange(historyClient!, script.relativePath, script.hash, pgSchema)
           : 'new';
-        if (change) {
-          result.postScriptsRun++;
-          result.executedPostScripts.push(script.relativePath);
-          result.scriptChanges[script.relativePath] = change;
-        } else {
+        if (!change) {
           result.skippedScripts++;
           result.skippedPostScripts++;
+          continue;
         }
+        if (holdBack(script)) continue;
+        result.postScriptsRun++;
+        result.executedPostScripts.push(script.relativePath);
+        result.scriptChanges[script.relativePath] = change;
       }
 
       for (const op of dryRunTighten) {
@@ -567,6 +589,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           logger?.debug(`Skipping unchanged pre-script: ${script.relativePath}`);
           continue;
         }
+        if (holdBack(script)) continue;
 
         const sql = await readFile(script.absolutePath, 'utf-8');
         const scriptClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
@@ -821,6 +844,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
             logger?.debug(`Skipping unchanged post-script: ${script.relativePath}`);
             continue;
           }
+          if (holdBack(script)) continue;
 
           const sql = await readFile(script.absolutePath, 'utf-8');
           const scriptClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Pre/post scripts can be marked destructive.** Put a script in
+  `pre/destructive/` or `post/destructive/` and it waits for
+  `--allow-destructive`, the same as a dropped column. Without the flag the
+  rest of the migration runs, the script is reported as held back (in `run`
+  and `plan` output, and as `blockedScripts` in `plan --json`), and it stays
+  pending until a run with the flag applies it. Scripts sort by full path, so
+  with timestamp names, destructive scripts run after the phase's other scripts.
+  Existing scripts are unaffected.
+
 ## [0.21.1] - 2026-10-12
 
 ### Fixed

@@ -86,7 +86,8 @@ schema/
 ├── mixins/                  # Reusable schema fragments
 │   └── timestamps.yaml
 ├── pre/                     # SQL scripts run before migration
-│   └── 001_cleanup.sql
+│   ├── 001_cleanup.sql
+│   └── destructive/         # held back until --allow-destructive
 └── post/                    # SQL scripts run after migration
     └── 001_refresh_views.sql
 ```

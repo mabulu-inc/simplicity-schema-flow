@@ -27,6 +27,11 @@ export interface SchemaFile {
   /** SHA-256 hash of file contents */
   hash: string;
   /**
+   * True for a pre/post script under `<phase>/destructive/`. It runs only with
+   * `--allow-destructive`; without it, it is skipped and stays pending.
+   */
+  destructive?: boolean;
+  /**
    * Package name this file was imported from, or undefined for local files.
    * Used to attribute conflicts and to scope imported mixin params.
    */
@@ -50,6 +55,7 @@ export async function hashFile(filePath: string): Promise<string> {
  *
  * Directory structure:
  * - pre/*.sql        → phase "pre" (alphabetical order)
+ * - pre/destructive/*.sql → phase "pre", destructive (sorted by full path)
  * - tables/*.yaml    → phase "schema"
  * - enums/*.yaml     → phase "schema"
  * - functions/*.yaml → phase "schema"
@@ -58,12 +64,13 @@ export async function hashFile(filePath: string): Promise<string> {
  * - mixins/*.yaml    → phase "schema"
  * - extensions.yaml  → phase "schema"
  * - post/*.sql       → phase "post" (alphabetical order)
+ * - post/destructive/*.sql → phase "post", destructive (sorted by full path)
  */
 export async function discoverSchemaFiles(baseDir: string, source?: string): Promise<DiscoveredFiles> {
   const abs = path.resolve(baseDir);
 
   const [preFiles, schemaFiles, postFiles] = await Promise.all([
-    discoverPhaseFiles(abs, ['pre/*.sql'], 'pre', source),
+    discoverPhaseFiles(abs, ['pre/*.sql', 'pre/destructive/*.sql'], 'pre', source),
     discoverPhaseFiles(
       abs,
       [
@@ -78,7 +85,7 @@ export async function discoverSchemaFiles(baseDir: string, source?: string): Pro
       'schema',
       source,
     ),
-    discoverPhaseFiles(abs, ['post/*.sql'], 'post', source),
+    discoverPhaseFiles(abs, ['post/*.sql', 'post/destructive/*.sql'], 'post', source),
   ]);
 
   return {
@@ -118,6 +125,7 @@ async function discoverPhaseFiles(
       phase,
       hash,
       ...(source !== undefined && { source }),
+      ...(rel.startsWith(`${phase}${path.sep}destructive${path.sep}`) && { destructive: true }),
     });
   }
 

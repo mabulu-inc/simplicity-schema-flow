@@ -17,6 +17,7 @@ function emptyResult(overrides: Partial<ExecuteResult> = {}): ExecuteResult {
     executedPreScripts: [],
     executedPostScripts: [],
     scriptChanges: {},
+    blockedScripts: [],
     ...overrides,
   };
 }

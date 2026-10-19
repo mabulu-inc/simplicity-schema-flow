@@ -27,6 +27,8 @@ These operations are **blocked by default** and require `--allow-destructive`:
   rounding (`numeric` -> `integer`) or truncating (`text` -> `varchar(50)`).
   See [Changing a column's type](/simplicity-schema-flow/schema/tables/#changing-a-columns-type).
 - Enum value removal (`remove_enum_value`)
+- Pre/post scripts under `pre/destructive/` or `post/destructive/`. See
+  [Destructive scripts](/simplicity-schema-flow/schema/scripts/#destructive-scripts).
 
 ## Behavior
 
