@@ -1,4 +1,4 @@
-import type { ConfigOverrides } from '../core/config.js';
+import type { ConfigOverrides, Stage } from '../core/config.js';
 
 // Exported as the source of truth for the CLI command set; the docs
 // cli/commands page is kept in sync with it by test.
@@ -162,6 +162,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case '--allow-destructive':
         overrides.allowDestructive = true;
         break;
+      case '--stage':
+        // Validated in main(), where an unknown value can be reported.
+        overrides.stage = (args[++i] ?? '') as Stage;
+        break;
       case '--skip-checks':
         overrides.skipChecks = true;
         break;
@@ -254,5 +258,6 @@ function flagTakesValue(flag: string): boolean {
     '--column',
     '--concurrency',
     '--per-tx-sql',
+    '--stage',
   ].includes(flag);
 }

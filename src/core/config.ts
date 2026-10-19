@@ -20,12 +20,24 @@ export interface ImportSpec {
   params?: Record<string, string>;
 }
 
+/**
+ * Where a run sits relative to the deploy (#83). `before-deploy` applies only
+ * what the old code can live with; `after-deploy` is the full pass, run once
+ * every service is deployed and checked. schema-flow cannot tell when that is,
+ * so the caller says so.
+ */
+export type Stage = 'before-deploy' | 'after-deploy';
+
+export const STAGES: readonly Stage[] = ['before-deploy', 'after-deploy'];
+
 export interface SimplicitySchemaConfig {
   connectionString: string;
   baseDir: string;
   pgSchema: string;
   dryRun: boolean;
   allowDestructive: boolean;
+  /** Overrides `allowDestructive` when set: off before deploy, on after (see `applyStage`). */
+  stage?: Stage;
   skipChecks: boolean;
   lockTimeout: number;
   statementTimeout: number;
@@ -64,6 +76,7 @@ export interface ConfigOverrides {
   pgSchema?: string;
   dryRun?: boolean;
   allowDestructive?: boolean;
+  stage?: Stage;
   skipChecks?: boolean;
   lockTimeout?: number;
   statementTimeout?: number;
@@ -140,6 +153,22 @@ export function resolveConfig(overrides: ConfigOverrides = {}): SimplicitySchema
   if (overrides.quiet !== undefined) config.quiet = overrides.quiet;
   if (overrides.json !== undefined) config.json = overrides.json;
   if (overrides.perTxSqlPath !== undefined) config.perTxSqlPath = overrides.perTxSqlPath;
+  if (overrides.stage !== undefined) config.stage = overrides.stage;
 
-  return config;
+  return applyStage(config);
+}
+
+/**
+ * A stage decides destructive work outright: `before-deploy` never applies a
+ * destructive change, whatever else is set; `after-deploy` applies them all,
+ * plus anything additive still pending. No stage leaves `allowDestructive` alone.
+ */
+export function applyStage(config: SimplicitySchemaConfig): SimplicitySchemaConfig {
+  if (!config.stage) return config;
+  return { ...config, allowDestructive: config.stage === 'after-deploy' };
+}
+
+/** How to get a held-back destructive change applied, for "Blocked" messages. */
+export function destructiveHint(stage: Stage | undefined): string {
+  return stage === 'before-deploy' ? 'waits for --stage after-deploy' : 'use --allow-destructive to allow';
 }

@@ -17,6 +17,9 @@ Run full migration pipeline: pre-scripts, schema migration, post-scripts.
 npx @smplcty/schema-flow run --db postgresql://user:pass@localhost:5432/mydb
 ```
 
+To split a release around the deploy, run it twice with `--stage before-deploy`
+and `--stage after-deploy`. See [Deploy stages](/simplicity-schema-flow/safety/destructive-protection/#deploy-stages).
+
 ### `schema-flow run pre`
 
 Run only pre-scripts (SQL files in `schema/pre/`).

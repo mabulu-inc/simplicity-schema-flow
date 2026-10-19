@@ -69,6 +69,13 @@ describe('resolveConfig', () => {
     expect(config.lockTimeout).toBe(5000);
     expect(config.verbose).toBe(true);
   });
+
+  it('lets a stage decide destructive work, overriding --allow-destructive (#83)', () => {
+    expect(resolveConfig({ stage: 'before-deploy', allowDestructive: true }).allowDestructive).toBe(false);
+    expect(resolveConfig({ stage: 'after-deploy' }).allowDestructive).toBe(true);
+    expect(resolveConfig({ allowDestructive: true }).allowDestructive).toBe(true);
+    expect(resolveConfig({}).stage).toBeUndefined();
+  });
 });
 
 describe('--env flag E2E', () => {

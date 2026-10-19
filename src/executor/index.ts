@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { runsAfterPostScripts, type Operation } from '../planner/index.js';
 import type { SchemaFile } from '../core/files.js';
 import type { Logger } from '../core/logger.js';
+import { destructiveHint, type Stage } from '../core/config.js';
 import { acquireClient } from '../core/db.js';
 import { ensureHistoryTable, fileChange, recordFile, type FileChange } from '../core/tracker.js';
 import { ensureSnapshotsTable, saveSnapshot } from '../rollback/index.js';
@@ -43,6 +44,8 @@ export interface ExecuteOptions {
   validateOnly?: boolean;
   /** Run pending scripts under `pre/destructive/` and `post/destructive/`. Without it they are held back. */
   allowDestructive?: boolean;
+  /** The run's stage, only to say why a destructive script is held back. */
+  stage?: Stage;
   lockTimeout?: number;
   statementTimeout?: number;
   /**
@@ -111,6 +114,11 @@ export interface ExecuteResult {
    * Filled by the caller that built the plan; the executor only runs what it is given.
    */
   blockedOperations: Operation[];
+  /**
+   * The stage the run was given, if any. Under `before-deploy`, everything in
+   * `blockedScripts` and `blockedOperations` waits for the `after-deploy` run.
+   */
+  stage?: Stage;
 }
 
 /**
@@ -454,6 +462,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     dryRun = false,
     validateOnly = false,
     allowDestructive = false,
+    stage,
     lockTimeout,
     statementTimeout,
     maxRetries = 3,
@@ -488,9 +497,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
   const holdBack = (script: SchemaFile): boolean => {
     if (!script.destructive || allowDestructive) return false;
     result.blockedScripts.push(script.relativePath);
-    logger?.warn(
-      `Blocked (destructive): ${script.phase}-script ${script.relativePath} — use --allow-destructive to allow`,
-    );
+    logger?.warn(`Blocked (destructive): ${script.phase}-script ${script.relativePath} — ${destructiveHint(stage)}`);
     return true;
   };
 

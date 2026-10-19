@@ -81,7 +81,7 @@ normally:
 ```text
 Blocked (destructive): post-script post/destructive/20261019_prune_devices.sql — use --allow-destructive to allow
 ...
-  Destructive scripts held back: 1 (use --allow-destructive to run)
+  Destructive scripts held back: 1 (use --allow-destructive to allow)
 ```
 
 It is not recorded as applied, so it stays pending (and shows in `status`), and

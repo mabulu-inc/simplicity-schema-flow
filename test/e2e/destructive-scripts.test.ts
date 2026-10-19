@@ -63,7 +63,7 @@ describe('E2E: destructive pre/post scripts (#82)', () => {
       write: (l) => lines.push(l),
       dryRun: true,
     });
-    expect(lines).toContain('  Destructive scripts held back: 1 (use --allow-destructive to run)');
+    expect(lines).toContain('  Destructive scripts held back: 1 (use --allow-destructive to allow)');
 
     const withFlag = await ctx.migrate({ allowDestructive: true });
     expect(withFlag.executedPostScripts).toEqual(['post/destructive/b_prune.sql']);

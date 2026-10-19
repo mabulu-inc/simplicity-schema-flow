@@ -32,6 +32,7 @@ Options:
   --env                Config file environment to use
   --dry-run            Plan only, don't execute
   --allow-destructive  Allow drops and destructive changes
+  --stage              before-deploy (additive only) or after-deploy (full pass); overrides --allow-destructive
   --skip-checks        Skip pre-migration checks
   --lock-timeout       Lock acquisition timeout in ms (default: 5000)
   --statement-timeout  Statement execution timeout in ms (default: 30000)
@@ -69,6 +70,7 @@ Usage: schema-flow run [options]
 Options:
   --dry-run            Plan only, don't execute
   --allow-destructive  Allow drops and destructive changes
+  --stage              before-deploy (additive only) or after-deploy (full pass); overrides --allow-destructive
   --skip-checks        Skip pre-migration checks
 ${EXECUTION_FLAGS}
 ${COMMON_DB_FLAGS}
@@ -76,7 +78,9 @@ ${COMMON_DB_FLAGS}
 Examples:
   schema-flow run
   schema-flow run --db postgres://localhost/mydb
-  schema-flow run --dry-run --verbose`,
+  schema-flow run --dry-run --verbose
+  schema-flow run --stage before-deploy   # before the new code deploys
+  schema-flow run --stage after-deploy    # once every service is deployed and checked`,
 
   'run pre': `schema-flow run pre — Run only pre-scripts
 
@@ -85,6 +89,7 @@ Executes only the pre-migration scripts phase.
 Usage: schema-flow run pre [options]
 
 Options:
+  --stage              before-deploy (additive only) or after-deploy (full pass); overrides --allow-destructive
 ${EXECUTION_FLAGS}
 ${COMMON_DB_FLAGS}
 
@@ -101,6 +106,7 @@ Usage: schema-flow run migrate [options]
 Options:
   --dry-run            Plan only, don't execute
   --allow-destructive  Allow drops and destructive changes
+  --stage              before-deploy (additive only) or after-deploy (full pass); overrides --allow-destructive
   --skip-checks        Skip pre-migration checks
 ${EXECUTION_FLAGS}
 ${COMMON_DB_FLAGS}
@@ -116,6 +122,7 @@ Executes only the post-migration scripts phase.
 Usage: schema-flow run post [options]
 
 Options:
+  --stage              before-deploy (additive only) or after-deploy (full pass); overrides --allow-destructive
 ${EXECUTION_FLAGS}
 ${COMMON_DB_FLAGS}
 
@@ -133,6 +140,7 @@ Usage: schema-flow plan [options]
 
 Options:
   --allow-destructive  Include destructive operations in the plan
+  --stage              before-deploy (additive only) or after-deploy (full pass); overrides --allow-destructive
 ${COMMON_DB_FLAGS}
 
 Examples:

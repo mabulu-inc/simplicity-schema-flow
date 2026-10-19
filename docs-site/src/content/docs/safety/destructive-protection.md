@@ -51,6 +51,48 @@ npx @smplcty/schema-flow plan
 npx @smplcty/schema-flow run --allow-destructive
 ```
 
+## Deploy stages
+
+schema-flow cannot tell when every service is running the new code, so a
+single `run` has to apply destructive changes either before that code is live
+or not at all. `--stage` lets the pipeline run schema-flow twice per release,
+around the deploy:
+
+```bash
+# Before the new code deploys: only what the old code can live with
+npx @smplcty/schema-flow run --stage before-deploy
+
+# ... deploy every service and check it ...
+
+# After: the destructive changes, plus anything still pending
+npx @smplcty/schema-flow run --stage after-deploy
+```
+
+- **`before-deploy`** applies additive changes and the pre/post scripts outside
+  `destructive/`. It never applies a destructive change, even with
+  `--allow-destructive`. What it holds back is reported as
+  `… — waits for --stage after-deploy` and listed in `blockedOperations` and
+  `blockedScripts` in `--json`, next to `"stage": "before-deploy"`.
+- **`after-deploy`** is a full pass, as `--allow-destructive` is: the blocked
+  operations and destructive scripts above, plus any additive change still
+  pending, so a skipped or failed before-deploy run is caught up.
+- **No `--stage`** behaves as it always has; `--allow-destructive` decides.
+
+`plan --stage …` previews either run.
+
+What schema-flow does not do is decide for you:
+
+- **Scripts are staged by folder alone.** schema-flow never reads a script to
+  pick its stage. A script outside `destructive/` runs before deploy, whatever
+  it contains.
+- **Timing is yours.** `after-deploy` applies every pending destructive change,
+  including a column drop committed in the same release as the code that
+  stopped reading it. If a code-only rollback to the previous release must stay
+  possible, drop the column one release later.
+- **Fail forward.** schema-flow does not track releases. Redeploying an older
+  release plans the newer objects as drops, so fix forward with a new release
+  instead.
+
 ## Cascading drops and convergence
 
 Some declared changes can only be applied by dropping an object that other

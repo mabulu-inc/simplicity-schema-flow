@@ -4,7 +4,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { SimplicitySchemaConfig } from '../core/config.js';
+import { applyStage, destructiveHint, type SimplicitySchemaConfig } from '../core/config.js';
 import type { Logger } from '../core/logger.js';
 import { discoverAllSources, resolveImportParams } from '../core/sources.js';
 import { buildDesiredState } from '../schema/desired-state.js';
@@ -57,11 +57,13 @@ export interface PipelineOptions {
  * Run the full migration pipeline (or a phase subset).
  */
 export async function runPipeline(
-  config: SimplicitySchemaConfig,
+  rawConfig: SimplicitySchemaConfig,
   logger: Logger,
   options: PipelineOptions = {},
 ): Promise<ExecuteResult> {
   const { phaseFilter, validateOnly = false } = options;
+  // Library callers pass a config without resolveConfig; the stage still wins.
+  const config = applyStage(rawConfig);
 
   // 1. Discover files (local schema + imported package schema)
   const discovered = await discoverAllSources(config);
@@ -119,6 +121,7 @@ export async function runPipeline(
     dryRun: config.dryRun,
     validateOnly,
     allowDestructive: config.allowDestructive,
+    stage: config.stage,
     lockTimeout: config.lockTimeout,
     statementTimeout: config.statementTimeout,
     maxRetries: config.maxRetries,
@@ -127,6 +130,7 @@ export async function runPipeline(
     bootstrapSession: config.bootstrapSession,
   });
   result.blockedOperations = blocked;
+  if (config.stage) result.stage = config.stage;
 
   // 6b. Post-apply convergence. A CASCADE drop (e.g. a function return-type
   //     change) can drop declared policies/views the original plan — built
@@ -168,7 +172,7 @@ async function planAgainstDatabase(
   });
 
   for (const op of blocked) {
-    logger.warn(`Blocked (destructive): ${op.type} ${op.objectName} — use --allow-destructive to allow`);
+    logger.warn(`Blocked (destructive): ${op.type} ${op.objectName} — ${destructiveHint(config.stage)}`);
   }
 
   // Never silent: a count by default, each object with --verbose (#77).

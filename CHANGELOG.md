@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`--stage before-deploy` / `--stage after-deploy`** split a release around
+  the deploy. Run `before-deploy` before the new code goes out: it applies
+  additive changes and the scripts outside `destructive/`, and never applies a
+  destructive change, even with `--allow-destructive`. Run `after-deploy` once
+  every service is deployed and checked: it applies the destructive changes and
+  `destructive/` scripts, plus anything else still pending. Held-back changes
+  say they wait for `--stage after-deploy`, and `--json` results carry the
+  `stage`. Without `--stage`, nothing changes.
+
+### Changed
+
+- The summary line for held-back destructive scripts now reads
+  `(use --allow-destructive to allow)`, matching the per-script warning.
+
 ## [0.23.0] - 2026-10-19
 
 ### Added

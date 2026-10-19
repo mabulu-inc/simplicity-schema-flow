@@ -8,7 +8,7 @@ import { parseArgs } from './args.js';
 import { getHelpText, getVersionText, getCommandHelpText } from './help.js';
 import { changeSuffix, reportMigrationResult, type VerbosityMode } from './report.js';
 import { runPipeline, initProject, getStatus, runBaseline, buildDesiredAndActual, getPlan } from './pipeline.js';
-import { resolveConfig } from '../core/config.js';
+import { resolveConfig, destructiveHint, STAGES } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
 import { testConnection, closePool, acquireClient } from '../core/db.js';
 import { detectDrift } from '../drift/index.js';
@@ -52,6 +52,13 @@ async function main(): Promise<void> {
 
   if (parsed.command === 'docs') {
     console.log('Documentation: https://github.com/mabulu-inc/schema-flow');
+    return;
+  }
+
+  const stage = parsed.overrides.stage;
+  if (stage !== undefined && !STAGES.includes(stage)) {
+    console.error(`Invalid --stage: ${stage || '(missing)'}. Expected one of: ${STAGES.join(', ')}`);
+    process.exitCode = 1;
     return;
   }
 
@@ -214,7 +221,7 @@ async function main(): Promise<void> {
 
           if (plan.blocked.length > 0) {
             for (const op of plan.blocked) {
-              logger.warn(`Blocked (destructive): ${op.type} ${op.objectName} — use --allow-destructive to allow`);
+              logger.warn(`Blocked (destructive): ${op.type} ${op.objectName} — ${destructiveHint(config.stage)}`);
             }
           }
 
@@ -240,7 +247,7 @@ async function main(): Promise<void> {
               });
             }
           } else if (plan.blocked.length > 0) {
-            logger.warn('No operations applied — all fixes are destructive. Use --allow-destructive to apply.');
+            logger.warn(`No operations applied — all fixes are destructive (${destructiveHint(config.stage)}).`);
           }
         }
         break;

@@ -104,6 +104,12 @@ describe('CLI argument parsing', () => {
     expect(result.overrides.allowDestructive).toBe(true);
   });
 
+  it('should parse --stage with its value', () => {
+    const result = parseArgs(['node', 'schema-flow', 'run', '--stage', 'before-deploy', '--dry-run']);
+    expect(result.overrides.stage).toBe('before-deploy');
+    expect(result.overrides.dryRun).toBe(true);
+  });
+
   it('should parse --skip-checks flag', () => {
     const result = parseArgs(['node', 'schema-flow', 'run', '--skip-checks']);
     expect(result.overrides.skipChecks).toBe(true);

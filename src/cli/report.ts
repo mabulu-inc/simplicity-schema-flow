@@ -6,6 +6,7 @@ import { runsAfterPostScripts, type Operation } from '../planner/index.js';
 import type { ExecuteResult } from '../executor/index.js';
 import type { FileChange } from '../core/tracker.js';
 import { formatOperationMessage } from '../executor/format-operation.js';
+import { destructiveHint } from '../core/config.js';
 
 export type VerbosityMode = 'quiet' | 'default' | 'verbose';
 
@@ -71,7 +72,7 @@ export function reportMigrationResult(options: ReportOptions): void {
   }
   const blocked = result.blockedScripts.length;
   if (blocked > 0) {
-    write(`  Destructive scripts held back: ${blocked} (use --allow-destructive to run)`);
+    write(`  Destructive scripts held back: ${blocked} (${destructiveHint(result.stage)})`);
   }
 }
 
