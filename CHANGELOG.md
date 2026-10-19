@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-19
+
 ### Added
 
 - **`--stage before-deploy` / `--stage after-deploy`** split a release around
@@ -664,7 +666,8 @@ existing function`. The drop is gated behind `--allow-destructive` (the
   coupling to any app's identity model, while keeping the common case
   param-free. Unknown or unset params fail with a clear error.
 
-[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.22.1...v0.23.0
 [0.22.1]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/mabulu-inc/simplicity-schema-flow/compare/v0.21.1...v0.22.0
