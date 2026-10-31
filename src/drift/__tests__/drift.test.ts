@@ -1567,8 +1567,8 @@ describe('detectDrift', () => {
     expect(report.items).toContainEqual(
       expect.objectContaining({
         type: 'seed',
-        object: 'statuses',
-        status: 'different',
+        object: 'statuses[id=1]',
+        status: 'missing_in_db',
       }),
     );
   });
@@ -2370,13 +2370,15 @@ describe('detectDrift', () => {
       ],
     });
     const report = detectDrift(desired, actual);
-    expect(report.items).toContainEqual(
+    // Names the table, key and column, and only the value that differs (#85).
+    expect(report.items.filter((i) => i.type === 'seed')).toEqual([
       expect.objectContaining({
-        type: 'seed',
-        object: 'statuses',
+        object: 'statuses[id=2].name',
         status: 'different',
+        expected: 'inactive',
+        actual: 'WRONG',
       }),
-    );
+    ]);
   });
 });
 

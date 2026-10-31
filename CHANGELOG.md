@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`seeds_authoritative: true`** makes a table's YAML own its seeded rows.
+  Every apply also updates an existing row's seeded columns to the YAML
+  values, so an edit to a reference table's seed (a renamed event type, a
+  corrected description) reaches databases that already have the row.
+  Columns the YAML doesn't seed are left alone, rows that already match are
+  not touched, and nothing is deleted. The table's seed rows need a primary
+  or unique key, or the plan fails. Seeds stay insert-only by default, so
+  values people edit after seeding are never reverted. On an audited table,
+  an update needs an actor for the seed transaction (for example a
+  `perTxSqlPath` hook that looks up your migration user); without one the
+  error says so, instead of a bare `NOT NULL` violation.
+
+### Fixed
+
+- A seed edit that an insert-only table won't apply is no longer silent.
+  `plan` and `run` warn once per seeded value the database holds
+  differently, naming the table, key and column, and `drift` reports each
+  one by key and column, where before it said only "Seed data differs".
+- The README no longer says seeds both "upsert" and are "insert-only".
+
 ## [0.25.0] - 2026-10-31
 
 ### Changed

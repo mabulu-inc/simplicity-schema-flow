@@ -94,7 +94,7 @@ schema/
 
 ## Seeds
 
-Keep reference/lookup rows present on every apply. Seeds upsert by the table's primary key, or — when the PK is absent from the rows — by the first unique key the rows cover (a column-level `unique: true`, then any non-partial table-level unique index; `as_constraint` isn't required). This lets you seed by a natural key and drop serial ids from the rows entirely. They converge to zero operations once the rows match — including `jsonb`/`numeric`/array values that Postgres re-formats on storage.
+Keep reference/lookup rows present on every apply. Each seed row is matched to an existing row by the table's primary key, or — when the PK is absent from the rows — by the first unique key the rows cover (a column-level `unique: true`, then any non-partial table-level unique index; `as_constraint` isn't required). This lets you seed by a natural key and drop serial ids from the rows entirely. They converge to zero operations once the rows match — including `jsonb`/`numeric`/array values that Postgres re-formats on storage.
 
 ```yaml
 table: users
@@ -107,7 +107,7 @@ seeds:
     created_at: !sql now() # SQL expression via the !sql tag
 ```
 
-Seeds are insert-only — existing rows are never overwritten. Note: seeding an explicit value into a `serial`/identity key does **not** advance the sequence. See the [Seeds docs](https://mabulu-inc.github.io/simplicity-schema-flow/schema/seeds/).
+By default seeds only insert missing rows: an existing row is never overwritten, so values people edit after seeding survive the next apply, and the plan warns about each seeded value it leaves different from the YAML. Set `seeds_authoritative: true` on a table whose YAML should own its seeded rows; every apply then also updates existing rows' seeded columns to match. Note: seeding an explicit value into a `serial`/identity key does **not** advance the sequence. See the [Seeds docs](https://mabulu-inc.github.io/simplicity-schema-flow/schema/seeds/).
 
 ## Bootstrap tables
 
