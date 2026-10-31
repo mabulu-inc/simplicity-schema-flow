@@ -56,6 +56,7 @@ CONCURRENTLY` cannot run inside one.
   it, also in its own transaction, so a post-script can backfill a new key
   column first.
 - Ops belonging to a [bootstrap table](/simplicity-schema-flow/schema/tables/#bootstrap-phase) (`bootstrap: true`) are split into a separate transaction that commits **before** the main apply, so per-tx hooks opening later transactions can resolve the rows seeded there. The bootstrap tx additionally sets `smplcty.bootstrap = 'true'` plus any `bootstrapSession` GUCs
+- Seeds for every other table run together in one seed tx after the DDL, which also sets any `bootstrapSession` GUCs (but not `smplcty.bootstrap`)
 - `--per-tx-sql <path>` (if set) is injected as the first statement after `BEGIN` in every executor transaction — pre-scripts, the bootstrap tx, each per-table group, the seed tx, post-scripts, and tighten — so `SET LOCAL` values are visible to everything that runs in the same tx
 - `validate` is the exception: it applies the **entire** diff in one transaction and rolls it back, because all-or-nothing apply-then-discard is exactly what validation checks.
 

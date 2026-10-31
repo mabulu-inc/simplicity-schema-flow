@@ -36,7 +36,7 @@ The classic example is an audit setup: a per-tx hook (via [`--per-tx-sql`](/simp
 
 ## `bootstrapSession`
 
-`bootstrapSession` is a **config-file-only** map of session settings applied (as `SET LOCAL`) for the duration of the bootstrap transaction, alongside the built-in `smplcty.bootstrap = 'true'`. Its type is `Record<string, string | number | boolean>`.
+`bootstrapSession` is a **config-file-only** map of session settings applied (as `SET LOCAL`) to every transaction that writes seeds: the bootstrap transaction (alongside the built-in `smplcty.bootstrap = 'true'`) and the seed transaction that seeds every other table. Its type is `Record<string, string | number | boolean>`.
 
 ```js
 // schema-flow.config.js
@@ -47,7 +47,7 @@ export default {
 };
 ```
 
-Point it at a GUC your own triggers already check so bootstrap seeds behave the way you need without touching the trigger. The values are rendered into `SET LOCAL`, so they apply only inside the bootstrap tx and reset automatically when it commits.
+Point it at a GUC your own triggers already check so seeds behave the way you need without touching the trigger. Seeds run with no request actor, so this is how an audit trigger that refuses actor-less writes (like `@smplcty/schema-std`'s `audit_stamp`) lets them through: set its lenient GUC here, then back-fill the attribution in a `post/` script before tighten. The values are rendered into `SET LOCAL`, so they reset automatically when each transaction commits; DDL, pre/post scripts and tighten never see them, and `smplcty.bootstrap` stays set only in the bootstrap transaction.
 
 See [Configuration](/simplicity-schema-flow/getting-started/configuration/) for where this sits among the other config keys.
 

@@ -50,7 +50,7 @@ environments:
 | `statementTimeout` | `--statement-timeout`         | `30000` (ms) | Statement execution timeout                                 |
 | `maxRetries`       | `--max-retries`               | `3`          | Max retries on transient errors                             |
 | `perTxSqlPath`     | `--per-tx-sql`                | unset        | SQL injected at the start of every executor transaction     |
-| `bootstrapSession` | --                            | unset        | GUCs set (as `SET LOCAL`) during the bootstrap transaction  |
+| `bootstrapSession` | --                            | unset        | GUCs set (as `SET LOCAL`) in the transactions that seed     |
 | `imports`          | --                            | unset        | Packages whose `schema/` is merged in — see below           |
 | `historyTable`     | --                            | `history`    | Migration tracking table (in `_smplcty_schema_flow` schema) |
 | `verbose`          | `--verbose`                   | `false`      | Verbose output                                              |
@@ -59,7 +59,7 @@ environments:
 
 ## Bootstrap session settings
 
-`bootstrapSession` is a config-file-only map of session settings applied (as `SET LOCAL`) for the duration of the [bootstrap transaction](/simplicity-schema-flow/schema/tables/#bootstrap-phase), alongside the built-in `smplcty.bootstrap = 'true'`. Point it at a GUC your own triggers already check so bootstrap seeds behave the way you need without touching the trigger:
+`bootstrapSession` is a config-file-only map of session settings applied (as `SET LOCAL`) to every transaction that writes seeds: the [bootstrap transaction](/simplicity-schema-flow/schema/tables/#bootstrap-phase), alongside the built-in `smplcty.bootstrap = 'true'`, and the seed transaction. Point it at a GUC your own triggers already check so seeds behave the way you need without touching the trigger:
 
 ```yaml
 default:

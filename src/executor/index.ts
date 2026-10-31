@@ -75,11 +75,12 @@ export interface ExecuteOptions {
   perTxSqlPath?: string;
   /**
    * Session settings applied (via `set_config(name, value, true)` — i.e.
-   * `SET LOCAL`) at the start of the bootstrap transaction, after the built-in
-   * `smplcty.bootstrap = 'true'` and before any per-tx SQL. Lets a consumer
-   * point schema-flow at the GUC their own audit trigger already checks (e.g.
-   * `{ 'app.audit_lenient': true }`) so bootstrap seeds land the way they need
-   * without modifying the trigger. Scoped to the bootstrap tx only.
+   * `SET LOCAL`) to every transaction that writes seeds — the bootstrap tx
+   * (after the built-in `smplcty.bootstrap = 'true'`) and the seed tx — before
+   * any per-tx SQL. Lets a consumer point schema-flow at the GUC their own audit
+   * trigger already checks (e.g. `{ 'app.audit_lenient': true }`) so seeds land
+   * the way they need without modifying the trigger. DDL, pre/post scripts and
+   * tighten never see them.
    */
   bootstrapSession?: Record<string, string | number | boolean>;
 }
@@ -379,6 +380,24 @@ WHERE NOT EXISTS (
   const unchanged = seedRows.length - inserted;
 
   return { inserted, unchanged };
+}
+
+/**
+ * Set the `bootstrapSession` GUCs (`SET LOCAL`) for the rest of the
+ * transaction. Returns their prior values, so a transaction that also runs
+ * non-seed ops (validate mode) can put them back after a seed.
+ */
+async function applySession(
+  client: pg.PoolClient,
+  session: Record<string, string | number | boolean>,
+): Promise<Record<string, string>> {
+  const prior: Record<string, string> = {};
+  for (const [name, value] of Object.entries(session)) {
+    const res = await client.query<{ v: string | null }>('SELECT current_setting($1, true) AS v', [name]);
+    prior[name] = res.rows[0]?.v ?? '';
+    await client.query('SELECT set_config($1, $2, true)', [name, String(value)]);
+  }
+  return prior;
 }
 
 interface OnlineGroupContext {
@@ -685,9 +704,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
         try {
           await bsClient.query('BEGIN');
           await bsClient.query(`SELECT set_config('smplcty.bootstrap', 'true', true)`);
-          for (const [name, value] of Object.entries(bootstrapSession ?? {})) {
-            await bsClient.query('SELECT set_config($1, $2, true)', [name, String(value)]);
-          }
+          await applySession(bsClient, bootstrapSession ?? {});
           if (perTxSql) await bsClient.query(perTxSql);
 
           for (const op of bootstrapOps) {
@@ -743,8 +760,12 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
             logger?.debug(`Executing: ${op.type} ${op.objectName}`);
             await withOpContext(op, async () => {
               if (op.type === 'seed_table') {
+                // Seeds see bootstrapSession here too, as in a real run's seed
+                // tx; restore afterward so the DDL sharing this tx doesn't.
+                const prior = await applySession(opClient, bootstrapSession ?? {});
                 const counts = await executeSeedTable(opClient, op, pgSchema);
                 op.seedResult = counts;
+                await applySession(opClient, prior);
               } else {
                 await opClient.query(op.sql);
               }
@@ -791,6 +812,9 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
           const seedClient = await acquireClient(connectionString, { pgSchema, lockTimeout, statementTimeout });
           try {
             await seedClient.query('BEGIN');
+            // Seeds outside bootstrap tables are migration-time writes with no
+            // request actor too, so they get the same session settings.
+            await applySession(seedClient, bootstrapSession ?? {});
             if (perTxSql) await seedClient.query(perTxSql);
             for (const op of seedOps) {
               logger?.debug(`Seeding: ${op.objectName}`);
