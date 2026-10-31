@@ -115,5 +115,5 @@ function renderOps(ops: Operation[], mode: VerbosityMode, dryRun: boolean, write
 function isNoOpSeed(op: Operation): boolean {
   if (op.type !== 'seed_table') return false;
   if (!op.seedResult) return false;
-  return op.seedResult.inserted === 0;
+  return op.seedResult.inserted === 0 && op.seedResult.updated === 0;
 }

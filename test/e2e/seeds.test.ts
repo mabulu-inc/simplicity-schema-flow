@@ -1,7 +1,38 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { useTestProject, writeSchema, runMigration, queryDb, assertTableExists } from './helpers.js';
 import { DATABASE_URL } from './setup.js';
 import type { TestProject } from './helpers.js';
+import { runPipeline } from '../../src/cli/pipeline.js';
+import { createLogger } from '../../src/core/logger.js';
+
+/** A logger that keeps warnings so a test can assert on them. */
+function capturingLogger(): { logger: ReturnType<typeof createLogger>; warnings: string[] } {
+  const warnings: string[] = [];
+  const logger = createLogger({
+    verbose: false,
+    quiet: false,
+    json: false,
+    color: false,
+    stdout: () => {},
+    stderr: (msg) => warnings.push(msg),
+  });
+  return { logger, warnings };
+}
+
+const EVENT_TYPES = (name: string, description: string) => `
+table: event_types
+columns:
+  - { name: event_type_id, type: serial, primary_key: true }
+  - { name: code, type: text, nullable: false, unique: true }
+  - { name: name, type: text, nullable: false }
+  - { name: description, type: text }
+  - { name: sort_order, type: integer }
+seeds:
+  - { code: cancelled, name: '${name}', description: '${description}' }
+  - { code: delivered, name: Delivered }
+`;
 
 describe('E2E: Seeds', () => {
   let ctx: TestProject;
@@ -496,5 +527,118 @@ seeds:
     // same match key as apply instead of comparing N desired vs 0 actual.
     const report = await ctx.drift();
     expect(report.items.filter((i) => i.type === 'seed')).toHaveLength(0);
+  });
+
+  it('(13) an insert-only table names each seed edit it does not apply (#85)', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+    writeSchema(ctx.dir, { 'tables/event_types.yaml': EVENT_TYPES('Load Cancelled', 'old text') });
+    await runMigration(ctx);
+
+    writeSchema(ctx.dir, { 'tables/event_types.yaml': EVENT_TYPES('Load Canceled', 'old text') });
+    const { logger, warnings } = capturingLogger();
+    await runPipeline(ctx.config, logger);
+
+    const row = await queryDb(ctx, `SELECT name FROM "${ctx.schema}".event_types WHERE code = 'cancelled'`);
+    expect(row.rows[0].name).toBe('Load Cancelled');
+    const seedWarnings = warnings.filter((w) => w.includes('Seed not applied'));
+    expect(seedWarnings).toHaveLength(1);
+    expect(seedWarnings[0]).toContain('event_types[code=cancelled].name');
+    expect(seedWarnings[0]).toContain('Load Cancelled');
+    expect(seedWarnings[0]).toContain('Load Canceled');
+    expect(seedWarnings[0]).toContain('seeds_authoritative');
+  });
+
+  it('(14) seeds_authoritative updates existing rows to the YAML and leaves other columns alone (#85)', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+    const authoritative = (name: string, description: string) =>
+      EVENT_TYPES(name, description).replace('table: event_types', 'table: event_types\nseeds_authoritative: true');
+    writeSchema(ctx.dir, { 'tables/event_types.yaml': authoritative('Load Cancelled', 'old text') });
+    await runMigration(ctx);
+    // A column the YAML never seeds belongs to the database.
+    await queryDb(ctx, `UPDATE "${ctx.schema}".event_types SET sort_order = 9 WHERE code = 'cancelled'`);
+
+    writeSchema(ctx.dir, { 'tables/event_types.yaml': authoritative('Load Canceled', 'new text') });
+    const { logger, warnings } = capturingLogger();
+    const result = await runPipeline(ctx.config, logger);
+
+    const rows = await queryDb(
+      ctx,
+      `SELECT code, name, description, sort_order FROM "${ctx.schema}".event_types ORDER BY code`,
+    );
+    expect(rows.rows).toEqual([
+      { code: 'cancelled', name: 'Load Canceled', description: 'new text', sort_order: 9 },
+      { code: 'delivered', name: 'Delivered', description: null, sort_order: null },
+    ]);
+    const seedOp = result.executedOperations.find((op) => op.type === 'seed_table');
+    expect(seedOp?.seedResult).toEqual({ inserted: 0, updated: 1, unchanged: 1 });
+    expect(warnings.filter((w) => w.includes('Seed not applied'))).toHaveLength(0);
+
+    // Converged: the next apply has no seed work and drift is clean.
+    const again = await runPipeline(ctx.config, capturingLogger().logger);
+    expect(again.executedOperations.filter((op) => op.type === 'seed_table')).toHaveLength(0);
+    const report = await ctx.drift();
+    expect(report.items.filter((i) => i.type === 'seed')).toHaveLength(0);
+  });
+
+  it('(15) seeds_authoritative without a match key is rejected at plan time (#85)', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+    writeSchema(ctx.dir, {
+      'tables/labels.yaml': `
+table: labels
+seeds_authoritative: true
+columns:
+  - { name: label_id, type: serial, primary_key: true }
+  - { name: text, type: text }
+seeds:
+  - { text: hello }
+`,
+    });
+    await expect(runPipeline(ctx.config, capturingLogger().logger)).rejects.toThrow(
+      /labels.*seeds_authoritative.*no match key/,
+    );
+  });
+
+  it('(16) an authoritative update on an audited table needs an actor for the seed transaction (#85)', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+    // An audit-style trigger: stamps updated_by from the actor setting on UPDATE,
+    // NULL when there is none, like @smplcty/schema-std's audit_stamp in lenient mode.
+    const schema = (name: string) => ({
+      'functions/stamp_actor.yaml': `
+name: stamp_actor
+language: plpgsql
+returns: trigger
+body: |
+  BEGIN
+    NEW.updated_by := NULLIF(current_setting('app.actor_id', true), '')::integer;
+    RETURN NEW;
+  END;
+`,
+      'tables/event_types.yaml': `
+table: event_types
+seeds_authoritative: true
+columns:
+  - { name: event_type_id, type: serial, primary_key: true }
+  - { name: code, type: text, nullable: false, unique: true }
+  - { name: name, type: text, nullable: false }
+  - { name: updated_by, type: integer, nullable: false, default: '0' }
+triggers:
+  - { name: event_types_stamp, timing: BEFORE, events: [UPDATE], function: stamp_actor }
+seeds:
+  - { code: cancelled, name: '${name}' }
+`,
+    });
+    writeSchema(ctx.dir, schema('Load Cancelled'));
+    await runMigration(ctx);
+
+    writeSchema(ctx.dir, schema('Load Canceled'));
+    await expect(runPipeline(ctx.config, capturingLogger().logger)).rejects.toThrow(
+      /set "updated_by" to NULL while updating seeded rows.*perTxSqlPath/s,
+    );
+
+    const hook = path.join(ctx.dir, 'actor.sql');
+    fs.writeFileSync(hook, `SELECT set_config('app.actor_id', '7', true);`);
+    await runPipeline({ ...ctx.config, perTxSqlPath: hook }, capturingLogger().logger);
+    const row = await queryDb(ctx, `SELECT name, updated_by FROM "${ctx.schema}".event_types`);
+    expect(row.rows).toEqual([{ name: 'Load Canceled', updated_by: 7 }]);
   });
 });

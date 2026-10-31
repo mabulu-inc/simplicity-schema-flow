@@ -276,6 +276,7 @@ export function groupByLockKey(ops: Operation[]): Operation[][] {
 
 interface SeedResult {
   inserted: number;
+  updated: number;
   unchanged: number;
 }
 
@@ -286,20 +287,23 @@ function isSqlExpression(val: unknown): val is { __sql: string } {
 }
 
 /**
- * Execute a seed_table operation as a bulk INSERT — seeds are insert-only.
+ * Execute a seed_table operation as a bulk INSERT. Seeds are insert-only unless
+ * the table sets `seeds_authoritative`, in which case an UPDATE first brings
+ * existing rows' seeded columns to the YAML values (matched on the key).
  *
  * With a resolvable match key (PK, or a unique constraint/index, in
  * `seedMatchColumns`): INSERT rows whose key isn't already present. A partial
  * unique index contributes its key columns but never its `where` predicate, so
  * a soft-deleted builtin still counts as present and is not re-inserted. With
  * no match key, "new" means no existing row has every seed-provided column
- * equal (null-safe via `IS NOT DISTINCT FROM`). Existing rows are never
- * modified, and columns the YAML didn't mention are never read.
+ * equal (null-safe via `IS NOT DISTINCT FROM`). Outside authoritative tables
+ * existing rows are never modified, and columns the YAML didn't mention are
+ * never read or written either way.
  */
 async function executeSeedTable(client: pg.PoolClient, op: Operation, pgSchema: string): Promise<SeedResult> {
   const { seedRows, seedColumns, seedMatchColumns } = op;
   if (!seedRows || !seedColumns || seedRows.length === 0) {
-    return { inserted: 0, unchanged: 0 };
+    return { inserted: 0, updated: 0, unchanged: 0 };
   }
 
   const table = op.objectName;
@@ -374,12 +378,45 @@ WHERE NOT EXISTS (
   SELECT 1 FROM "${pgSchema}"."${table}" t WHERE ${existsJoin}
 )`;
 
+  // Authoritative: UPDATE existing rows whose seeded columns differ, before the
+  // INSERT, both from the same recordset. A row whose values already match is
+  // left alone, so its triggers (e.g. an audit stamp) never fire.
+  let updated = 0;
+  const valueCols = seedColumns.filter((c) => !matchColSet.has(c.name));
+  if (op.seedAuthoritative && keyCols.length > 0 && valueCols.length > 0) {
+    const keyJoin = keyCols.map((c) => `t."${c.name}" IS NOT DISTINCT FROM d."${c.name}"`).join(' AND ');
+    const updateSql = `${dataCte}
+UPDATE "${pgSchema}"."${table}" t
+SET ${valueCols.map((c) => `"${c.name}" = d."${c.name}"`).join(', ')}
+FROM data d
+WHERE ${keyJoin}
+  AND (${valueCols.map((c) => `t."${c.name}"`).join(', ')}) IS DISTINCT FROM (${valueCols.map((c) => `d."${c.name}"`).join(', ')})
+RETURNING ${keyCols.map((c) => `t."${c.name}"`).join(', ')}`;
+    try {
+      const updateRes = await client.query(updateSql, [JSON.stringify(jsonbData)]);
+      updated = new Set(updateRes.rows.map((r) => JSON.stringify(r))).size;
+    } catch (err) {
+      // A NOT NULL failure on a column the YAML doesn't set came from a
+      // trigger — typically an audit stamp with no actor during migration.
+      const e = err as { code?: string; column?: string; message: string };
+      if (e.code === '23502' && e.column && !seedColumns.some((c) => c.name === e.column)) {
+        throw new Error(
+          `${e.message}. A trigger set "${e.column}" to NULL while updating seeded rows: an audit trigger ` +
+            `stamps it from the actor setting, which a migration doesn't have. Set an actor for the seed ` +
+            `transaction, e.g. a perTxSqlPath hook that looks up your migration user.`,
+          { cause: err },
+        );
+      }
+      throw err;
+    }
+  }
+
   const insertRes = await client.query(insertSql, [JSON.stringify(jsonbData)]);
   const inserted = insertRes.rowCount ?? 0;
 
-  const unchanged = seedRows.length - inserted;
+  const unchanged = seedRows.length - inserted - updated;
 
-  return { inserted, unchanged };
+  return { inserted, updated, unchanged };
 }
 
 /**

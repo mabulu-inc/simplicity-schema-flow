@@ -628,6 +628,7 @@ export const TABLE_KEYS = [
   'seeds',
   'mixins',
   'bootstrap',
+  'seeds_authoritative',
   'comment',
   'description',
 ] as const;
@@ -711,6 +712,7 @@ export function parseTable(yamlStr: string): TableSchema {
   if (raw.seeds !== undefined) table.seeds = raw.seeds as Record<string, unknown>[];
   if (raw.mixins !== undefined) table.mixins = raw.mixins as string[];
   if (raw.bootstrap !== undefined) table.bootstrap = Boolean(raw.bootstrap);
+  if (raw.seeds_authoritative !== undefined) table.seeds_authoritative = Boolean(raw.seeds_authoritative);
   const tableComment = resolveComment(raw);
   if (tableComment !== undefined) table.comment = tableComment;
 

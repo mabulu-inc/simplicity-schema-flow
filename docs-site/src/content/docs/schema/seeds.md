@@ -3,7 +3,7 @@ title: Seeds
 description: YAML reference for seeding reference/lookup data idempotently.
 ---
 
-`seeds:` declares rows that schema-flow keeps present in a table on every apply. It's for reference and lookup data — enum-like status tables, a service user, default settings — not for bulk fixtures. Seeds are **insert-only** and idempotent: a row is created if its key isn't already present and otherwise left untouched, so re-running a migration converges to zero operations and never overwrites existing data.
+`seeds:` declares rows that schema-flow keeps present in a table on every apply. It's for reference and lookup data — enum-like status tables, a service user, default settings — not for bulk fixtures. By default seeds are **insert-only** and idempotent: a row is created if its key isn't already present and otherwise left untouched, so re-running a migration converges to zero operations and never overwrites existing data. A table can opt into [authoritative seeds](#authoritative-seeds), where the YAML also updates existing rows.
 
 ## Example
 
@@ -69,11 +69,52 @@ seeds:
   - { code: kg, name: Kilograms }
 ```
 
-## Insert-only — existing rows are never overwritten
+## Insert-only by default
 
-Seeds only ever **insert**. A seed row whose key already exists is left exactly as it is in the database; schema-flow never updates it to match the YAML. This keeps seeds safe for reference data an application may edit after install (renaming a status, soft-deleting a builtin) — re-applying a migration won't clobber those changes or resurrect a removed row.
+By default seeds only **insert**. A seed row whose key already exists is left exactly as it is in the database; schema-flow never updates it to match the YAML. This keeps seeds safe for data an application edits after install (a settings row changed through an admin page, a renamed status, a soft-deleted builtin): re-applying a migration won't clobber those changes or resurrect a removed row.
 
-If you need to change a value that's already been seeded, do it with a migration pre/post-script, not by editing the seed.
+An edit to an existing seed row therefore doesn't reach a database that already has the row. That is never silent: `plan` and `run` warn once per seeded value the database holds differently, naming the table, key and column:
+
+```text
+warn Seed not applied: load_event_types[code=cancelled].name is Load Cancelled in the database, Load Canceled in the YAML. Seeds only insert missing rows; set seeds_authoritative: true on load_event_types to apply seed edits.
+```
+
+`drift` reports the same values, one item per key and column. If the database value is the one you want, update the YAML to match and the warning stops. If the YAML is right, make the table authoritative.
+
+## Authoritative seeds
+
+Set `seeds_authoritative: true` on a table whose YAML owns its seeded rows, typically a reference table such as event types or device types. Every apply then also brings an existing row's **seeded columns** to the YAML values:
+
+```yaml
+table: load_event_types
+seeds_authoritative: true
+columns:
+  - { name: load_event_type_id, type: serial, primary_key: true }
+  - { name: code, type: text, unique: true }
+  - { name: name, type: text }
+  - { name: description, type: text }
+seeds:
+  - { code: cancelled, name: Load Canceled, description: The load was canceled before pickup. }
+```
+
+- Only the columns a seed row lists are written. Columns the YAML doesn't seed keep whatever the database holds.
+- A row whose seeded values already match is not touched, so its update triggers don't fire and the plan has no seed operation once everything matches.
+- Rows removed from the YAML are not deleted.
+- The table needs a [match key](#match-key-resolution): every seed row must include the primary key or a unique key. Without one there is no way to find the row to update, and the plan fails.
+
+Updates and inserts run from the same recordset in the seed transaction, updates first.
+
+### Audited tables need an actor
+
+A seed update fires the table's update triggers. An audit trigger that stamps `updated_by` from an actor setting, such as [`@smplcty/schema-std`](https://www.npmjs.com/package/@smplcty/schema-std)'s `audit_stamp`, finds no actor during a migration. In lenient mode it stamps NULL, and on an existing database `updated_by` is already `NOT NULL`, so the update fails. schema-flow knows nothing about your users, so supply an actor for the seed transaction yourself: a [`perTxSqlPath`](/simplicity-schema-flow/getting-started/configuration/) hook that looks up your migration user, for example
+
+```sql
+SELECT set_config('app.actor_id', (SELECT user_id::text FROM users WHERE name = 'app-init'), true);
+```
+
+or a fixed id in [`bootstrapSession`](/simplicity-schema-flow/schema/bootstrap/#bootstrapsession). The hook runs after the session settings, so it wins. Without an actor, the apply fails with an error naming the table and column, and says to set one.
+
+On a fresh database the hook can't find a migration user seeded in the same transaction, but a fresh database has no rows to update; the lenient setting plus a back-fill covers its inserts (see [Bootstrap](/simplicity-schema-flow/schema/bootstrap/)).
 
 ## Seeds and serial/identity sequences
 

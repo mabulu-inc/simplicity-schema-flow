@@ -164,8 +164,10 @@ export interface Operation {
    * consulted.
    */
   seedMatchColumns?: string[];
+  /** The table's seeds are authoritative: existing rows are updated to match. */
+  seedAuthoritative?: boolean;
   /** Result counts filled by executor after seed_table execution */
-  seedResult?: { inserted: number; unchanged: number };
+  seedResult?: { inserted: number; updated: number; unchanged: number };
   /** Expand metadata — populated for expand_column and create_dual_write_trigger ops */
   expandMeta?: ExpandMeta;
 }
@@ -3450,6 +3452,12 @@ function createSeedTableOp(table: TableSchema, seeds: Record<string, unknown>[],
   });
 
   const seedMatchColumns = resolveSeedMatchColumns(table, seeds);
+  if (table.seeds_authoritative && seedMatchColumns.length === 0) {
+    throw new Error(
+      `table "${table.table}" sets seeds_authoritative but its seeds have no match key: ` +
+        `every seed row must include the primary key or a unique key, so each row can be found and updated.`,
+    );
+  }
 
   return {
     type: 'seed_table',
@@ -3460,6 +3468,7 @@ function createSeedTableOp(table: TableSchema, seeds: Record<string, unknown>[],
     seedRows: seeds,
     seedColumns,
     seedMatchColumns,
+    seedAuthoritative: table.seeds_authoritative === true,
   };
 }
 

@@ -354,6 +354,13 @@ export interface TableSchema {
    * non-bootstrap table — that's rejected at plan time.
    */
   bootstrap?: boolean;
+  /**
+   * The YAML owns this table's seeded rows: every apply updates an existing
+   * row's seeded columns to the YAML values, not just inserts missing rows.
+   * Off by default, so values people edit after seeding are never reverted.
+   * Requires a match key (primary key or unique key) covered by every seed row.
+   */
+  seeds_authoritative?: boolean;
 }
 
 // ─── Extend ─────────────────────────────────────────────────────

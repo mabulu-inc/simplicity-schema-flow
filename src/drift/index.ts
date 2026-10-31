@@ -104,7 +104,7 @@ export async function hydrateActualSeeds(
     const matchCols = resolveSeedMatchColumns(dt, dt.seeds);
     if (matchCols.length === 0) continue;
 
-    const seedCols = Object.keys(dt.seeds[0]);
+    const seedCols = [...new Set(dt.seeds.flatMap((row) => Object.keys(row)))];
 
     const rows: Record<string, unknown>[] = [];
     for (const seed of dt.seeds) {
@@ -418,7 +418,7 @@ function driftTables(desired: TableSchema[], actual: Map<string, TableSchema>): 
       items.push(...driftRls(dt, at));
       items.push(...driftPolicies(dt.table, dt.policies || [], at.policies || []));
       items.push(...driftGrants(dt.table, dt.grants || [], at.grants || []));
-      items.push(...driftSeeds(dt.table, dt.seeds, at.seeds));
+      items.push(...driftSeeds(dt, at.seeds));
       items.push(...driftTableComment(dt.table, dt.comment, at.comment));
     }
   }
@@ -1199,42 +1199,78 @@ function normalizeSeedRow(row: Record<string, unknown>, skip: Set<string>): Reco
   return result;
 }
 
-function driftSeeds(
-  table: string,
-  desired?: Record<string, unknown>[],
-  actual?: Record<string, unknown>[],
-): DriftItem[] {
-  const dLen = desired?.length ?? 0;
-  const aLen = actual?.length ?? 0;
-  if (dLen === 0 && aLen === 0) return [];
+/**
+ * Compare a table's YAML seeds with the rows the database holds for them.
+ * With a match key, each seed row is found by its key and each seeded column
+ * that differs is its own item naming table, key and column (#85), e.g.
+ * `load_event_types[code=cancelled].name`. Without one, only a table-level
+ * difference can be reported.
+ */
+export function driftSeeds(table: TableSchema, actual?: Record<string, unknown>[]): DriftItem[] {
+  const desired = table.seeds ?? [];
+  if (desired.length === 0 && (actual?.length ?? 0) === 0) return [];
   // Columns whose desired value is a SQL expression (`{ __sql: '…' }`) can't
   // be compared as static text — String() of an unevaluated expression never
   // equals the stored typed value, so it would flag drift on every run
   // (issue #53). The planner's typed EXCEPT is the authority for whether such
   // seeds changed; exclude these columns from the advisory drift compare.
   const skip = new Set<string>();
-  for (const row of desired || []) {
+  for (const row of desired) {
     for (const [key, val] of Object.entries(row)) {
       if (isSqlExpression(val)) skip.add(key);
     }
   }
-  const normalizedDesired = (desired || []).map((r) => normalizeSeedRow(r, skip));
-  const normalizedActual = (actual || []).map((r) => normalizeSeedRow(r, skip));
-  const dJson = JSON.stringify(normalizedDesired);
-  const aJson = JSON.stringify(normalizedActual);
-  if (dJson !== aJson) {
+
+  const matchCols = desired.length > 0 ? resolveSeedMatchColumns(table, desired) : [];
+  if (matchCols.length === 0 || matchCols.some((c) => skip.has(c))) {
+    const dJson = JSON.stringify(desired.map((r) => normalizeSeedRow(r, skip)));
+    const aJson = JSON.stringify((actual || []).map((r) => normalizeSeedRow(r, skip)));
+    if (dJson === aJson) return [];
     return [
       {
         type: 'seed',
-        object: table,
+        object: table.table,
         status: 'different',
-        expected: `${dLen} seed rows`,
-        actual: `${aLen} seed rows`,
-        detail: `Seed data differs for ${table}`,
+        expected: `${desired.length} seed rows`,
+        actual: `${actual?.length ?? 0} seed rows`,
+        detail: `Seed data differs for ${table.table}`,
       },
     ];
   }
-  return [];
+
+  const keyOf = (row: Record<string, unknown>): string =>
+    JSON.stringify(matchCols.map((c) => normalizeSeedValue(row[c])));
+  const actualByKey = new Map((actual || []).map((r) => [keyOf(r), r]));
+
+  const items: DriftItem[] = [];
+  for (const row of desired) {
+    const label = `${table.table}[${matchCols.map((c) => `${c}=${normalizeSeedValue(row[c])}`).join(', ')}]`;
+    const live = actualByKey.get(keyOf(row));
+    if (!live) {
+      items.push({
+        type: 'seed',
+        object: label,
+        status: 'missing_in_db',
+        detail: `Seed row ${label} is not in the database`,
+      });
+      continue;
+    }
+    for (const [col, val] of Object.entries(row)) {
+      if (skip.has(col) || matchCols.includes(col)) continue;
+      const expected = normalizeSeedValue(val);
+      const actualValue = normalizeSeedValue(live[col]);
+      if (expected === actualValue) continue;
+      items.push({
+        type: 'seed',
+        object: `${label}.${col}`,
+        status: 'different',
+        expected,
+        actual: actualValue,
+        detail: `Seed value differs for ${label}.${col}`,
+      });
+    }
+  }
+  return items;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────

@@ -34,7 +34,7 @@ import { filterUnchangedSeeds } from '../planner/filter-seeds.js';
 import { execute } from '../executor/index.js';
 import type { ExecuteResult } from '../executor/index.js';
 import { acquireClient } from '../core/db.js';
-import { hydrateActualSeeds } from '../drift/index.js';
+import { driftSeeds, hydrateActualSeeds } from '../drift/index.js';
 import { ensureHistoryTable, getHistory, recordFile, type FileChange } from '../core/tracker.js';
 import type { Phase } from '../core/files.js';
 import type {
@@ -173,6 +173,28 @@ async function planAgainstDatabase(
 
   for (const op of blocked) {
     logger.warn(`Blocked (destructive): ${op.type} ${op.objectName} — ${destructiveHint(config.stage)}`);
+  }
+
+  // Never silent: a seed edit an insert-only table won't apply is named (#85).
+  // filterUnchangedSeeds emptied the seeds of every table that already
+  // matches, so only tables with a real difference are compared here.
+  const insertOnly = desired.tables.filter((t) => !t.seeds_authoritative && t.seeds && t.seeds.length > 0);
+  if (insertOnly.length > 0) {
+    const client = await acquireClient(config.connectionString, { pgSchema: config.pgSchema });
+    try {
+      await hydrateActualSeeds(client, insertOnly, actual.tables, config.pgSchema);
+    } finally {
+      client.release();
+    }
+    for (const t of insertOnly) {
+      for (const item of driftSeeds(t, actual.tables.get(t.table)?.seeds)) {
+        if (item.status !== 'different') continue;
+        logger.warn(
+          `Seed not applied: ${item.object} is ${item.actual} in the database, ${item.expected} in the YAML. ` +
+            `Seeds only insert missing rows; set seeds_authoritative: true on ${t.table} to apply seed edits.`,
+        );
+      }
+    }
   }
 
   // Never silent: a count by default, each object with --verbose (#77).

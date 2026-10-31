@@ -415,7 +415,7 @@ describe('Batch seeds — executor', () => {
 
     // Check seed result counts
     const seedOp = result.executedOperations.find((o) => o.type === 'seed_table')!;
-    expect(seedOp.seedResult).toEqual({ inserted: 3, unchanged: 0 });
+    expect(seedOp.seedResult).toEqual({ inserted: 3, updated: 0, unchanged: 0 });
   });
 
   it('inserts only new keys and never modifies existing rows', async () => {
@@ -473,7 +473,7 @@ describe('Batch seeds — executor', () => {
 
     // Check counts
     const seedOp = result.executedOperations.find((o) => o.type === 'seed_table')!;
-    expect(seedOp.seedResult).toEqual({ inserted: 1, unchanged: 2 });
+    expect(seedOp.seedResult).toEqual({ inserted: 1, updated: 0, unchanged: 2 });
   });
 
   it('does not re-insert a soft-deleted builtin matched by a partial unique index', async () => {
@@ -524,7 +524,7 @@ describe('Batch seeds — executor', () => {
     }
 
     const seedOp = result.executedOperations.find((o) => o.type === 'seed_table')!;
-    expect(seedOp.seedResult).toEqual({ inserted: 0, unchanged: 1 });
+    expect(seedOp.seedResult).toEqual({ inserted: 0, updated: 0, unchanged: 1 });
   });
 
   it('handles SQL expressions in seed values', async () => {
@@ -759,7 +759,7 @@ describe('Batch seeds — executor', () => {
 
     // slug 'a' already exists → left untouched ('old-alpha'); 'b' inserted.
     const seedOp = result.executedOperations.find((o) => o.type === 'seed_table')!;
-    expect(seedOp.seedResult).toEqual({ inserted: 1, unchanged: 1 });
+    expect(seedOp.seedResult).toEqual({ inserted: 1, updated: 0, unchanged: 1 });
 
     const client2 = await pool.connect();
     try {
@@ -806,7 +806,7 @@ describe('Batch seeds — executor', () => {
     });
 
     const seedOp = result.executedOperations.find((o) => o.type === 'seed_table')!;
-    expect(seedOp.seedResult).toEqual({ inserted: 1, unchanged: 1 });
+    expect(seedOp.seedResult).toEqual({ inserted: 1, updated: 0, unchanged: 1 });
 
     const client2 = await pool.connect();
     try {
@@ -827,7 +827,7 @@ describe('Batch seeds — executor', () => {
       logger,
     });
     const seedOp2 = result2.executedOperations.find((o) => o.type === 'seed_table')!;
-    expect(seedOp2.seedResult).toEqual({ inserted: 0, unchanged: 2 });
+    expect(seedOp2.seedResult).toEqual({ inserted: 0, updated: 0, unchanged: 2 });
   });
 });
 
@@ -841,7 +841,7 @@ describe('Batch seeds — format', () => {
       objectName: 'statuses',
       sql: '',
       destructive: false,
-      seedResult: { inserted: 3, unchanged: 1 },
+      seedResult: { inserted: 3, updated: 0, unchanged: 1 },
     };
     const msg = formatOperationMessage(op);
     expect(msg).toBe('Seeded: statuses (3 inserted, 1 unchanged)');
@@ -866,7 +866,7 @@ describe('Batch seeds — format', () => {
       objectName: 'units',
       sql: '',
       destructive: false,
-      seedResult: { inserted: 5, unchanged: 0 },
+      seedResult: { inserted: 5, updated: 0, unchanged: 0 },
     };
     const msg = formatOperationMessage(op);
     expect(msg).toBe('Seeded: units (5 inserted)');
