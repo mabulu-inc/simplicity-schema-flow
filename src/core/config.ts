@@ -54,9 +54,10 @@ export interface SimplicitySchemaConfig {
    */
   perTxSqlPath?: string;
   /**
-   * Session settings applied (as `SET LOCAL`) for the duration of the bootstrap
-   * transaction, alongside the built-in `smplcty.bootstrap = 'true'`. Maps GUC
-   * name → value, e.g. `{ 'app.audit_lenient': true }`. Config-file only (a map
+   * Session settings applied (as `SET LOCAL`) to every transaction that writes
+   * seeds: the bootstrap transaction (alongside the built-in
+   * `smplcty.bootstrap = 'true'`) and the seed transaction. Maps GUC name →
+   * value, e.g. `{ 'app.audit_lenient': true }`. Config-file only (a map
    * doesn't fit a CLI flag).
    */
   bootstrapSession?: Record<string, string | number | boolean>;

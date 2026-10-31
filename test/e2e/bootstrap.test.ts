@@ -121,6 +121,51 @@ seeds:
     ]);
   });
 
+  it('applies bootstrapSession GUCs to the seed tx, for seeds outside bootstrap tables', async () => {
+    ctx = await useTestProject(DATABASE_URL);
+
+    // A strict trigger in the style of @smplcty/schema-std's audit_stamp: it
+    // refuses the write unless the lenient GUC is set. The seeded table is NOT
+    // a bootstrap table — a trigger calling a function the migration creates
+    // can't be one — so its seeds run in the seed tx.
+    writeSchema(ctx.dir, {
+      'functions/strict_stamp.yaml': `
+name: strict_stamp
+language: plpgsql
+returns: trigger
+body: |
+  BEGIN
+    IF current_setting('app.audit_lenient', true) IS DISTINCT FROM 'true' THEN
+      RAISE EXCEPTION 'strict_stamp: no actor';
+    END IF;
+    NEW.bootstrap_marker := current_setting('smplcty.bootstrap', true);
+    RETURN NEW;
+  END;
+`,
+      'tables/channels.yaml': `
+table: channels
+columns:
+  - { name: channel_id, type: serial, primary_key: true }
+  - { name: code, type: text, nullable: false }
+  - { name: bootstrap_marker, type: text }
+triggers:
+  - { name: channels_strict, timing: BEFORE, events: [INSERT], function: strict_stamp }
+seeds:
+  - { channel_id: 1, code: email }
+`,
+    });
+
+    const config = { ...ctx.config, bootstrapSession: { 'app.audit_lenient': true } };
+    await runPipeline(config, logger, { validateOnly: true });
+    await runPipeline(config, logger);
+
+    // Seeded, and the bootstrap marker stayed scoped to the bootstrap tx.
+    const channels = await queryDb(ctx, `SELECT code, bootstrap_marker FROM "${ctx.schema}".channels`);
+    expect(channels.rows).toHaveLength(1);
+    expect(channels.rows[0].code).toBe('email');
+    expect(channels.rows[0].bootstrap_marker ?? '').toBe('');
+  });
+
   it('rejects at plan time a bootstrap table with an FK to a non-bootstrap table', async () => {
     ctx = await useTestProject(DATABASE_URL);
 

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `bootstrapSession` settings now apply to every seed, not only to seeds of
+  `bootstrap: true` tables. Seeds run during a migration with no request actor,
+  so an audit trigger that refuses actor-less writes (such as
+  `@smplcty/schema-std` 0.1's `audit_stamp`) used to make any seeded audited
+  table fail with no way to opt out: those tables can't be bootstrap tables,
+  because their trigger function doesn't exist yet when the bootstrap phase
+  runs. Setting `bootstrapSession: { app.audit_lenient: true }` now lets their
+  seeds through. Schema changes, pre/post scripts and the tighten phase still
+  never see these settings, and `smplcty.bootstrap` is still set only during
+  the bootstrap phase. If you set `bootstrapSession` today, check that its
+  values are also what you want for ordinary seeds.
+
 ### Security
 
 - Upgraded the `glob` dependency to 14, which fixes a moderate advisory
