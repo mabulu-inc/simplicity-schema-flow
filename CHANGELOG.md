@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Upgraded the `glob` dependency to 14, which fixes a moderate advisory
+  ([GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4))
+  where a canceled schema-file scan could keep walking the filesystem, plus a
+  denial-of-service advisory in its `minimatch` dependency
+  ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)).
+  Installing schema-flow no longer pulls either vulnerable version into your
+  project.
+
 ## [0.24.0] - 2026-10-19
 
 ### Added
