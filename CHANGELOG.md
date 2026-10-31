@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   differently, naming the table, key and column, and `drift` reports each
   one by key and column, where before it said only "Seed data differs".
 - The README no longer says seeds both "upsert" and are "insert-only".
+- The destructive-protection docs now list every operation the planner holds
+  back: removing a table or column grant, removing a role from a group, and
+  turning off `FORCE ROW LEVEL SECURITY` were blocked but missing. These are
+  also what `--stage before-deploy` leaves for the after-deploy run. A test
+  now keeps the list matched to the planner.
 
 ## [0.25.0] - 2026-10-31
 
