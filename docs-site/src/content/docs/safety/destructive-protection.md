@@ -5,7 +5,7 @@ description: How schema-flow prevents accidental data loss.
 
 ## Blocked operations
 
-These operations are **blocked by default** and require `--allow-destructive`:
+These operations are **blocked by default** and require `--allow-destructive`. With [deploy stages](#deploy-stages), they are what `--stage before-deploy` holds back for the after-deploy run:
 
 - `drop_table` -- dropping entire tables
 - `drop_column` -- dropping columns
@@ -20,7 +20,10 @@ These operations are **blocked by default** and require `--allow-destructive`:
 - `drop_materialized_view` -- dropping materialized views
 - `drop_extension` -- dropping extensions
 - `disable_rls` -- disabling row-level security
+- `disable_force_rls` -- turning off `FORCE ROW LEVEL SECURITY`
 - `drop_policy` -- dropping RLS policies
+- `revoke_table` / `revoke_column` -- removing a table or column grant
+- `revoke_membership` -- removing a role from a group
 - `drop_trigger` -- dropping triggers
 - A column type change whose cast can change values without an error, unless
   the column sets `using:`: time-zone-dependent (`timestamptz` -> `date`),
